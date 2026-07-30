@@ -6,7 +6,13 @@ SECTIONS
 
     .text :
     {
+        KEEP(*(.multiboot))
         *(.text)
+    }
+
+    .rodata :
+    {
+        *(.rodata*)
     }
 
     .data :
