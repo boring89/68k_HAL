@@ -27,6 +27,7 @@ typedef enum
 
 } vga_color_t;
 
+static void vga_update_cursor(void);
 static inline int vga_index(void);
 void vga_set_cursor(int x, int y);
 void vga_set_color(vga_color_t foreground, vga_color_t background);
@@ -38,5 +39,6 @@ void vga_write(const char *str);
 void vga_scroll(void);
 void vga_write_line(const char *str);
 void vga_write_color(const char *str, vga_color_t fg, vga_color_t bg);
+void vga_write_color_line(const char *str, vga_color_t fg, vga_color_t bg);
 
 #endif

@@ -8,32 +8,42 @@ CFLAGS=-m32 -ffreestanding -fno-pie -fno-asynchronous-unwind-tables -nostdlib
 
 all: $(BUILD)/kernel.elf
 
+.PHONY: all clean iso
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
-
 $(BUILD)/boot.o: boot/boot.asm | $(BUILD)
 	$(ASM) -f elf32 boot/boot.asm -o $(BUILD)/boot.o
 
-$(BUILD)/vga.o: hal/vga.c | $(BUILD)
-	$(CC) $(CFLAGS) -c hal/vga.c -o $(BUILD)/vga.o
+$(BUILD)/vga.o: hal/vga/vga.c | $(BUILD)
+	$(CC) $(CFLAGS) -c hal/vga/vga.c -o $(BUILD)/vga.o
+
+$(BUILD)/serial.o: hal/serial/serial.c | $(BUILD)
+	$(CC) $(CFLAGS) -c hal/serial/serial.c -o $(BUILD)/serial.o
 
 $(BUILD)/kernel.o: kernel/main.c | $(BUILD)
 	$(CC) $(CFLAGS) -c kernel/main.c -o $(BUILD)/kernel.o
 
 
-$(BUILD)/kernel.elf: $(BUILD)/boot.o $(BUILD)/kernel.o $(BUILD)/vga.o
-	ld -m elf_i386 -T linker.ld \
+$(BUILD)/kernel.elf: \
 	$(BUILD)/boot.o \
 	$(BUILD)/kernel.o \
 	$(BUILD)/vga.o \
-	-o $(BUILD)/kernel.elf
+	$(BUILD)/serial.o
+
+	ld -m elf_i386 -T linker.ld \
+		$(BUILD)/boot.o \
+		$(BUILD)/kernel.o \
+		$(BUILD)/vga.o \
+		$(BUILD)/serial.o \
+		-o $(BUILD)/kernel.elf
 
 clean:
 	rm -rf $(BUILD)
 
 iso: $(BUILD)/kernel.elf
+	rm -rf $(ISO_ROOT)
 	mkdir -p $(ISO_ROOT)/boot/grub
 	cp $(BUILD)/kernel.elf $(ISO_ROOT)/boot/
 	cp grub.cfg $(ISO_ROOT)/boot/grub/

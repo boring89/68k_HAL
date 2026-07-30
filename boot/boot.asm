@@ -12,7 +12,6 @@ global _start
 extern kernel_main
 
 _start:
-	mov dword [0xb8000], 0x07210748
 	call kernel_main
 
 hang:
