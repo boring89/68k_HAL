@@ -28,6 +28,9 @@ $(BUILD)/console.o: kernel/console/console.c | $(BUILD)
 $(BUILD)/log.o: kernel/log/log.c | $(BUILD)
 	$(CC) $(CFLAGS) -c kernel/log/log.c -o $(BUILD)/log.o
 
+$(BUILD)/k_string.o: kernel/lib/k_string.c | $(BUILD)
+	$(CC) $(CFLAGS) -c kernel/lib/k_string.c -o $(BUILD)/k_string.o
+
 $(BUILD)/kernel.o: kernel/main.c | $(BUILD)
 	$(CC) $(CFLAGS) -c kernel/main.c -o $(BUILD)/kernel.o
 

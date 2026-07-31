@@ -1,5 +1,5 @@
-#ifndef SERIAL_H
-#define SERIAL_H
+#ifndef HAL_SERIAL_SERIAL_H
+#define HAL_SERIAL_SERIAL_H
 
 #include <stdint.h>
 

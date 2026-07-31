@@ -14,6 +14,12 @@ void console_write(const char *str)
     serial_write(str);
 }
 
+void console_write_char(char c)
+{
+    vga_put_char(c);
+    serial_write_char(c);
+}
+
 void console_write_line(const char *str)
 {
     vga_write_line(str);

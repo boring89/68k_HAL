@@ -1,5 +1,5 @@
-#ifndef LOG_H
-#define LOG_H
+#ifndef KERNEL_LOG_LOG_H
+#define KERNEL_LOG_LOG_H
 
 typedef enum
 {
@@ -16,4 +16,4 @@ void log_error(const char *msg);
 
 void kernel_log(log_level_t lvl, const char *msg);
 
-#endif LOG_H
+#endif

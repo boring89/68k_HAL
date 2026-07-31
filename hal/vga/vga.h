@@ -1,5 +1,6 @@
-#ifndef VGA_H
-#define VGA_H
+#ifndef HAL_VGA_VGA_H
+#define HAL_VGA_VGA_H
+
 #define VGA_WIDTH 80
 #define VGA_HEIGHT 25
 #define VGA_DEFAULT_COLOR \
