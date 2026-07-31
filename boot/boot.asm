@@ -9,9 +9,12 @@ multiboot_header:
 section .text
 
 global _start
+
 extern kernel_main
+extern gdt_init
 
 _start:
+	call gdt_init
 	call kernel_main
 
 hang:

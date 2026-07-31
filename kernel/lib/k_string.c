@@ -1,5 +1,7 @@
 #include "k_string.h"
 
+#include <stddef.h>
+
 size_t k_strlen(const char *str)
 {
     size_t len = 0;
@@ -17,7 +19,7 @@ void k_strcpy(char *dst, const char *src)
         *dst++ = *src++;
     }
 
-    *dst = '\0'
+    *dst = '\0';
 }
 
 int k_strcmp(const char *a, const char *b)

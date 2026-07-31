@@ -1,5 +1,7 @@
 #include "k_number.h"
 
+#include <stdint.h>
+
 static void k_reverse(char *buffer, int len)
 {
     if (!buffer || len <= 1)
