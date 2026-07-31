@@ -40,6 +40,9 @@ $(BUILD)/k_string.o: kernel/lib/k_string.c | $(BUILD)
 $(BUILD)/k_number.o: kernel/lib/k_number.c | $(BUILD)
 	$(CC) $(CFLAGS) -c kernel/lib/k_number.c -o $(BUILD)/k_number.o
 
+$(BUILD)/printf.o: kernel/printf/printf.c | $(BUILD)
+	$(CC) $(CFLAGS) -c kernel/printf/printf.c -o $(BUILD)/printf.o
+
 $(BUILD)/idt.o: kernel/interrupt/idt.c | $(BUILD)
 	$(CC) $(CFLAGS) -c kernel/interrupt/idt.c -o $(BUILD)/idt.o
 
@@ -60,6 +63,7 @@ $(BUILD)/kernel.elf: \
 	$(BUILD)/log.o \
 	$(BUILD)/k_string.o \
 	$(BUILD)/k_number.o \
+	$(BUILD)/printf.o \
 	$(BUILD)/idt.o \
 	$(BUILD)/interrupt.o \
 	$(BUILD)/isr.o
@@ -74,6 +78,7 @@ $(BUILD)/kernel.elf: \
 		$(BUILD)/log.o \
 		$(BUILD)/k_string.o \
 		$(BUILD)/k_number.o \
+		$(BUILD)/printf.o \
 		$(BUILD)/idt.o \
 		$(BUILD)/interrupt.o \
 		$(BUILD)/isr.o \

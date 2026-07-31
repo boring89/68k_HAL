@@ -3,8 +3,8 @@
 #include <stdarg.h>
 
 #include "../console/console.h"
-#include "k_string.h"
-#include "k_number.h"
+#include "../lib/k_string.h"
+#include "../lib/k_number.h"
 
 void kernel_vprintf(const char *fmt, va_list args)
 {
@@ -27,8 +27,10 @@ void kernel_vprintf(const char *fmt, va_list args)
         switch (*fmt)
         {
         case '%':
+        {
             console_write_char('%');
             break;
+        }
         case 'c':
         {
             char c = va_arg(args, int);
@@ -44,6 +46,7 @@ void kernel_vprintf(const char *fmt, va_list args)
         }
 
         case 'd':
+        {
             int value = va_arg(args, int);
 
             k_itoa(value, buffer);
@@ -71,13 +74,13 @@ void kernel_vprintf(const char *fmt, va_list args)
         }
         default:
         {
-            console_write_char('?') break;
+            console_write_char('?');
+            break;
         }
-
+        }
         fmt++;
     }
 }
-
 
 void kernel_printf(const char *fmt, ...)
 {

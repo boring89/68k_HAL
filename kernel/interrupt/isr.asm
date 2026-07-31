@@ -6,6 +6,10 @@ extern interrupt_handler
 section .text
 
 isr0:
+    cli
+    
+    push 0x30
+
     pusha
 
     push esp
@@ -13,4 +17,8 @@ isr0:
     add esp,  4
 
     popa
+
+    add esp, 4
+
+    sti
     iret

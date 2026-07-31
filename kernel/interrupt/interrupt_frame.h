@@ -14,6 +14,8 @@ struct interrupt_frame
     uint32_t edx;
     uint32_t ecx;
     uint32_t eax;
+
+    uint32_t int_no;
 };
 
 #endif
