@@ -25,6 +25,9 @@ $(BUILD)/serial.o: hal/serial/serial.c | $(BUILD)
 $(BUILD)/console.o: kernel/console/console.c | $(BUILD)
 	$(CC) $(CFLAGS) -c kernel/console/console.c -o $(BUILD)/console.o
 
+$(BUILD)/log.o: kernel/log/log.c | $(BUILD)
+	$(CC) $(CFLAGS) -c kernel/log/log.c -o $(BUILD)/log.o
+
 $(BUILD)/kernel.o: kernel/main.c | $(BUILD)
 	$(CC) $(CFLAGS) -c kernel/main.c -o $(BUILD)/kernel.o
 
@@ -34,15 +37,17 @@ $(BUILD)/kernel.elf: \
 	$(BUILD)/kernel.o \
 	$(BUILD)/vga.o \
 	$(BUILD)/serial.o \
-	$(BUILD)/console.o
+	$(BUILD)/console.o \
+	$(BUILD)/log.o
 
 	ld -m elf_i386 -T linker.ld \
 		$(BUILD)/boot.o \
 		$(BUILD)/kernel.o \
 		$(BUILD)/vga.o \
 		$(BUILD)/serial.o \
-	$(BUILD)/console.o \
-	-o $(BUILD)/kernel.elf
+		$(BUILD)/console.o \
+		$(BUILD)/log.o \
+		-o $(BUILD)/kernel.elf
 
 clean:
 	rm -rf $(BUILD)
