@@ -1,16 +1,11 @@
-#include "../hal/vga/vga.h"
-#include "../hal/serial/serial.h"
+#include "console/console.h"
 
 
 void kernel_main(void) 
 {
-	vga_init();
-    vga_write("A");
-	// vga_write_line("Normal text OK");
-	// vga_write_color_line("Colored text OK", VGA_GREEN, VGA_BLACK);
+	console_init();
 
-    // serial_init();
-    // serial_write("Serial OK");
+    console_write_line("kernel boot");
 
     while(1)
     {

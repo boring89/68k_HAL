@@ -22,6 +22,9 @@ $(BUILD)/vga.o: hal/vga/vga.c | $(BUILD)
 $(BUILD)/serial.o: hal/serial/serial.c | $(BUILD)
 	$(CC) $(CFLAGS) -c hal/serial/serial.c -o $(BUILD)/serial.o
 
+$(BUILD)/console.o: kernel/console/console.c | $(BUILD)
+	$(CC) $(CFLAGS) -c kernel/console/console.c -o $(BUILD)/console.o
+
 $(BUILD)/kernel.o: kernel/main.c | $(BUILD)
 	$(CC) $(CFLAGS) -c kernel/main.c -o $(BUILD)/kernel.o
 
@@ -30,14 +33,16 @@ $(BUILD)/kernel.elf: \
 	$(BUILD)/boot.o \
 	$(BUILD)/kernel.o \
 	$(BUILD)/vga.o \
-	$(BUILD)/serial.o
+	$(BUILD)/serial.o \
+	$(BUILD)/console.o
 
 	ld -m elf_i386 -T linker.ld \
 		$(BUILD)/boot.o \
 		$(BUILD)/kernel.o \
 		$(BUILD)/vga.o \
 		$(BUILD)/serial.o \
-		-o $(BUILD)/kernel.elf
+	$(BUILD)/console.o \
+	-o $(BUILD)/kernel.elf
 
 clean:
 	rm -rf $(BUILD)
@@ -48,3 +53,6 @@ iso: $(BUILD)/kernel.elf
 	cp $(BUILD)/kernel.elf $(ISO_ROOT)/boot/
 	cp grub.cfg $(ISO_ROOT)/boot/grub/
 	grub-mkrescue -o $(BUILD)/68k_HAL.iso $(ISO_ROOT)
+
+run: iso
+	qemu-system-i386 -cdrom $(BUILD)/68k_HAL.iso -serial stdio

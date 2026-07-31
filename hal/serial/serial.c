@@ -52,3 +52,9 @@ void serial_write(const char *str)
         str++;
     }
 }
+
+void serial_write_line(const char *str)
+{
+    serial_write(str);
+    serial_write("\n");
+}
