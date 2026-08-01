@@ -6,83 +6,31 @@ CC=gcc
 
 CFLAGS=-m32 -ffreestanding -fno-pie -fno-asynchronous-unwind-tables -nostdlib
 
-all: $(BUILD)/kernel.elf
+.PHONY: all clean iso run
 
-.PHONY: all clean iso
+C_SOURCES := $(shell find boot hal kernel -name "*.c")
+ASM_SOURCES := $(shell find boot hal kernel -name "*.asm")
 
-$(BUILD):
-	mkdir -p $(BUILD)
+C_OBJECTS := $(C_SOURCES:%.c=$(BUILD)/%.o)
+ASM_OBJECTS := $(ASM_SOURCES:%.asm=$(BUILD)/%.o)
 
-$(BUILD)/gdt.o: boot/gdt.asm | $(BUILD)
-	$(ASM) -f elf32 boot/gdt.asm -o $(BUILD)/gdt.o
+OBJECTS := $(C_OBJECTS) $(ASM_OBJECTS)
 
-$(BUILD)/boot.o: boot/boot.asm | $(BUILD)
-	$(ASM) -f elf32 boot/boot.asm -o $(BUILD)/boot.o
+$(info C sources: $(C_SOURCES))
+$(info ASM sources: $(ASM_SOURCES))
 
-$(BUILD)/isr.o: kernel/interrupt/isr.asm | $(BUILD)
-	$(ASM) -f elf32 kernel/interrupt/isr.asm -o $(BUILD)/isr.o
+$(BUILD)/%.o: %.c
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD)/vga.o: hal/vga/vga.c | $(BUILD)
-	$(CC) $(CFLAGS) -c hal/vga/vga.c -o $(BUILD)/vga.o
+$(BUILD)/%.o: %.asm
+	mkdir -p $(dir $@)
+	$(ASM) -f elf32 $< -o $@
 
-$(BUILD)/serial.o: hal/serial/serial.c | $(BUILD)
-	$(CC) $(CFLAGS) -c hal/serial/serial.c -o $(BUILD)/serial.o
-
-$(BUILD)/console.o: kernel/console/console.c | $(BUILD)
-	$(CC) $(CFLAGS) -c kernel/console/console.c -o $(BUILD)/console.o
-
-$(BUILD)/log.o: kernel/log/log.c | $(BUILD)
-	$(CC) $(CFLAGS) -c kernel/log/log.c -o $(BUILD)/log.o
-
-$(BUILD)/k_string.o: kernel/lib/k_string.c | $(BUILD)
-	$(CC) $(CFLAGS) -c kernel/lib/k_string.c -o $(BUILD)/k_string.o
-
-$(BUILD)/k_number.o: kernel/lib/k_number.c | $(BUILD)
-	$(CC) $(CFLAGS) -c kernel/lib/k_number.c -o $(BUILD)/k_number.o
-
-$(BUILD)/printf.o: kernel/printf/printf.c | $(BUILD)
-	$(CC) $(CFLAGS) -c kernel/printf/printf.c -o $(BUILD)/printf.o
-
-$(BUILD)/idt.o: kernel/interrupt/idt.c | $(BUILD)
-	$(CC) $(CFLAGS) -c kernel/interrupt/idt.c -o $(BUILD)/idt.o
-
-$(BUILD)/interrupt.o: kernel/interrupt/interrupt.c | $(BUILD)
-	$(CC) $(CFLAGS) -c kernel/interrupt/interrupt.c -o $(BUILD)/interrupt.o
-
-$(BUILD)/kernel.o: kernel/main.c | $(BUILD)
-	$(CC) $(CFLAGS) -c kernel/main.c -o $(BUILD)/kernel.o
-
-
-$(BUILD)/kernel.elf: \
-	$(BUILD)/gdt.o \
-	$(BUILD)/boot.o \
-	$(BUILD)/kernel.o \
-	$(BUILD)/vga.o \
-	$(BUILD)/serial.o \
-	$(BUILD)/console.o \
-	$(BUILD)/log.o \
-	$(BUILD)/k_string.o \
-	$(BUILD)/k_number.o \
-	$(BUILD)/printf.o \
-	$(BUILD)/idt.o \
-	$(BUILD)/interrupt.o \
-	$(BUILD)/isr.o
-
+$(BUILD)/kernel.elf: $(OBJECTS)
 	ld -m elf_i386 -T linker.ld \
-		$(BUILD)/gdt.o \
-		$(BUILD)/boot.o \
-		$(BUILD)/kernel.o \
-		$(BUILD)/vga.o \
-		$(BUILD)/serial.o \
-		$(BUILD)/console.o \
-		$(BUILD)/log.o \
-		$(BUILD)/k_string.o \
-		$(BUILD)/k_number.o \
-		$(BUILD)/printf.o \
-		$(BUILD)/idt.o \
-		$(BUILD)/interrupt.o \
-		$(BUILD)/isr.o \
-		-o $(BUILD)/kernel.elf
+		$(OBJECTS) \
+		-o $@
 
 clean:
 	rm -rf $(BUILD)
@@ -96,3 +44,5 @@ iso: $(BUILD)/kernel.elf
 
 run: iso
 	qemu-system-i386 -cdrom $(BUILD)/68k_HAL.iso -serial stdio
+
+all: $(BUILD)/kernel.elf
