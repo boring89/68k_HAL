@@ -12,6 +12,10 @@ void kernel_main(void)
 
     kernel_log(LOG_INFO, "IDT loaded");
 
+    pic_init();
+
+    kernel_log(LOG_INFO, "PIC initialized");
+
     asm volatile("int $0x30");
 
     while (1)

@@ -10,6 +10,7 @@ static inline void outb(uint16_t port, uint8_t value)
         :
         : "a"(value),
           "Nd"(port)
+        : "memory"
     );
 }
 
@@ -21,6 +22,7 @@ static inline uint8_t inb(uint16_t port)
         "inb %1, %0"
         : "=a"(result)
         : "Nd"(port)
+        : "memory"
     );
 
     return result;
