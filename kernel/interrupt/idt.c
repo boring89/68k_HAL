@@ -1,5 +1,6 @@
 #include "idt.h"
 #include "isr.h"
+#include "irq.h"
 
 struct idt_entry
 {
@@ -50,9 +51,7 @@ void idt_init(void)
     idtr.limit = sizeof(idt) - 1;
     idtr.base = (uint32_t)&idt;
 
-    idt_set_gate(
-        0x30,
-        (uint32_t)isr0);
+    idt_set_gate(0x20, (uint32_t)irq0);
 
     lidt(&idtr);
 }

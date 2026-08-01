@@ -48,3 +48,5 @@ gdt_end:
 gdt_descriptor:
 dw gdt_end - gdt_start - 1
 dd gdt_start
+
+section .note.GNU-stack noalloc noexec nowrite progbits

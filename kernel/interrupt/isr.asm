@@ -22,3 +22,5 @@ isr0:
 
     sti
     iret
+
+section .note.GNU-stack noalloc noexec nowrite progbits
