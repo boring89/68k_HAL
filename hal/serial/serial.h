@@ -1,3 +1,8 @@
+/*
+ * Copyright (C) 2026 YuanChi Hsieh
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 #ifndef HAL_SERIAL_SERIAL_H
 #define HAL_SERIAL_SERIAL_H
 

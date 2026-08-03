@@ -1,3 +1,8 @@
+/*
+ * Copyright (C) 2026 YuanChi Hsieh
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 #ifndef KERNEL_CONSOLE_CONSOLE_H
 #define KERNEL_CONSOLE_CONSOLE_H
 

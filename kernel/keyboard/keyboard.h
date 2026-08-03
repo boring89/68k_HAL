@@ -1,15 +1,20 @@
+/*
+ * Copyright (C) 2026 YuanChi Hsieh
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 #ifndef KERNEL_KEYBOARD_KEYBOARD_H
 #define KERNEL_KEYBOARD_KEYBOARD_H
 
-#include <stdint.h>
-#include <stdbool.h>
+#include "../input/event.h"
 
 void keyboard_init(void);
 
-bool keyboard_has_key(void);
-
-int keyboard_read(uint8_t *scancode);
-
 void keyboard_handler(void);
+
+bool keyboard_has_event(void);
+
+int keyboard_read(input_event_t *event);
+
 
 #endif

@@ -1,3 +1,8 @@
+/*
+ * Copyright (C) 2026 YuanChi Hsieh
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 #include "../../hal/vga/vga.h"
 #include "../../hal/serial/serial.h"
 #include "console.h"

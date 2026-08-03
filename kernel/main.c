@@ -1,3 +1,8 @@
+/*
+ * Copyright (C) 2026 YuanChi Hsieh
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 #include "console/console.h"
 #include "log/log.h"
 #include "printf/printf.h"
@@ -24,6 +29,8 @@ void kernel_main(void)
     pic_init();
     kernel_log(LOG_INFO, "PIC initialized");
 
+    keyboard_init();
+
     pit_init(100);
 
     asm volatile("sti");
@@ -40,13 +47,21 @@ void kernel_main(void)
             last_tick = tick;
         }
 
-        uint8_t key;
+        input_event_t event;
 
-        if (keyboard_read(&key) == 0)
+        if (keyboard_read(&event) == 0)
         {
-            kernel_printf("%x\n", key);
+            if (event.type == INPUT_EVENT_KEYBOARD)
+            {
+                if (event.data.keyboard.pressed)
+                {
+                    kernel_printf(
+                        "%x\n",
+                        event.data.keyboard.scancode);
+                }
+            }
         }
-        
+
         asm volatile("hlt");
     }
 }

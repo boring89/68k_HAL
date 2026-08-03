@@ -1,15 +1,28 @@
+/*
+ * Copyright (C) 2026 YuanChi Hsieh
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 #include "keyboard.h"
 
-#include "../input/buffer.h"
+#include "../input/event.h"
+#include "../input/ring_buffer.h"
 #include "../../hal/io/io.h"
 
 
-static input_buffer_t keyboard_buffer;
+static input_event_t keyboard_events[128];
+
+static ring_buffer_t keyboard_buffer;
 
 
 void keyboard_init(void)
 {
-    input_buffer_init(&keyboard_buffer);
+    ring_buffer_init(
+        &keyboard_buffer,
+        keyboard_events,
+        sizeof(input_event_t),
+        128
+    );
 }
 
 
@@ -18,29 +31,31 @@ void keyboard_handler(void)
     uint8_t scancode = inb(0x60);
 
 
-    if (scancode & 0x80)
-        return;
+    input_event_t event =
+        input_event_keyboard(
+            scancode & 0x7F,
+            !(scancode & 0x80)
+        );
 
-
-    input_buffer_push(
+    ring_buffer_push(
         &keyboard_buffer,
-        scancode
+        &event
     );
 }
 
 
 bool keyboard_has_key(void)
 {
-    return input_buffer_has_data(
+    return ring_buffer_has_data(
         &keyboard_buffer
     );
 }
 
 
-int keyboard_read(uint8_t *scancode)
+int keyboard_read(input_event_t *event)
 {
-    return input_buffer_pop(
+    return ring_buffer_pop(
         &keyboard_buffer,
-        scancode
+        event
     );
 }
