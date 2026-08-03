@@ -1,4 +1,24 @@
+# Build output
 build/
 *.o
 *.elf
+*.bin
+*.img
 *.iso
+*.map
+
+# VS Code
+.vscode/
+
+# CLion
+.idea/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.swp
