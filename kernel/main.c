@@ -1,8 +1,12 @@
 #include "console/console.h"
 #include "log/log.h"
+#include "printf/printf.h"
+
 #include "interrupt/idt.h"
 #include "interrupt/pic.h"
+
 #include "timer/pit.h"
+#include "keyboard/keyboard.h"
 
 #include <stdint.h>
 
@@ -36,12 +40,13 @@ void kernel_main(void)
             last_tick = tick;
         }
 
-        if (keyboard_last_scancode)
-        {
-            kernel_printf("%x\n", keyboard_last_scancode);
-            keyboard_last_scancode = 0;
-        }
+        uint8_t key;
 
+        if (keyboard_read(&key) == 0)
+        {
+            kernel_printf("%x\n", key);
+        }
+        
         asm volatile("hlt");
     }
 }
