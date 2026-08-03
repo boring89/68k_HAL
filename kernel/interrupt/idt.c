@@ -52,6 +52,7 @@ void idt_init(void)
     idtr.base = (uint32_t)&idt;
 
     idt_set_gate(0x20, (uint32_t)irq0);
+    idt_set_gate(0x21, (uint32_t)irq1);
 
     lidt(&idtr);
 }

@@ -7,4 +7,6 @@ void irq_handler(uint32_t irq);
 
 void irq0(void);
 
+void irq1(void);
+
 #endif

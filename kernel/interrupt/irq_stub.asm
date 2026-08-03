@@ -1,12 +1,15 @@
 bits 32
 
 global irq0
+global irq1
 
 extern irq_handler
 
 section .text
 
 irq_common_stub:
+    cli
+    
     pusha
 
     push dword [esp + 32]
@@ -23,5 +26,8 @@ irq0:
     push 0
     jmp irq_common_stub
 
+irq1:
+    push 1
+    jmp irq_common_stub
 
 section .note.GNU-stack noalloc noexec nowrite progbits
