@@ -9,6 +9,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "../keyboard/keycode.h"
+
 /*
  * Event types
  */
@@ -29,7 +31,7 @@ typedef enum
  */
 typedef struct 
 {
-    uint8_t scancode;
+    keycode_t key;
     bool pressed;
 } keyboard_event_t;
 
@@ -52,7 +54,7 @@ typedef struct
  * Event constructors
  */
 input_event_t input_event_keyboard(
-    uint8_t scancode,
+    keycode_t key,
     bool pressed
 );
 

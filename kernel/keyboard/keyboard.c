@@ -4,25 +4,18 @@
  */
 
 #include "keyboard.h"
+#include "scancode.h"
+#include "keymap.h"
 
 #include "../input/event.h"
-#include "../input/ring_buffer.h"
+#include "../input/event_buffer.h"
+
 #include "../../hal/io/io.h"
-
-
-static input_event_t keyboard_events[128];
-
-static ring_buffer_t keyboard_buffer;
 
 
 void keyboard_init(void)
 {
-    ring_buffer_init(
-        &keyboard_buffer,
-        keyboard_events,
-        sizeof(input_event_t),
-        128
-    );
+    scancode_init();
 }
 
 
@@ -30,32 +23,24 @@ void keyboard_handler(void)
 {
     uint8_t scancode = inb(0x60);
 
+    keyboard_key_event_t key;
 
-    input_event_t event =
-        input_event_keyboard(
-            scancode & 0x7F,
-            !(scancode & 0x80)
-        );
+    if (scancode_process(scancode, &key))
+    {
+        keycode_t keycode =
+            keyboard_scancode_to_keycode(
+                key.code
+            );
 
-    ring_buffer_push(
-        &keyboard_buffer,
-        &event
-    );
-}
+        if (keycode != KEY_NONE)
+        {
+            input_event_t event = 
+                input_event_keyboard(
+                    keycode,
+                    key.pressed
+                );
 
-
-bool keyboard_has_key(void)
-{
-    return ring_buffer_has_data(
-        &keyboard_buffer
-    );
-}
-
-
-int keyboard_read(input_event_t *event)
-{
-    return ring_buffer_pop(
-        &keyboard_buffer,
-        event
-    );
+                input_event_push(&event);
+        }
+    }
 }

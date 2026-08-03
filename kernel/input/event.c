@@ -6,7 +6,7 @@
 #include "event.h"
 
 input_event_t input_event_keyboard(
-    uint8_t scancode,
+    keycode_t key,
     bool pressed
 )
 {
@@ -14,7 +14,7 @@ input_event_t input_event_keyboard(
 
     event.type = INPUT_EVENT_KEYBOARD;
 
-    event.data.keyboard.scancode = scancode;
+    event.data.keyboard.key = key;
     event.data.keyboard.pressed = pressed;
 
     return event;

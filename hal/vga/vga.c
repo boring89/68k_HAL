@@ -51,6 +51,7 @@ void vga_scroll(void)
 
     cursor_y = VGA_HEIGHT - 1;
     cursor_x = 0;
+    vga_update_cursor();
 }
 
 void vga_set_color(vga_color_t foreground, vga_color_t background)
@@ -68,7 +69,7 @@ void vga_set_cursor(int x, int y)
     {
         cursor_x = x;
         cursor_y = y;
-        
+
         vga_update_cursor();
     }
 }
@@ -76,7 +77,6 @@ void vga_set_cursor(int x, int y)
 void vga_newline(void)
 {
     cursor_x = 0;
-    vga_update_cursor();
 
     if (cursor_y == VGA_HEIGHT - 1)
     {
@@ -85,6 +85,7 @@ void vga_newline(void)
     }
 
     cursor_y++;
+    vga_update_cursor();
 }
 void vga_clear(void)
 {
@@ -123,6 +124,10 @@ void vga_put_char(char c)
     if (cursor_x >= VGA_WIDTH)
     {
         vga_newline();
+    }
+    else
+    {
+        vga_update_cursor();
     }
 }
 

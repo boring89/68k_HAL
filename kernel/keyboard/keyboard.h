@@ -6,15 +6,9 @@
 #ifndef KERNEL_KEYBOARD_KEYBOARD_H
 #define KERNEL_KEYBOARD_KEYBOARD_H
 
-#include "../input/event.h"
-
 void keyboard_init(void);
 
 void keyboard_handler(void);
-
-bool keyboard_has_event(void);
-
-int keyboard_read(input_event_t *event);
 
 
 #endif
