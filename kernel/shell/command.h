@@ -14,6 +14,7 @@ typedef enum
     COMMAND_CLEAR,
     COMMAND_ECHO,
     COMMAND_TICKS,
+    COMMAND_INFO,
 
     COMMAND_COUNT
 
