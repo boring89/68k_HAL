@@ -5,7 +5,7 @@
 
 #include "pic.h"
 
-#include "../../hal/io/io.h"
+#include "../../arch/x86/io/io.h"
 
 #define PIC1_COMMAND 0x20 // Master PIC command port
 #define PIC1_DATA 0x21    // Master PIC data port

@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#ifndef HAL_SERIAL_SERIAL_H
-#define HAL_SERIAL_SERIAL_H
+#ifndef ARCH_X86_SERIAL_SERIAL_H
+#define ARCH_X86_SERIAL_SERIAL_H
 
 #include <stdint.h>
 

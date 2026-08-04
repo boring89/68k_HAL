@@ -4,11 +4,13 @@
  */
 
 #include "console/console.h"
+#include "terminal/terminal.h"
 #include "log/log.h"
 #include "printf/printf.h"
 
 #include "interrupt/idt.h"
 #include "interrupt/pic.h"
+#include "interrupt/irq_callback.h"
 
 #include "input/event_buffer.h"
 
@@ -30,6 +32,8 @@ void kernel_main(void)
 
     pic_init();
     kernel_log(LOG_INFO, "PIC initialized");
+
+    irq_callback_init();
 
     input_event_buffer_init();
 
@@ -74,7 +78,7 @@ void kernel_main(void)
 
                     if (c)
                     {
-                        kernel_printf("%c", c);
+                        terminal_put_char(c);
                     }
                 }
             }

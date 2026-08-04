@@ -5,28 +5,13 @@
 
 #include "irq.h"
 #include "pic.h"
-
-#include "../printf/printf.h"
-#include "../timer/pit.h"
-#include "../keyboard/keyboard.h"
+#include "irq_callback.h"
 
 #include <stdint.h>
 
 void irq_handler(uint32_t irq)
 {
-    switch(irq)
-    {
-        case 0:
-            timer_tick();
-            break;
-        
-        case 1:
-            keyboard_handler();
-            break;
-        
-        default:
-            break;
-    }
+    irq_dispatch((uint8_t)irq);
 
-    pic_send_eoi(irq);
+    pic_send_eoi((uint8_t)irq);
 }

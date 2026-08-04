@@ -10,8 +10,8 @@ void log_info(const char *msg)
 {
     console_write_color(
         "[INFO] ",
-        VGA_GREEN,
-        VGA_BLACK
+        COLOR_GREEN,
+        COLOR_BLACK
     );
 
     console_write_line(msg);
@@ -21,8 +21,8 @@ void log_debug(const char *msg)
 {
     console_write_color(
         "[DEBUG] ",
-        VGA_CYAN,
-        VGA_BLACK
+        COLOR_CYAN,
+        COLOR_BLACK
     );
 
     console_write_line(msg);
@@ -32,8 +32,8 @@ void log_warn(const char *msg)
 {
     console_write_color(
         "[WARN] ",
-        VGA_YELLOW,
-        VGA_BLACK
+        COLOR_YELLOW,
+        COLOR_BLACK
     );
 
     console_write_line(msg);
@@ -43,8 +43,8 @@ void log_error(const char *msg)
 {
     console_write_color(
         "[ERROR] ",
-        VGA_LIGHT_RED,
-        VGA_BLACK
+        COLOR_LIGHT_RED,
+        COLOR_BLACK
     );
 
     console_write_line(msg);
@@ -54,8 +54,8 @@ void log_fatal(const char *msg)
 {
     console_write_color(
         "[FATAL] ",
-        VGA_RED,
-        VGA_BLACK
+        COLOR_RED,
+        COLOR_BLACK
     );
 
     console_write_line(msg);

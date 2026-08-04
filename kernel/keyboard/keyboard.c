@@ -10,14 +10,16 @@
 #include "../input/event.h"
 #include "../input/event_buffer.h"
 
-#include "../../hal/io/io.h"
+#include "../interrupt/irq_callback.h"
 
+#include "../../arch/x86/io/io.h"
 
 void keyboard_init(void)
 {
     scancode_init();
-}
 
+    irq_register(1, keyboard_handler);
+}
 
 void keyboard_handler(void)
 {
@@ -29,18 +31,16 @@ void keyboard_handler(void)
     {
         keycode_t keycode =
             keyboard_scancode_to_keycode(
-                key.code
-            );
+                key.code);
 
         if (keycode != KEY_NONE)
         {
-            input_event_t event = 
+            input_event_t event =
                 input_event_keyboard(
                     keycode,
-                    key.pressed
-                );
+                    key.pressed);
 
-                input_event_push(&event);
+            input_event_push(&event);
         }
     }
 }

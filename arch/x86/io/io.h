@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#ifndef HAL_IO_IO_H
-#define HAL_IO_IO_H
+#ifndef ARCH_X86_IO_IO_H
+#define ARCH_X86_IO_IO_H
 
 #include <stdint.h>
 

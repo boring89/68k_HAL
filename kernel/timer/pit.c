@@ -5,10 +5,12 @@
 
 #include "pit.h"
 
-#include "../../hal/io/io.h"
+#include "../../arch/x86/io/io.h"
+
+#include "../interrupt/irq_callback.h"
 
 #define PIT_CHANNEL0 0x40
-#define PIT_COMMAND  0x43
+#define PIT_COMMAND 0x43
 
 static uint32_t ticks = 0;
 
@@ -16,8 +18,14 @@ void pit_init(uint32_t frequency)
 {
     uint32_t divisor = 1193182 / frequency;
 
+    outb(PIT_COMMAND, 0x36);
+
     outb(PIT_CHANNEL0, divisor & 0xff);
     outb(PIT_CHANNEL0, (divisor >> 8) & 0xff);
+
+    kernel_printf("PIT register IRQ0\n");
+
+    irq_register(0, timer_tick);
 }
 
 void timer_tick(void)
