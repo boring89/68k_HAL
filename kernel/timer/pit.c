@@ -7,6 +7,8 @@
 
 #include "../../arch/x86/io/io.h"
 
+#include "../printf/printf.h"
+
 #include "../interrupt/irq_callback.h"
 
 #define PIT_CHANNEL0 0x40
@@ -22,9 +24,7 @@ void pit_init(uint32_t frequency)
 
     outb(PIT_CHANNEL0, divisor & 0xff);
     outb(PIT_CHANNEL0, (divisor >> 8) & 0xff);
-
-    kernel_printf("PIT register IRQ0\n");
-
+    
     irq_register(0, timer_tick);
 }
 

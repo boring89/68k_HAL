@@ -5,6 +5,9 @@
 
 #include "console/console.h"
 #include "terminal/terminal.h"
+#include "terminal/input.h"
+#include "shell/shell.h"
+
 #include "log/log.h"
 #include "printf/printf.h"
 
@@ -36,6 +39,12 @@ void kernel_main(void)
     irq_callback_init();
 
     input_event_buffer_init();
+
+    terminal_input_init();
+
+    terminal_input_set_callback(shell_execute);
+
+    shell_init();
 
     keyboard_init();
     keyboard_state_init();
@@ -78,7 +87,7 @@ void kernel_main(void)
 
                     if (c)
                     {
-                        terminal_put_char(c);
+                        terminal_input_char(c);
                     }
                 }
             }

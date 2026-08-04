@@ -11,6 +11,8 @@
 
 void terminal_init(void);
 
+void terminal_newline(void);
+
 void terminal_backspace(void);
 
 void terminal_tab(void);
