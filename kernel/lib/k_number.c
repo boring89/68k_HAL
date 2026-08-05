@@ -94,3 +94,66 @@ void k_utoa_ptr(uint32_t value, char *buffer)
 
     k_utoa_hex(value, buffer+2);
 }
+
+void k_atoi(const char *str, int *value)
+{
+    int result = 0;
+    int sign = 1;
+
+    if (*str == '-')
+    {
+        sign = -1;
+        str++;
+    }
+
+    while (*str >= '0' && *str <= '9')
+    {
+        result = result * 10 + (*str - '0');
+        str++;
+    }
+
+    *value = result * sign;
+}
+
+uint32_t k_atoh(const char *str)
+{
+    uint32_t value = 0;
+
+    if (str[0] == '0' &&
+        (str[1] == 'x' || str[1] == 'X'))
+    {
+        str += 2;
+    }
+
+    while (*str)
+    {
+        char c = *str;
+
+        uint32_t digit;
+
+
+        if (c >= '0' && c <= '9')
+        {
+            digit = c - '0';
+        }
+        else if (c >= 'a' && c <= 'f')
+        {
+            digit = c - 'a' + 10;
+        }
+        else if (c >= 'A' && c <= 'F')
+        {
+            digit = c - 'A' + 10;
+        }
+        else
+        {
+            break;
+        }
+
+
+        value = value * 16 + digit;
+
+        str++;
+    }
+
+    return value;
+}

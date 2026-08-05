@@ -47,12 +47,10 @@ void terminal_backspace(void)
 
 void terminal_tab(void)
 {
-    int spaces = 4 - (cursor_x % 4);
-
-    for (int i = 0; i < spaces; i++)
-    {
-        terminal_put_char(' ');
-    }
+    // for (int i = 0; i < 4; i++)
+    // {
+    //     terminal_put_char(' ');
+    // }
 }
 
 void terminal_clear(void)

@@ -61,6 +61,15 @@ void terminal_input_char(char c)
         return;
     }
 
+    if (c == '\t')
+    {
+        for (int i = 0; i < 4; i++)
+        {
+            terminal_input_char(' ');
+        }
+        return;
+    }
+
     if (input_length >= TERMINAL_INPUT_SIZE - 1)
         return;
 

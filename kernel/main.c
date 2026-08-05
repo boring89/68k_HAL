@@ -22,13 +22,22 @@
 #include "keyboard/state.h"
 #include "keyboard/keychar.h"
 
+#include "memory/memory.h"
+#include "memory/heap.h"
+
 #include <stdint.h>
 
 void kernel_main(void)
 {
     console_init();
 
+    memory_init();
+
+    heap_init();
+
     kernel_log(LOG_INFO, "Kernel Booting...");
+
+    kernel_printf("Kernel end: %x\n", memory_get_kernel_end());
 
     idt_init();
     kernel_log(LOG_INFO, "IDT loaded");
