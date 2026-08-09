@@ -24,20 +24,47 @@
 
 #include "memory/memory.h"
 #include "memory/heap.h"
+#include "memory/multiboot.h"
 
 #include <stdint.h>
 
-void kernel_main(void)
+void kernel_main(
+    uint32_t magic,
+    uint32_t mbi_address)
 {
+
     console_init();
+
+    if (magic != 0x2BADB002)
+    {
+        kernel_log(LOG_ERROR, "Invalid Multiboot magic");
+
+        while (1)
+            asm volatile("hlt");
+    }
+
+    multiboot_init(mbi_address);
+
+    kernel_log(LOG_INFO, "Multiboot initialized");
+
+    const multiboot_info_t *mbi =
+        multiboot_get_info();
+
+    kernel_printf(
+        "Multiboot flags: %x\n",
+        mbi->flags);
+
+    kernel_printf(
+        "Multiboot info: %x\n",
+        mbi_address);
 
     memory_init();
 
     heap_init();
 
-    kernel_log(LOG_INFO, "Kernel Booting...");
-
     kernel_printf("Kernel end: %x\n", memory_get_kernel_end());
+
+    kernel_log(LOG_INFO, "Kernel Booting...");
 
     idt_init();
     kernel_log(LOG_INFO, "IDT loaded");

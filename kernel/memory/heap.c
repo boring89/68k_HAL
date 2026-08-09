@@ -28,7 +28,32 @@ void heap_init(void)
     heap_used = 0;
 }
 
-heap_block_t *heap_find_free(uint32_t size)
+static heap_block_t *heap_split(
+    heap_block_t *block,
+    uint32_t size)
+{
+    uint32_t remaining =
+        block->size - size;
+
+    if (remaining <= sizeof(heap_block_t))
+        return 0;
+
+    heap_block_t *new_block =
+        (heap_block_t *)(
+            (uint8_t *)(block + 1) + size
+        );
+
+    new_block->size =
+        remaining - sizeof(heap_block_t);
+
+    new_block->used = 0;
+
+    block->size = size;
+
+    return new_block;
+}
+
+static heap_block_t *heap_find_free(uint32_t size)
 {
     uint32_t current = heap_start;
 
@@ -50,6 +75,38 @@ heap_block_t *heap_find_free(uint32_t size)
     return 0;
 }
 
+static void heap_merge(void)
+{
+    uint32_t current = heap_start;
+
+    while (current < heap_current)
+    {
+        heap_block_t *block =(heap_block_t *)current;
+
+        uint32_t next_address =
+            current +
+            sizeof(heap_block_t) +
+            block->size;
+
+        if (next_address >= heap_current)
+            break;
+
+        heap_block_t *next = 
+            (heap_block_t *)next_address;
+        
+        if (!block -> used && !next->used)
+        {
+            block->size +=
+                sizeof(heap_block_t) +
+                next->size;
+
+            continue;
+        }
+
+        current = next_address;
+    }
+}
+
 void *kmalloc(uint32_t size)
 {
     if (size == 0)
@@ -60,9 +117,11 @@ void *kmalloc(uint32_t size)
 
     if (block)
     {
+        heap_split(block, size);
+
         block->used = 1;
 
-        heap_used += block->size;
+        heap_used += size;
 
         return (void *)(block + 1);
     }
@@ -105,6 +164,8 @@ void kfree(void *ptr)
     block->used = 0;
 
     heap_used -= block->size;
+
+    heap_merge();
 }
 
 uint32_t heap_get_start(void)

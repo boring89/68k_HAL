@@ -151,6 +151,15 @@ void cmd_memory(
     char buffer[32];
 
     terminal_newline();
+    terminal_write("Kernel End: ");
+
+    k_utoa(
+        memory_get_kernel_end(),
+        buffer);
+
+    terminal_write_line(buffer);
+
+    terminal_newline();
     terminal_write("Heap Start: ");
 
     k_utoa(
