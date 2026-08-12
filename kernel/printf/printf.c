@@ -62,7 +62,8 @@ void kernel_vprintf(const char *fmt, va_list args)
 
         case 'u':
         {
-            unsigned int value = va_arg(args, int);
+            unsigned int value =
+                va_arg(args, unsigned int);
 
             k_utoa(value, buffer);
             console_write(buffer);
