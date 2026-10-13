@@ -27,7 +27,6 @@ make clean
 - 不依賴硬體的模組（`kernel/lib`、`kernel/shell/parser.c`、`emu/m68k`）放在 `tests/host/test_<模組>.c`，使用 `tests/host/test.h` 的巨集。新增可在 host 編譯的模組時，要加入 Makefile 的 `HOST_LIB_SOURCES`。
 - 需要硬體或中斷的測試放在 `kernel/test/selftest.c`，用 `SELFTEST_RUN` 註冊。
 - host 測試在 64-bit 環境執行：把指標轉成 `uint32_t` 的程式碼（例如 heap）目前無法在 host 測試。
-- Makefile 沒有追蹤 header 相依性：修改 header 後若結果異常，先 `make clean`。
 
 ## 目錄結構
 

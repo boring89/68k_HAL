@@ -8,8 +8,6 @@
 
 #include <stdint.h>
 
-static void k_reverse(char *buffer, int len);
-
 void k_utoa(unsigned int value, char *buffer);
 void k_itoa(int value, char *buffer);
 
