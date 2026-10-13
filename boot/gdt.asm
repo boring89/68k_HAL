@@ -23,8 +23,13 @@ gdt_init:
     ret
 
 
-section .rodata
+; Writable: the CPU sets the Accessed bit (bit 0 of the type field) of a
+; descriptor when it loads a segment register (Intel SDM Vol.3A 3.4.5.1),
+; so the GDT must not end up on a read-only page.
+section .data
 
+; 8-byte alignment gives the best performance (Intel SDM Vol.3A 3.5.1).
+align 8
 gdt_start:
 
 ; null descriptor
