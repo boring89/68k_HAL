@@ -310,7 +310,6 @@ page fault 測試用 `.byte` 寫死 2 bytes 的 `mov` 指令，hook 記錄 CR2 �
 - `make test-qemu` 帶 `-no-reboot`：triple fault 時 QEMU 直接結束，不會無限重開。
 - QEMU 加 `-d int,cpu_reset`：印出每個例外的編號、CR2、EIP，可看出第一個 page fault 的位址。
 - QEMU monitor：`info mem`（對應範圍與權限）、`info tlb`（逐頁對應）、`xp /4wx <實體位址>`（直接讀分頁表）。
-- `make run` 時 GRUB 停在選單（`grub.cfg` 沒有設定 `timeout`），需要按 Enter。
 
 ## 11. 之後的工作
 
