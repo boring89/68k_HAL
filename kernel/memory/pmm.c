@@ -199,6 +199,59 @@ uintptr_t pmm_alloc_frame(void)
     return 0;
 }
 
+uintptr_t pmm_alloc_frames(size_t count)
+{
+    /* Zero is meaningless; more than the free count can never fit. */
+    if (count == 0 || count > pmm_free_count)
+        return 0;
+
+    uint32_t first_free = pmm_limit;
+    uint32_t run_start = 0;
+    size_t run_length = 0;
+
+    /* One pass: count consecutive free frames, reset on a used one. */
+    for (uint32_t frame = pmm_hint; frame < pmm_limit; frame++)
+    {
+        if (frame % 32 == 0 && pmm_bitmap[frame / 32] == 0xFFFFFFFF)
+        {
+            /* 32 used frames: break the run and skip the word. */
+            run_length = 0;
+            frame += 31;
+            continue;
+        }
+
+        if (pmm_test(frame))
+        {
+            run_length = 0;
+            continue;
+        }
+
+        if (first_free == pmm_limit)
+            first_free = frame;
+
+        if (run_length == 0)
+            run_start = frame;
+
+        run_length++;
+
+        if (run_length == count)
+        {
+            pmm_mark_used(run_start, (uint64_t)run_start + count);
+
+            /* Free frames skipped before the run keep the hint there. */
+            pmm_hint = run_start == first_free
+                           ? run_start + (uint32_t)count
+                           : first_free;
+
+            return (uintptr_t)run_start * PMM_FRAME_SIZE;
+        }
+    }
+
+    /* No run long enough; scattered free frames may remain, so the hint
+     * stays where it is. */
+    return 0;
+}
+
 int pmm_free_frame(uintptr_t address)
 {
     /* Check range and alignment before touching the bitmap. The low

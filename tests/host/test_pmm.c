@@ -313,6 +313,114 @@ static void test_free_rejects_bad_addresses(void)
     TEST_ASSERT_EQ_INT(0, pmm_free_frame(a));
 }
 
+static void test_alloc_frames_rejects_bad_count(void)
+{
+    reset();
+    add_region(MiB, MiB, MULTIBOOT_MEMORY_AVAILABLE);
+    boot();
+
+    TEST_ASSERT_EQ_INT(0, pmm_alloc_frames(0));
+    TEST_ASSERT_EQ_INT(0, pmm_alloc_frames(257));
+    TEST_ASSERT_EQ_INT(256, pmm_get_free_frames());
+}
+
+static void test_alloc_frames_basic(void)
+{
+    reset();
+    add_region(MiB, MiB, MULTIBOOT_MEMORY_AVAILABLE);
+    boot();
+
+    /* count = 1 behaves like pmm_alloc_frame. */
+    TEST_ASSERT_EQ_INT(0x100000, pmm_alloc_frames(1));
+
+    TEST_ASSERT_EQ_INT(0x101000, pmm_alloc_frames(3));
+    TEST_ASSERT_EQ_INT(252, pmm_get_free_frames());
+
+    /* Run started at the first free frame: hint moves past it. */
+    TEST_ASSERT_EQ_INT(0x104000, pmm_alloc_frame());
+}
+
+static void test_alloc_frames_skips_short_gap(void)
+{
+    reset();
+    add_region(MiB, MiB, MULTIBOOT_MEMORY_AVAILABLE);
+    boot();
+
+    for (int i = 0; i < 4; i++)
+        pmm_alloc_frame();
+
+    /* Gap of 2 at 0x100-0x101, then 0x102-0x103 used. */
+    pmm_free_frame(0x100000);
+    pmm_free_frame(0x101000);
+
+    TEST_ASSERT_EQ_INT(0x104000, pmm_alloc_frames(3));
+
+    /* The skipped gap is still found by the next allocation. */
+    TEST_ASSERT_EQ_INT(0x100000, pmm_alloc_frame());
+}
+
+static void test_alloc_frames_skips_full_words(void)
+{
+    reset();
+    add_region(MiB, MiB, MULTIBOOT_MEMORY_AVAILABLE);
+    boot();
+
+    /* Use frames 0x100-0x15F (words 8-10), then free 0x100 only. */
+    for (int i = 0; i < 96; i++)
+        pmm_alloc_frame();
+
+    pmm_free_frame(0x100000);
+
+    TEST_ASSERT_EQ_INT(0x160000, pmm_alloc_frames(2));
+    TEST_ASSERT_EQ_INT(0x100000, pmm_alloc_frame());
+}
+
+static void test_alloc_frames_across_word_boundary(void)
+{
+    reset();
+
+    /* Frames 0x11E-0x121 span words 8 and 9. */
+    add_region(0x11E000, 0x4000, MULTIBOOT_MEMORY_AVAILABLE);
+    boot();
+
+    TEST_ASSERT_EQ_INT(0x11E000, pmm_alloc_frames(4));
+    TEST_ASSERT_EQ_INT(0, pmm_alloc_frame());
+}
+
+static void test_alloc_frames_not_across_hole(void)
+{
+    reset();
+    add_region(MiB, 0x2000, MULTIBOOT_MEMORY_AVAILABLE);
+    add_region(MiB + 0x3000, 0x2000, MULTIBOOT_MEMORY_AVAILABLE);
+    boot();
+
+    /* Frame 0x102 is not RAM, so 4 frames never fit. */
+    TEST_ASSERT_EQ_INT(4, pmm_get_free_frames());
+    TEST_ASSERT_EQ_INT(0, pmm_alloc_frames(3));
+    TEST_ASSERT_EQ_INT(0x100000, pmm_alloc_frames(2));
+    TEST_ASSERT_EQ_INT(0x103000, pmm_alloc_frames(2));
+}
+
+static void test_alloc_frames_fragmented(void)
+{
+    reset();
+    add_region(MiB, 0x4000, MULTIBOOT_MEMORY_AVAILABLE);
+    boot();
+
+    for (int i = 0; i < 4; i++)
+        pmm_alloc_frame();
+
+    pmm_free_frame(0x100000);
+    pmm_free_frame(0x102000);
+
+    /* 2 frames free, but not next to each other. */
+    TEST_ASSERT_EQ_INT(0, pmm_alloc_frames(2));
+    TEST_ASSERT_EQ_INT(2, pmm_get_free_frames());
+
+    /* Failure leaves the hint alone. */
+    TEST_ASSERT_EQ_INT(0x100000, pmm_alloc_frame());
+}
+
 int main(void)
 {
     area = mmap(NULL, AREA_SIZE, PROT_READ | PROT_WRITE,
@@ -342,6 +450,13 @@ int main(void)
     TEST_RUN(test_free_after_exhaustion);
     TEST_RUN(test_free_rejects_double_free);
     TEST_RUN(test_free_rejects_bad_addresses);
+    TEST_RUN(test_alloc_frames_rejects_bad_count);
+    TEST_RUN(test_alloc_frames_basic);
+    TEST_RUN(test_alloc_frames_skips_short_gap);
+    TEST_RUN(test_alloc_frames_skips_full_words);
+    TEST_RUN(test_alloc_frames_across_word_boundary);
+    TEST_RUN(test_alloc_frames_not_across_hole);
+    TEST_RUN(test_alloc_frames_fragmented);
 
     munmap(area, AREA_SIZE);
 
