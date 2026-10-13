@@ -67,6 +67,7 @@ HOST_LIB_SOURCES := \
 	kernel/lib/k_memory.c \
 	kernel/lib/ring_buffer.c \
 	kernel/memory/heap.c \
+	kernel/memory/multiboot.c \
 	kernel/shell/parser.c \
 	$(wildcard emu/m68k/*.c)
 

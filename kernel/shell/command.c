@@ -15,6 +15,7 @@
 #include "../lib/k_number.h"
 
 #include "../memory/memory.h"
+#include "../memory/multiboot.h"
 
 static void cmd_help(
     int argc,
@@ -44,6 +45,9 @@ static void cmd_free(
     int argc,
     char **argv);
 static void cmd_heap(
+    int argc,
+    char **argv);
+static void cmd_mmap(
     int argc,
     char **argv);
 
@@ -84,7 +88,11 @@ static shell_command_entry_t commands[] =
         {COMMAND_FREE,
          "free",
          "Free up last allocation",
-         cmd_free}};
+         cmd_free},
+        {COMMAND_MMAP,
+         "mmap",
+         "Display Multiboot memory map",
+         cmd_mmap}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -381,6 +389,82 @@ static void cmd_free(
 
     terminal_write("Memory freed");
     terminal_newline();
+}
+
+/* Write a 32-bit value as exactly 8 hex digits. */
+static void write_hex32(uint32_t value)
+{
+    const char digits[] = "0123456789ABCDEF";
+    char buffer[9];
+
+    for (int i = 7; i >= 0; i--)
+    {
+        buffer[i] = digits[value & 0xF];
+        value >>= 4;
+    }
+
+    buffer[8] = '\0';
+    terminal_write(buffer);
+}
+
+/* Write a 64-bit value as "high:low" (kernel_printf/k_utoa_hex are 32-bit). */
+static void write_hex64(uint64_t value)
+{
+    write_hex32((uint32_t)(value >> 32));
+    terminal_put_char(':');
+    write_hex32((uint32_t)value);
+}
+
+static const char *mmap_type_name(uint32_t type)
+{
+    switch (type)
+    {
+    case MULTIBOOT_MEMORY_AVAILABLE:
+        return "available";
+    case MULTIBOOT_MEMORY_ACPI_RECLAIMABLE:
+        return "ACPI reclaimable";
+    case MULTIBOOT_MEMORY_NVS:
+        return "ACPI NVS";
+    case MULTIBOOT_MEMORY_BADRAM:
+        return "bad RAM";
+    default:
+        return "reserved";
+    }
+}
+
+static void cmd_mmap(
+    int argc,
+    char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    const multiboot_mmap_entry_t *entry =
+        multiboot_mmap_first();
+
+    if (entry == NULL)
+    {
+        terminal_write_line("No memory map");
+        return;
+    }
+
+    terminal_write_line("Base              Length            Type");
+
+    for (; entry != NULL; entry = multiboot_mmap_next(entry))
+    {
+        char buffer[32];
+
+        write_hex64(entry->addr);
+        terminal_put_char(' ');
+        write_hex64(entry->len);
+        terminal_put_char(' ');
+
+        k_utoa(entry->type, buffer);
+        terminal_write(buffer);
+        terminal_write(" (");
+        terminal_write(mmap_type_name(entry->type));
+        terminal_write_line(")");
+    }
 }
 
 void shell_dispatch(shell_command_t *cmd)
