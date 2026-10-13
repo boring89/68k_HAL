@@ -176,7 +176,7 @@ void cmd_memory(
 
     terminal_write_line(buffer);
 
-    terminal_write("Reversed: ");
+    terminal_write("Reserved: ");
 
     k_utoa(
         heap_get_reserved(),
@@ -283,7 +283,7 @@ static void cmd_alloc(
         size_buffer);
 
     k_utoa_ptr(
-        (uint32_t)ptr,
+        (uintptr_t)ptr,
         addr_buffer);
 
     terminal_write("Allocated ");
@@ -305,10 +305,15 @@ static void cmd_free(
         return;
     }
 
-    uint32_t address =
+    uintptr_t address =
         k_atoh(argv[1]);
 
-    kfree((void *)address);
+    if (kfree((void *)address) != 0)
+    {
+        terminal_write("Warning: not an allocated block, heap unchanged");
+        terminal_newline();
+        return;
+    }
 
     terminal_write("Memory freed");
     terminal_newline();

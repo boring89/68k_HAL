@@ -4,63 +4,91 @@
  */
 
 #include "heap.h"
-#include "memory.h"
+
+/* Every block header and payload starts on an 8-byte boundary. */
+#define HEAP_ALIGN 8
+
+#define HEAP_ALIGN_UP(value) \
+    (((value) + (HEAP_ALIGN - 1)) & ~(uintptr_t)(HEAP_ALIGN - 1))
+
+/* "HEAP" in ASCII; marks a valid block header. */
+#define HEAP_MAGIC 0x48454150u
 
 typedef struct
 {
-    uint32_t size;
-    uint8_t used;
+    uint32_t magic;
+    uint32_t used;
+    size_t size;
 
 } heap_block_t;
 
-static uint32_t heap_used;
+/* Header size rounded up so the payload after it stays aligned. */
+#define HEAP_HEADER_SIZE HEAP_ALIGN_UP(sizeof(heap_block_t))
 
-static uint32_t heap_current;
+static size_t heap_used;
 
-static uint32_t heap_start;
+static uintptr_t heap_current;
 
-void heap_init(void)
+static uintptr_t heap_start;
+
+static uintptr_t heap_end;
+
+static heap_block_t *heap_block_at(uintptr_t address)
 {
-    heap_start = memory_get_kernel_end();
+    return (heap_block_t *)address;
+}
+
+static uintptr_t heap_next_address(uintptr_t address)
+{
+    return address + HEAP_HEADER_SIZE + heap_block_at(address)->size;
+}
+
+void heap_init(uintptr_t start, size_t size)
+{
+    uintptr_t aligned = HEAP_ALIGN_UP(start);
+    uintptr_t padding = aligned - start;
+
+    heap_start = aligned;
+
+    heap_end = (padding < size) ? aligned + (size - padding) : aligned;
 
     heap_current = heap_start;
 
     heap_used = 0;
 }
 
-static heap_block_t *heap_split(
+static void heap_split(
     heap_block_t *block,
-    uint32_t size)
+    size_t size)
 {
-    uint32_t remaining =
+    size_t remaining =
         block->size - size;
 
-    if (remaining <= sizeof(heap_block_t))
-        return 0;
+    if (remaining <= HEAP_HEADER_SIZE)
+        return;
 
     heap_block_t *new_block =
-        (heap_block_t *)(
-            (uint8_t *)(block + 1) + size
-        );
+        heap_block_at(
+            (uintptr_t)block + HEAP_HEADER_SIZE + size);
+
+    new_block->magic = HEAP_MAGIC;
 
     new_block->size =
-        remaining - sizeof(heap_block_t);
+        remaining - HEAP_HEADER_SIZE;
 
     new_block->used = 0;
 
     block->size = size;
-
-    return new_block;
 }
 
-static heap_block_t *heap_find_free(uint32_t size)
+static heap_block_t *heap_find_free(size_t size)
 {
-    uint32_t current = heap_start;
+    uintptr_t current = heap_start;
 
     while (current < heap_current)
     {
         heap_block_t *block =
-            (heap_block_t *)current;
+            heap_block_at(current);
 
         if (!block->used &&
             block->size >= size)
@@ -68,37 +96,49 @@ static heap_block_t *heap_find_free(uint32_t size)
             return block;
         }
 
-        current += sizeof(heap_block_t);
-        current += block->size;
+        current = heap_next_address(current);
     }
 
     return 0;
 }
 
+/*
+ * Merge adjacent free blocks and give a trailing free block back to
+ * the unreserved area. Absorbed headers lose their magic so a stale
+ * address inside a merged block cannot pass kfree's check.
+ */
 static void heap_merge(void)
 {
-    uint32_t current = heap_start;
+    uintptr_t current = heap_start;
 
     while (current < heap_current)
     {
-        heap_block_t *block =(heap_block_t *)current;
+        heap_block_t *block = heap_block_at(current);
 
-        uint32_t next_address =
-            current +
-            sizeof(heap_block_t) +
-            block->size;
+        uintptr_t next_address =
+            heap_next_address(current);
 
         if (next_address >= heap_current)
-            break;
+        {
+            if (!block->used)
+            {
+                block->magic = 0;
+                heap_current = current;
+            }
 
-        heap_block_t *next = 
-            (heap_block_t *)next_address;
-        
-        if (!block -> used && !next->used)
+            break;
+        }
+
+        heap_block_t *next =
+            heap_block_at(next_address);
+
+        if (!block->used && !next->used)
         {
             block->size +=
-                sizeof(heap_block_t) +
+                HEAP_HEADER_SIZE +
                 next->size;
+
+            next->magic = 0;
 
             continue;
         }
@@ -107,10 +147,12 @@ static void heap_merge(void)
     }
 }
 
-void *kmalloc(uint32_t size)
+void *kmalloc(size_t size)
 {
-    if (size == 0)
+    if (size == 0 || size > SIZE_MAX - (HEAP_ALIGN - 1))
         return 0;
+
+    size = HEAP_ALIGN_UP(size);
 
     heap_block_t *block =
         heap_find_free(size);
@@ -121,17 +163,27 @@ void *kmalloc(uint32_t size)
 
         block->used = 1;
 
-        heap_used += size;
+        /* block->size may exceed size when the block was not split. */
+        heap_used += block->size;
 
-        return (void *)(block + 1);
+        return (void *)((uintptr_t)block + HEAP_HEADER_SIZE);
     }
 
-    block = (heap_block_t *)heap_current;
+    uintptr_t available = heap_end - heap_current;
 
+    if (available < HEAP_HEADER_SIZE ||
+        size > available - HEAP_HEADER_SIZE)
+    {
+        return 0;
+    }
+
+    block = heap_block_at(heap_current);
+
+    block->magic = HEAP_MAGIC;
     block->size = size;
     block->used = 1;
 
-    heap_current += sizeof(heap_block_t);
+    heap_current += HEAP_HEADER_SIZE;
 
     void *ptr = (void *)heap_current;
 
@@ -142,48 +194,50 @@ void *kmalloc(uint32_t size)
     return ptr;
 }
 
-void kfree(void *ptr)
+/* Returns -1 without touching the heap if ptr is not an allocated block. */
+int kfree(void *ptr)
 {
-    if (!ptr)
-        return;
+    uintptr_t address = (uintptr_t)ptr;
 
-    uint32_t address = (uint32_t)ptr;
-
-    if (address < heap_start ||
-        address >= heap_current)
+    /* Range and alignment first, so the header read stays inside the heap. */
+    if (address < heap_start + HEAP_HEADER_SIZE ||
+        address >= heap_current ||
+        address % HEAP_ALIGN != 0)
     {
-        return;
+        return -1;
     }
 
     heap_block_t *block =
-        ((heap_block_t *)ptr) - 1;
+        heap_block_at(address - HEAP_HEADER_SIZE);
 
-    if (!block->used)
-        return;
+    if (block->magic != HEAP_MAGIC || !block->used)
+        return -1;
 
     block->used = 0;
 
     heap_used -= block->size;
 
     heap_merge();
+
+    return 0;
 }
 
-uint32_t heap_get_start(void)
+uintptr_t heap_get_start(void)
 {
     return heap_start;
 }
 
-uint32_t heap_get_current(void)
+uintptr_t heap_get_current(void)
 {
     return heap_current;
 }
 
-uint32_t heap_get_used(void)
+size_t heap_get_used(void)
 {
     return heap_used;
 }
 
-uint32_t heap_get_reserved(void)
+size_t heap_get_reserved(void)
 {
     return heap_current - heap_start;
 }
@@ -192,20 +246,20 @@ int heap_get_block(
     int index,
     heap_block_info_t *info)
 {
-    uint32_t current = heap_start;
+    uintptr_t current = heap_start;
 
     int i = 0;
 
     while (current < heap_current)
     {
         heap_block_t *block =
-            (heap_block_t *)current;
+            heap_block_at(current);
 
         if (i == index)
         {
             info->header = current;
             info->address =
-                current + sizeof(heap_block_t);
+                current + HEAP_HEADER_SIZE;
 
             info->size = block->size;
             info->used = block->used;
@@ -213,8 +267,7 @@ int heap_get_block(
             return 0;
         }
 
-        current += sizeof(heap_block_t);
-        current += block->size;
+        current = heap_next_address(current);
 
         i++;
     }

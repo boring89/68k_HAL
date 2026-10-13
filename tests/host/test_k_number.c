@@ -47,6 +47,14 @@ static void test_utoa_hex(void)
 
     k_utoa_ptr(0x100000, buffer);
     TEST_ASSERT_EQ_STR("0x100000", buffer);
+
+    k_utoa_ptr(0, buffer);
+    TEST_ASSERT_EQ_STR("0x0", buffer);
+
+#if UINTPTR_MAX > 0xFFFFFFFFu
+    k_utoa_ptr((uintptr_t)0x123456789ABull, buffer);
+    TEST_ASSERT_EQ_STR("0x123456789AB", buffer);
+#endif
 }
 
 static void test_atoi(void)

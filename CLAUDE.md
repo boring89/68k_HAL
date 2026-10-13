@@ -26,7 +26,6 @@ make clean
 
 - 不依賴硬體的模組（`kernel/lib`、`kernel/shell/parser.c`、`emu/m68k`）放在 `tests/host/test_<模組>.c`，使用 `tests/host/test.h` 的巨集。新增可在 host 編譯的模組時，要加入 Makefile 的 `HOST_LIB_SOURCES`。
 - 需要硬體或中斷的測試放在 `kernel/test/selftest.c`，用 `SELFTEST_RUN` 註冊。
-- host 測試在 64-bit 環境執行：把指標轉成 `uint32_t` 的程式碼（例如 heap）目前無法在 host 測試。
 
 ## 目錄結構
 
@@ -112,5 +111,5 @@ Claude 依照上方工作規則直接實作。
 
 ## 已知問題（尚未修正）
 
-- heap 沒有對齊，沒有上限，也沒有參考 Multiboot 記憶體表。
+- heap 使用固定大小的區域，尚未依據 Multiboot 記憶體表（待 PMM）。
 - `emu/m68k` 的 MOVE 和 ADDI 是寫死的（固定立即值存入 D0），沒有 CCR 旗標。

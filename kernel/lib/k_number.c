@@ -87,12 +87,26 @@ void k_utoa_hex(unsigned int value, char *buffer)
     k_reverse(buffer, i);
 }
 
-void k_utoa_ptr(uint32_t value, char *buffer)
+void k_utoa_ptr(uintptr_t value, char *buffer)
 {
+    const char digits[] = "0123456789ABCDEF";
+
+    int i = 0;
+
     buffer[0]='0';
     buffer[1]='x';
+    buffer += 2;
 
-    k_utoa_hex(value, buffer+2);
+    /* Not k_utoa_hex: unsigned int would truncate 64-bit host pointers. */
+    do
+    {
+        buffer[i++] = digits[value % 16];
+        value /= 16;
+    } while (value > 0);
+
+    buffer[i] = '\0';
+
+    k_reverse(buffer, i);
 }
 
 void k_atoi(const char *str, int *value)

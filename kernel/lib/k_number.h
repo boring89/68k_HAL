@@ -12,7 +12,7 @@ void k_utoa(unsigned int value, char *buffer);
 void k_itoa(int value, char *buffer);
 
 void k_utoa_hex(unsigned int value, char *buffer);
-void k_utoa_ptr(uint32_t value, char *buffer);
+void k_utoa_ptr(uintptr_t value, char *buffer);
 
 void k_atoi(const char *str, int *value);
 

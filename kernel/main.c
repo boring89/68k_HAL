@@ -32,6 +32,13 @@
 
 #include <stdint.h>
 
+/*
+ * Fixed-size heap region placed right after the kernel image.
+ * Temporary: it assumes this range is usable RAM. The region will
+ * come from the PMM (based on the Multiboot memory map) later.
+ */
+#define KERNEL_HEAP_SIZE (1024 * 1024)
+
 void kernel_main(
     uint32_t magic,
     uint32_t mbi_address)
@@ -63,7 +70,7 @@ void kernel_main(
         mbi_address);
 
     memory_init();
-    heap_init();
+    heap_init((uintptr_t)memory_get_kernel_end(), KERNEL_HEAP_SIZE);
     kernel_printf("Kernel end: %x\n", memory_get_kernel_end());
 
     kernel_log(LOG_INFO, "Kernel Booting...");
