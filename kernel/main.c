@@ -30,6 +30,8 @@
 
 #include "kernel/panic/panic.h"
 
+#include "hal/cpu.h"
+
 #ifdef KERNEL_SELFTEST
 #include "kernel/test/selftest.h"
 #endif
@@ -47,8 +49,7 @@ void kernel_main(
     {
         kernel_log(LOG_ERROR, "Invalid Multiboot magic");
 
-        while (1)
-            asm volatile("hlt");
+        hal_cpu_halt();
     }
 
     multiboot_init(mbi_address);
@@ -106,7 +107,7 @@ void kernel_main(
 
     pit_init(100);
 
-    asm volatile("sti");
+    hal_cpu_enable_interrupts();
 
 #ifdef KERNEL_SELFTEST
     selftest_run();
@@ -152,7 +153,7 @@ void kernel_main(
             }
         }
 
-        asm volatile("hlt");
+        hal_cpu_idle();
     }
 }
 

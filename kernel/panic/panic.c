@@ -7,6 +7,8 @@
 
 #include "kernel/printf/printf.h"
 
+#include "hal/cpu.h"
+
 #ifdef KERNEL_SELFTEST
 #include "kernel/test/selftest.h"
 #endif
@@ -15,7 +17,7 @@
 
 void panic(const char *fmt, ...)
 {
-    asm volatile("cli");
+    hal_cpu_disable_interrupts();
 
     va_list args;
     va_start(args, fmt);
@@ -31,6 +33,5 @@ void panic(const char *fmt, ...)
     selftest_abort();
 #endif
 
-    while (1)
-        asm volatile("hlt");
+    hal_cpu_halt();
 }

@@ -16,6 +16,8 @@
 #include "kernel/timer/pit.h"
 #include "kernel/interrupt/exception.h"
 
+#include "hal/cpu.h"
+
 #include "arch/x86/cpu/cpu.h"
 #include "arch/x86/io/io.h"
 
@@ -96,9 +98,46 @@ static void test_pit_ticks(void)
 {
     uint32_t start = pit_get_ticks();
 
-    /* Each hlt wakes on the next interrupt; PIT runs at 100 Hz. */
+    /* Each idle wakes on the next interrupt; PIT runs at 100 Hz. */
     for (int i = 0; i < 1000 && pit_get_ticks() == start; i++)
-        asm volatile("hlt");
+        hal_cpu_idle();
+
+    SELFTEST_ASSERT(pit_get_ticks() != start);
+}
+
+/* EFLAGS.IF, bit 9 (Intel SDM Vol.1 3.4.3, Figure 3-8). */
+#define EFLAGS_IF 0x00000200u
+
+static uint32_t read_eflags(void)
+{
+    uint32_t value;
+
+    asm volatile(
+        "pushf\n\t"
+        "pop %0"
+        : "=r"(value)
+        :
+        : "memory");
+
+    return value;
+}
+
+static void test_hal_cpu_interrupts(void)
+{
+    hal_cpu_disable_interrupts();
+    SELFTEST_ASSERT((read_eflags() & EFLAGS_IF) == 0);
+
+    /* selftest_run() is entered with interrupts on: restore that. */
+    hal_cpu_enable_interrupts();
+    SELFTEST_ASSERT((read_eflags() & EFLAGS_IF) != 0);
+}
+
+/* No keyboard input during the run, so the wake-up is the PIT tick. */
+static void test_hal_cpu_idle(void)
+{
+    uint32_t start = pit_get_ticks();
+
+    hal_cpu_idle();
 
     SELFTEST_ASSERT(pit_get_ticks() != start);
 }
@@ -551,10 +590,7 @@ static void __attribute__((noreturn)) selftest_exit(uint8_t code)
     outb(QEMU_EXIT_PORT, code);
 
     /* Not running under QEMU with isa-debug-exit: stop here. */
-    asm volatile("cli");
-
-    while (1)
-        asm volatile("hlt");
+    hal_cpu_halt();
 }
 
 void selftest_abort(void)
@@ -573,6 +609,8 @@ void selftest_run(void)
     SELFTEST_RUN(test_pit_ticks);
     SELFTEST_RUN(test_divide_error_exception);
     SELFTEST_RUN(test_cpu_read_cr0);
+    SELFTEST_RUN(test_hal_cpu_interrupts);
+    SELFTEST_RUN(test_hal_cpu_idle);
     SELFTEST_RUN(test_paging_enabled);
     SELFTEST_RUN(test_paging_recursive_entry);
     SELFTEST_RUN(test_paging_identity_map);
