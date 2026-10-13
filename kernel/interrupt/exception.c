@@ -5,13 +5,14 @@
 
 #include "exception.h"
 
+#include "page_fault.h"
 #include "../printf/printf.h"
 #include "../panic/panic.h"
+#include "../../arch/x86/cpu/cpu.h"
 
 #include <stdint.h>
 
 #define EXCEPTION_COUNT 32
-#define EXCEPTION_PAGE_FAULT 14
 
 /* Vector names from Intel SDM Vol.3 Ch.6, Table 6-1. */
 static const char *const exception_names[EXCEPTION_COUNT] =
@@ -81,9 +82,10 @@ void exception_handler(struct interrupt_frame *frame)
     if (frame->int_no == EXCEPTION_PAGE_FAULT)
     {
         /* CR2 holds the faulting linear address (Intel SDM Vol.3 6.15). */
-        uint32_t cr2;
-        asm volatile("mov %%cr2, %0" : "=r"(cr2));
-        kernel_printf("cr2=%x\n", cr2);
+        char reason[PAGE_FAULT_DESCRIBE_MAX];
+
+        page_fault_describe(frame->err_code, reason, sizeof(reason));
+        kernel_printf("cr2=%x (%s)\n", cpu_read_cr2(), reason);
     }
 
     panic("unhandled CPU exception %u", frame->int_no);

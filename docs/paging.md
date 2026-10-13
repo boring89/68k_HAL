@@ -219,7 +219,14 @@ error code（Intel SDM Vol. 3A §4.7, Figure 4-12）：
 
 例：`*(uint32_t *)0 = 1` → CR2 = `0`、error code = `0x2`（不存在、寫入、kernel）。分頁開啟前同一行會靜默寫壞 BIOS 中斷向量表。
 
-目前 `kernel/interrupt/exception.c` 印出 CR2 與原始 error code 後 `panic`。
+`kernel/interrupt/exception.c` 印出暫存器、CR2 與解讀後的 error code，然後 `panic`。解讀由 `kernel/interrupt/page_fault.c` 的 `page_fault_describe` 負責（host 測試：`tests/host/test_page_fault.c`），位元常數 `EXCEPTION_PF_*` 定義在 `exception.h`：
+
+```
+CPU exception 14: Page Fault (#PF)
+err_code=2 eip=10110F cs=8 eflags=10006
+...
+cr2=0 (not present, write, kernel)
+```
 
 ## 6. 設計決策
 
@@ -311,4 +318,4 @@ page fault 測試用 `.byte` 寫死 2 bytes 的 `mov` 指令，hook 記錄 CR2 �
 - **heap 自動擴充**：用 `pmm_alloc_frame` + `paging_map` 把散落的 frame 接在 heap 結尾之後，不再需要實體連續（`docs/pmm.md` 第 8 節）。
 - **higher half kernel**：如果之後需要每個程式獨立的低位址空間。
 - **多個位址空間**：每個程式一個 directory，共用 kernel 的 PDE；需要修改非目前位址空間的機制（暫時對應視窗）。
-- **page fault handler 逐位解讀 error code**；`exception.c` 讀 CR2 改用 `cpu_read_cr2()`，`EXCEPTION_PAGE_FAULT` 移到 `exception.h` 共用。
+- ~~page fault handler 逐位解讀 error code；`exception.c` 改用 `cpu_read_cr2()`；`EXCEPTION_PAGE_FAULT` 移到 `exception.h`~~：已完成。

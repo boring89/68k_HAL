@@ -315,13 +315,6 @@ static void test_paging_map_rejects(void)
     pmm_free_frame(frame);
 }
 
-/* Vector 14, Page Fault (Intel SDM Vol.3 Ch.6, Table 6-1). */
-#define EXCEPTION_PAGE_FAULT 14
-
-/* Page fault error code bits (Intel SDM Vol.3A 4.7, Figure 4-12). */
-#define PF_ERR_PRESENT 0x1 /* 0: page not present, 1: protection violation */
-#define PF_ERR_WRITE   0x2 /* 0: read, 1: write */
-
 /* "mov ecx, [eax]" (8B 08) and "mov [eax], ecx" (89 08) are both 2 bytes. */
 #define MOV_EAX_LENGTH 2
 
@@ -431,7 +424,7 @@ static void test_paging_fault_write_unmapped(void)
 
     SELFTEST_ASSERT(page_fault_count == 1);
     SELFTEST_ASSERT(page_fault_cr2 == 0x80000000);
-    SELFTEST_ASSERT(page_fault_code == PF_ERR_WRITE);
+    SELFTEST_ASSERT(page_fault_code == EXCEPTION_PF_WRITE);
 }
 
 static void test_paging_fault_null_pointer(void)
@@ -443,7 +436,7 @@ static void test_paging_fault_null_pointer(void)
 
     SELFTEST_ASSERT(page_fault_count == 1);
     SELFTEST_ASSERT(page_fault_cr2 == 0);
-    SELFTEST_ASSERT(page_fault_code == PF_ERR_WRITE);
+    SELFTEST_ASSERT(page_fault_code == EXCEPTION_PF_WRITE);
 }
 
 static void test_paging_fault_read_only(void)

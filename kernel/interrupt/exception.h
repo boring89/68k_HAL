@@ -8,6 +8,16 @@
 
 #include "interrupt_frame.h"
 
+/* Vector 14 (Intel SDM Vol.3A 6.15, Table 6-1). */
+#define EXCEPTION_PAGE_FAULT 14
+
+/* Page fault error code bits (Intel SDM Vol.3A 4.7, Figure 4-12). */
+#define EXCEPTION_PF_PRESENT  0x01 /* 0: page not present, 1: protection violation */
+#define EXCEPTION_PF_WRITE    0x02 /* 0: read, 1: write */
+#define EXCEPTION_PF_USER     0x04 /* 0: ring 0, 1: ring 3 */
+#define EXCEPTION_PF_RESERVED 0x08 /* reserved bit set in a paging entry */
+#define EXCEPTION_PF_FETCH    0x10 /* instruction fetch (needs NX or SMEP) */
+
 /* Called by isr_common_stub (isr.asm) for CPU exceptions 0-31. */
 void exception_handler(struct interrupt_frame *frame);
 
