@@ -40,7 +40,7 @@ tools/         開發工具
 ```
 
 - 資料流：IRQ → keyboard → `input_event` ring buffer → 主迴圈 → terminal → shell
-- Makefile 會自動搜尋 `boot hal kernel arch emu` 下的 `.c` 與 `.asm`，新增檔案不需修改 Makefile。
+- Makefile 會自動搜尋 `boot hal kernel arch` 下的 `.c` 與 `.asm`，新增檔案不需修改 Makefile。`emu/` 不編進 kernel，只透過 `HOST_LIB_SOURCES` 在 host 測試中編譯。
 - 程式碼在 freestanding 環境執行：沒有 libc，只能使用 `<stdint.h>`、`<stdbool.h>`、`<stdarg.h>`、`<stddef.h>`。字串與記憶體函式使用 `kernel/lib/`（`k_strcmp`、`k_memcpy` 等）。
 
 ## 程式風格
