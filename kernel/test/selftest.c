@@ -14,6 +14,7 @@
 #include "../timer/pit.h"
 #include "../interrupt/exception.h"
 
+#include "../../arch/x86/cpu/cpu.h"
 #include "../../arch/x86/io/io.h"
 
 #include <stdint.h>
@@ -100,6 +101,33 @@ static void test_pit_ticks(void)
     SELFTEST_ASSERT(pit_get_ticks() != start);
 }
 
+static void test_cpu_read_cr0(void)
+{
+    /* The bootloader enters the kernel in protected mode. */
+    SELFTEST_ASSERT(cpu_read_cr0() & CPU_CR0_PE);
+}
+
+static void test_cpu_cr3_round_trip(void)
+{
+    /* Safe only while paging is off: the CPU ignores CR3 when PG = 0. */
+    SELFTEST_ASSERT(!(cpu_read_cr0() & CPU_CR0_PG));
+
+    uint32_t saved = cpu_read_cr3();
+
+    cpu_write_cr3(0x0012F000);
+    SELFTEST_ASSERT(cpu_read_cr3() == 0x0012F000);
+
+    cpu_write_cr3(saved);
+    SELFTEST_ASSERT(cpu_read_cr3() == saved);
+}
+
+static void test_cpu_invlpg(void)
+{
+    /* Only checks that it executes; its effect is tested with paging. */
+    cpu_invlpg(0xB8000);
+    SELFTEST_ASSERT(1);
+}
+
 /* Vector 0, Divide Error (Intel SDM Vol.3 Ch.6, Table 6-1). */
 #define EXCEPTION_DIVIDE_ERROR 0
 
@@ -173,6 +201,9 @@ void selftest_run(void)
     SELFTEST_RUN(test_heap_region_reserved_in_pmm);
     SELFTEST_RUN(test_pit_ticks);
     SELFTEST_RUN(test_divide_error_exception);
+    SELFTEST_RUN(test_cpu_read_cr0);
+    SELFTEST_RUN(test_cpu_cr3_round_trip);
+    SELFTEST_RUN(test_cpu_invlpg);
 
     if (selftest_failures == 0)
     {
