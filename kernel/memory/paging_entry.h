@@ -41,6 +41,16 @@
  */
 typedef uint32_t paging_entry_t;
 
+/*
+ * Recursive mapping: the last PDE points to the page directory itself,
+ * so once paging is on, page table N is visible at
+ * PAGING_TABLES_VIRT + N * 4096 and the directory at
+ * PAGING_DIRECTORY_VIRT (OSDev Wiki "Paging", Recursive mapping).
+ */
+#define PAGING_RECURSIVE_INDEX 1023
+#define PAGING_TABLES_VIRT     0xFFC00000u /* PAGING_RECURSIVE_INDEX << 22 */
+#define PAGING_DIRECTORY_VIRT  0xFFFFF000u /* page table 1023 = directory */
+
 /* Index into the page directory: bits 31:22. */
 uint32_t paging_dir_index(uintptr_t virt);
 
@@ -59,5 +69,11 @@ uintptr_t paging_entry_get_phys(paging_entry_t entry);
 
 /* Nonzero if the P bit is set. */
 int paging_entry_is_present(paging_entry_t entry);
+
+/*
+ * Virtual address of page table dir_index through the recursive mapping
+ * (only meaningful while paging is on). dir_index is taken modulo 1024.
+ */
+uintptr_t paging_table_virt(uint32_t dir_index);
 
 #endif

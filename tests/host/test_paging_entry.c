@@ -94,6 +94,46 @@ static void test_entry_round_trip(void)
     TEST_ASSERT(paging_entry_is_present(entry));
 }
 
+static void test_table_virt(void)
+{
+    TEST_ASSERT_EQ_INT(0xFFC00000, paging_table_virt(0));
+    TEST_ASSERT_EQ_INT(0xFFC01000, paging_table_virt(1));
+    TEST_ASSERT_EQ_INT(0xFFFFE000, paging_table_virt(1022));
+}
+
+static void test_table_virt_recursive_is_directory(void)
+{
+    /* Table 1023 loops through the directory twice: it is the directory. */
+    TEST_ASSERT_EQ_INT(PAGING_DIRECTORY_VIRT,
+                       paging_table_virt(PAGING_RECURSIVE_INDEX));
+}
+
+static void test_table_virt_in_recursive_region(void)
+{
+    /* Every table address must translate through directory[1023]. */
+    TEST_ASSERT_EQ_INT(PAGING_RECURSIVE_INDEX,
+                       paging_dir_index(paging_table_virt(0)));
+    TEST_ASSERT_EQ_INT(PAGING_RECURSIVE_INDEX,
+                       paging_dir_index(paging_table_virt(1023)));
+    /* ...and its table index selects directory[N], i.e. page table N. */
+    TEST_ASSERT_EQ_INT(0, paging_table_index(paging_table_virt(0)));
+    TEST_ASSERT_EQ_INT(768, paging_table_index(paging_table_virt(768)));
+}
+
+static void test_table_virt_vga_pte(void)
+{
+    /* PTE for 0xB8000: table 0, entry 184 -> 0xFFC00000 + 184 * 4. */
+    uintptr_t table = paging_table_virt(paging_dir_index(0xB8000));
+
+    TEST_ASSERT_EQ_INT(0xFFC002E0,
+                       table + paging_table_index(0xB8000) * sizeof(paging_entry_t));
+}
+
+static void test_table_virt_wraps_index(void)
+{
+    TEST_ASSERT_EQ_INT(paging_table_virt(0), paging_table_virt(1024));
+}
+
 int main(void)
 {
     TEST_RUN(test_index_vga_buffer);
@@ -106,6 +146,11 @@ int main(void)
     TEST_RUN(test_entry_get_phys);
     TEST_RUN(test_entry_is_present);
     TEST_RUN(test_entry_round_trip);
+    TEST_RUN(test_table_virt);
+    TEST_RUN(test_table_virt_recursive_is_directory);
+    TEST_RUN(test_table_virt_in_recursive_region);
+    TEST_RUN(test_table_virt_vga_pte);
+    TEST_RUN(test_table_virt_wraps_index);
 
     return TEST_REPORT("paging_entry");
 }

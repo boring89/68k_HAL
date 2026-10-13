@@ -38,3 +38,10 @@ int paging_entry_is_present(paging_entry_t entry)
 {
     return (entry & PAGING_PRESENT) != 0;
 }
+
+uintptr_t paging_table_virt(uint32_t dir_index)
+{
+    /* Each page table occupies one 4 KiB page of the top 4 MiB. */
+    return PAGING_TABLES_VIRT
+        + ((uintptr_t)(dir_index & PAGING_INDEX_MASK) << PAGING_TABLE_SHIFT);
+}
