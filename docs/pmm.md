@@ -2,7 +2,7 @@
 
 `kernel/memory/pmm.c`、`kernel/memory/pmm.h`
 
-PMM 負責記住每一塊實體記憶體（frame）有沒有人用，並把空的分配出去。它在記憶體管理的最底層：heap 和之後的分頁都向它要記憶體，它自己不依賴任何其他配置器。
+PMM 負責記住每一塊實體記憶體（frame）有沒有人用，並把空的分配出去。它在記憶體管理的最底層：heap 和分頁都向它要記憶體，它自己不依賴任何其他配置器。
 
 ## 1. 基本概念
 
@@ -48,7 +48,7 @@ frame 編號 = 位址 / 4096 = 位址 >> 12
         └──────┬──────┘
                │
         ┌──────▼──────┐
-        │   分頁       │  虛擬 page → 實體 frame（尚未實作）
+        │   分頁       │  虛擬 page → 實體 frame（見 docs/paging.md）
         └──────┬──────┘
                │
         ┌──────▼──────┐
@@ -250,5 +250,5 @@ Base              Length            Type
 ## 8. 之後的工作
 
 - ~~heap 改向 PMM 要記憶體~~：已完成。`kernel_main` 在 `pmm_init` 之後用 `pmm_alloc_frames(KERNEL_HEAP_SIZE / PMM_FRAME_SIZE)` 取得 1 MiB 連續區域交給 `heap_init`，失敗時 `panic`；過渡期的 `pmm_reserve_range` 已移除。
-- heap 自動擴充：用完 1 MiB 時再向 PMM 要 frame。沒有分頁時新的 frame 不一定接在舊區域後面，所以要等分頁，或讓 heap 支援多段區域。
-- 分頁（`kernel/memory/paging`）：page table 的 frame 由 `pmm_alloc_frame` 提供，且必須由呼叫端清 0。
+- heap 自動擴充：用完 1 MiB 時再向 PMM 要 frame。新的 frame 不一定接在舊區域後面；分頁已完成，可以用 `pmm_alloc_frame` + `paging_map` 把它們接在 heap 結尾的虛擬位址之後（`docs/paging.md` 第 11 節）。
+- ~~分頁（`kernel/memory/paging`）~~：已完成，見 `docs/paging.md`。page table 的 frame 由 `pmm_alloc_frame` 提供，由分頁模組清 0；開機時的 directory 與第一張 page table 是 heap 之後的頭兩個 frame（QEMU 上為 `0x32A000`、`0x32B000`）。
