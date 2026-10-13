@@ -9,6 +9,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* Size of the heap region kernel_main allocates from the PMM. */
+#define KERNEL_HEAP_SIZE (1024 * 1024)
+
 typedef struct
 {
     uintptr_t header;

@@ -113,5 +113,5 @@ Claude 依照上方工作規則直接實作。
 
 ## 已知問題（尚未修正）
 
-- heap 尚未向 PMM 要記憶體：仍使用 kernel 後面固定的 1 MiB，由 `kernel/main.c` 的 `pmm_reserve_range` 暫時保留（見 `docs/pmm.md` 第 8 節）。
+- heap 大小固定為 1 MiB（開機時由 `pmm_alloc_frames` 提供），用完不會自動擴充（見 `docs/pmm.md` 第 8 節）。
 - `emu/m68k` 的 MOVE 和 ADDI 是寫死的（固定立即值存入 D0），沒有 CCR 旗標。

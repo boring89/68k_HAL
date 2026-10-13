@@ -50,6 +50,10 @@ int pmm_free_frames(
     uintptr_t address,
     size_t count);
 
+/* 1 if the frame containing address is used (or outside the bitmap's
+ * range, so never allocatable), 0 if free. */
+int pmm_is_frame_used(uintptr_t address);
+
 /* Whole frames inside available (type 1) memory map regions. */
 size_t pmm_get_total_frames(void);
 

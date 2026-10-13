@@ -123,9 +123,9 @@ Base              Length            Type
            │ BIOS ROM                │   type 2
 0x00100000 ├─────────────────────────┤ ┐
            │ kernel（含 128 KiB bitmap）│ │
-0x00229600 ├─ _kernel_end ───────────┤ │
-           │ heap（固定 1 MiB，過渡期）│ │ type 1
-0x00329600 ├─────────────────────────┤ │
+0x00229D40 ├─ _kernel_end ───────────┤ │
+0x0022A000 │ heap（1 MiB，PMM 分配）   │ │ type 1
+0x0032A000 ├─────────────────────────┤ │
            │ PMM 可分配的空間         │ │
 0x07FE0000 ├─────────────────────────┤ ┘ ← pmm_limit（frame 0x7FE0）
            │ 保留                     │   type 2
@@ -139,7 +139,7 @@ Base              Length            Type
 開機時印出 `PMM: 31926 / 32639 frames free`：
 
 - total 32639 = 低區 159 個完整 frame（`0x9FC00 / 4096`）+ 主區 32480
-- free 31926 = 32480 − kernel 298（frame `0x100`～`0x229`）− heap 256（frame `0x22A`～`0x329`；`0x229` 與 kernel 共用）
+- free 31926 = 32480 − kernel 298（frame `0x100`～`0x229`）− heap 256（frame `0x22A`～`0x329`，`pmm_alloc_frames(256)` 找到的第一段連續空位）
 
 經過 GRUB（`make run`）時 Multiboot 資訊的位置不同，但處理規則一樣。
 
@@ -235,18 +235,20 @@ Base              Length            Type
 | `pmm_alloc_frames(count)` | 連續 count 個，失敗或 `count = 0` 回傳 `0` |
 | `pmm_free_frame(address)` | 沒對齊、超出範圍、double free 回傳 `-1` |
 | `pmm_free_frames(address, count)` | 同上，全有或全無 |
+| `pmm_is_frame_used(address)` | 包含 address 的 frame 已用（或超出範圍）回傳 `1`，空的回傳 `0` |
 | `pmm_get_total_frames()` | 表上 type 1 的完整 frame 數 |
 | `pmm_get_free_frames()` | 目前空的 frame 數 |
 
 ## 7. 測試
 
 - `tests/host/test_multiboot.c`：結構 offset、bit 6、走訪、較長的列、截斷與太短的列。
-- `tests/host/test_pmm.c`：初始化計數、取整、重疊、4 GiB 截斷、分配順序、字邊界、空洞、用盡、釋放與 hint、double free、錯誤位址、連續分配與碎片化、溢位。
+- `tests/host/test_pmm.c`：初始化計數、取整、重疊、4 GiB 截斷、查詢、分配順序、字邊界、空洞、用盡、釋放與 hint、double free、錯誤位址、連續分配與碎片化、溢位。
+- `kernel/test/selftest.c`（`test_heap_region_reserved_in_pmm`）：開機後 heap 區域的每個 frame 在 PMM 中都是已用。
 
 `multiboot_info_t` 存的是 32-bit 位址，所以 host 測試用 `mmap(MAP_32BIT)` 把假的 Multiboot 資料放在 4 GiB 以下。PMM 只讀寫自己的 bitmap，不碰假的實體位址。
 
 ## 8. 之後的工作
 
-- heap 改向 PMM 要記憶體，並移除 `kernel/main.c` 中過渡期的 `pmm_reserve_range`。
-- 完成後更新 CLAUDE.md「已知問題」中 heap 那一條。
+- ~~heap 改向 PMM 要記憶體~~：已完成。`kernel_main` 在 `pmm_init` 之後用 `pmm_alloc_frames(KERNEL_HEAP_SIZE / PMM_FRAME_SIZE)` 取得 1 MiB 連續區域交給 `heap_init`，失敗時 `panic`；過渡期的 `pmm_reserve_range` 已移除。
+- heap 自動擴充：用完 1 MiB 時再向 PMM 要 frame。沒有分頁時新的 frame 不一定接在舊區域後面，所以要等分頁，或讓 heap 支援多段區域。
 - 分頁（`kernel/memory/paging`）：page table 的 frame 由 `pmm_alloc_frame` 提供，且必須由呼叫端清 0。

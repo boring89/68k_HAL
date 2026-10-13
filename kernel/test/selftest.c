@@ -10,6 +10,7 @@
 
 #include "../printf/printf.h"
 #include "../memory/heap.h"
+#include "../memory/pmm.h"
 #include "../timer/pit.h"
 #include "../interrupt/exception.h"
 
@@ -67,6 +68,25 @@ static void test_heap_alloc_free(void)
 
     kfree(b);
     kfree(c);
+}
+
+static void test_heap_region_reserved_in_pmm(void)
+{
+    uintptr_t start = heap_get_start();
+
+    /* The region comes from pmm_alloc_frames, so it is frame aligned. */
+    SELFTEST_ASSERT(start % PMM_FRAME_SIZE == 0);
+
+    int unmarked = 0;
+
+    for (uintptr_t offset = 0; offset < KERNEL_HEAP_SIZE;
+         offset += PMM_FRAME_SIZE)
+    {
+        if (!pmm_is_frame_used(start + offset))
+            unmarked++;
+    }
+
+    SELFTEST_ASSERT(unmarked == 0);
 }
 
 static void test_pit_ticks(void)
@@ -150,6 +170,7 @@ void selftest_run(void)
     selftest_failures = 0;
 
     SELFTEST_RUN(test_heap_alloc_free);
+    SELFTEST_RUN(test_heap_region_reserved_in_pmm);
     SELFTEST_RUN(test_pit_ticks);
     SELFTEST_RUN(test_divide_error_exception);
 

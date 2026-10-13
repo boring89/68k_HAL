@@ -296,6 +296,16 @@ int pmm_free_frames(
     return 0;
 }
 
+int pmm_is_frame_used(uintptr_t address)
+{
+    uint32_t frame = (uint32_t)(address / PMM_FRAME_SIZE);
+
+    if (frame >= pmm_limit)
+        return 1;
+
+    return pmm_test(frame);
+}
+
 size_t pmm_get_total_frames(void)
 {
     return pmm_total_count;

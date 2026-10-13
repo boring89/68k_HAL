@@ -151,6 +151,25 @@ static void test_reserve_range(void)
     TEST_ASSERT_EQ_INT(254, pmm_get_free_frames());
 }
 
+static void test_is_frame_used(void)
+{
+    reset();
+    add_region(MiB, MiB, MULTIBOOT_MEMORY_AVAILABLE);
+    boot();
+
+    TEST_ASSERT_EQ_INT(1, pmm_is_frame_used(0));          /* low 1 MiB */
+    TEST_ASSERT_EQ_INT(0, pmm_is_frame_used(0x150000));
+    TEST_ASSERT_EQ_INT(0, pmm_is_frame_used(0x150FFF));   /* same frame */
+    TEST_ASSERT_EQ_INT(1, pmm_is_frame_used(2 * MiB));    /* at limit */
+    TEST_ASSERT_EQ_INT(1, pmm_is_frame_used(0xFFFFF000)); /* past RAM */
+
+    uintptr_t a = pmm_alloc_frame();
+    TEST_ASSERT_EQ_INT(1, pmm_is_frame_used(a));
+
+    TEST_ASSERT_EQ_INT(0, pmm_free_frame(a));
+    TEST_ASSERT_EQ_INT(0, pmm_is_frame_used(a));
+}
+
 static void test_init_resets_state(void)
 {
     reset();
@@ -515,6 +534,7 @@ int main(void)
     TEST_RUN(test_reserved_overlap_wins);
     TEST_RUN(test_above_4gib_clamped);
     TEST_RUN(test_reserve_range);
+    TEST_RUN(test_is_frame_used);
     TEST_RUN(test_init_resets_state);
     TEST_RUN(test_alloc_lowest_first);
     TEST_RUN(test_alloc_skips_kernel_and_reserved);

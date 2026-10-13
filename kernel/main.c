@@ -27,18 +27,13 @@
 #include "memory/pmm.h"
 #include "memory/multiboot.h"
 
+#include "panic/panic.h"
+
 #ifdef KERNEL_SELFTEST
 #include "test/selftest.h"
 #endif
 
 #include <stdint.h>
-
-/*
- * Fixed-size heap region placed right after the kernel image.
- * Temporary: it assumes this range is usable RAM. The region will
- * come from the PMM (based on the Multiboot memory map) later.
- */
-#define KERNEL_HEAP_SIZE (1024 * 1024)
 
 void kernel_main(
     uint32_t magic,
@@ -73,10 +68,15 @@ void kernel_main(
     memory_init();
     pmm_init(memory_get_kernel_start(), memory_get_kernel_end());
 
-    /* Until the heap allocates from the PMM, keep its fixed region out
-     * of the PMM's hands. */
-    heap_init((uintptr_t)memory_get_kernel_end(), KERNEL_HEAP_SIZE);
-    pmm_reserve_range(memory_get_kernel_end(), KERNEL_HEAP_SIZE);
+    /* Physically contiguous: there is no paging yet. */
+    uintptr_t heap_region =
+        pmm_alloc_frames(KERNEL_HEAP_SIZE / PMM_FRAME_SIZE);
+
+    if (heap_region == 0)
+        panic("PMM: cannot allocate %u bytes for the heap",
+              (unsigned int)KERNEL_HEAP_SIZE);
+
+    heap_init(heap_region, KERNEL_HEAP_SIZE);
 
     kernel_printf(
         "PMM: %u / %u frames free\n",
