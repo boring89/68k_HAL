@@ -9,7 +9,7 @@ CFLAGS=-m32 -ffreestanding -I. -Wall -Wextra -Werror -fno-pie -fno-asynchronous-
 HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -fsanitize=address,undefined -MMD -MP
 
-.PHONY: all clean iso run test test-host test-qemu
+.PHONY: all clean iso run test test-boundary test-host test-qemu
 
 # Only search directories that exist (e.g. hal/ is picked up once created).
 # emu/ is not part of the kernel; it is only built for host tests.
@@ -114,4 +114,16 @@ test-qemu:
 		exit 1; \
 	fi
 
-test: test-host test-qemu
+# The source tree must pass every rule. Each tests/boundary/<rule>/ is a
+# fixture tree that breaks one rule, so the check must fail on it.
+test-boundary:
+	@tools/check_boundary.sh
+	@for fixture in tests/boundary/*/; do \
+		if tools/check_boundary.sh $$fixture >/dev/null; then \
+			echo "boundary check: FAIL ($$fixture not reported)"; \
+			exit 1; \
+		fi; \
+	done
+	@echo "boundary check: PASS"
+
+test: test-boundary test-host test-qemu
