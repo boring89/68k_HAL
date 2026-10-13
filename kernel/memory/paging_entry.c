@@ -9,6 +9,10 @@
 #define PAGING_TABLE_SHIFT 12
 #define PAGING_INDEX_MASK (PAGING_ENTRIES_PER_TABLE - 1)
 
+/* Frames are 4 KiB aligned, so bits 11:0 of an entry are free for flags. */
+#define PAGING_ADDRESS_MASK 0xFFFFF000u
+#define PAGING_FLAGS_MASK 0x00000FFFu
+
 uint32_t paging_dir_index(uintptr_t virt)
 {
     /* The mask keeps the result in range when uintptr_t is 64-bit (host). */
@@ -18,4 +22,19 @@ uint32_t paging_dir_index(uintptr_t virt)
 uint32_t paging_table_index(uintptr_t virt)
 {
     return (uint32_t)(virt >> PAGING_TABLE_SHIFT) & PAGING_INDEX_MASK;
+}
+
+paging_entry_t paging_entry_make(uintptr_t phys, uint32_t flags)
+{
+    return ((uint32_t)phys & PAGING_ADDRESS_MASK) | (flags & PAGING_FLAGS_MASK);
+}
+
+uintptr_t paging_entry_get_phys(paging_entry_t entry)
+{
+    return entry & PAGING_ADDRESS_MASK;
+}
+
+int paging_entry_is_present(paging_entry_t entry)
+{
+    return (entry & PAGING_PRESENT) != 0;
 }

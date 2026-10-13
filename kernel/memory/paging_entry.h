@@ -23,10 +23,41 @@
 /* Both the page directory and a page table hold 1024 4-byte entries. */
 #define PAGING_ENTRIES_PER_TABLE 1024
 
+/*
+ * Entry flags, shared by PDEs and PTEs
+ * (Intel SDM Vol.3A 4.3, Table 4-5 and Table 4-6).
+ */
+#define PAGING_PRESENT  0x001 /* bit 0: P */
+#define PAGING_WRITABLE 0x002 /* bit 1: R/W */
+#define PAGING_USER     0x004 /* bit 2: U/S */
+
+/*
+ * One PDE or PTE:
+ *
+ *   31                     12 11          0
+ *   +------------------------+-------------+
+ *   | frame address >> 12    |    flags    |
+ *   +------------------------+-------------+
+ */
+typedef uint32_t paging_entry_t;
+
 /* Index into the page directory: bits 31:22. */
 uint32_t paging_dir_index(uintptr_t virt);
 
 /* Index into a page table: bits 21:12. */
 uint32_t paging_table_index(uintptr_t virt);
+
+/*
+ * Build an entry. phys is truncated to a 4 KiB boundary and flags to
+ * bits 11:0, so neither can corrupt the other; callers must check
+ * alignment themselves if a misaligned phys is an error.
+ */
+paging_entry_t paging_entry_make(uintptr_t phys, uint32_t flags);
+
+/* Frame address stored in an entry (bits 31:12). */
+uintptr_t paging_entry_get_phys(paging_entry_t entry);
+
+/* Nonzero if the P bit is set. */
+int paging_entry_is_present(paging_entry_t entry);
 
 #endif

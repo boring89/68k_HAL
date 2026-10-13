@@ -48,6 +48,52 @@ static void test_index_extremes(void)
     TEST_ASSERT_EQ_INT(1023, paging_table_index(0xFFFFFFFF));
 }
 
+static void test_entry_make(void)
+{
+    /* VGA page, present and writable: 0xB8000 | 0x003. */
+    TEST_ASSERT_EQ_INT(0x000B8003,
+                       paging_entry_make(0xB8000, PAGING_PRESENT | PAGING_WRITABLE));
+    TEST_ASSERT_EQ_INT(0x00100001, paging_entry_make(0x00100000, PAGING_PRESENT));
+    TEST_ASSERT_EQ_INT(0xFFFFF007,
+                       paging_entry_make(0xFFFFF000,
+                                         PAGING_PRESENT | PAGING_WRITABLE | PAGING_USER));
+    TEST_ASSERT_EQ_INT(0, paging_entry_make(0, 0));
+}
+
+static void test_entry_make_masks_fields(void)
+{
+    /* Low bits of a misaligned phys must not turn into flags. */
+    TEST_ASSERT_EQ_INT(0x000B8001, paging_entry_make(0xB8FFE, PAGING_PRESENT));
+    /* Flag bits above 11 must not change the frame address. */
+    TEST_ASSERT_EQ_INT(0x000B8003, paging_entry_make(0xB8000, 0xFFFFF003));
+}
+
+static void test_entry_get_phys(void)
+{
+    TEST_ASSERT_EQ_INT(0xB8000, paging_entry_get_phys(0x000B8003));
+    /* Accessed (bit 5) and dirty (bit 6) set by the CPU are ignored. */
+    TEST_ASSERT_EQ_INT(0xB8000, paging_entry_get_phys(0x000B8063));
+    TEST_ASSERT_EQ_INT(0xFFFFF000, paging_entry_get_phys(0xFFFFFFFF));
+    TEST_ASSERT_EQ_INT(0, paging_entry_get_phys(0x00000FFF));
+}
+
+static void test_entry_is_present(void)
+{
+    TEST_ASSERT(paging_entry_is_present(0x000B8003));
+    TEST_ASSERT(paging_entry_is_present(0x00000001));
+    /* Writable but not present: the address bits do not matter. */
+    TEST_ASSERT(!paging_entry_is_present(0x000B8002));
+    TEST_ASSERT(!paging_entry_is_present(0));
+}
+
+static void test_entry_round_trip(void)
+{
+    paging_entry_t entry = paging_entry_make(0x0032A000, PAGING_PRESENT | PAGING_WRITABLE);
+
+    TEST_ASSERT_EQ_INT(0x0032A000, paging_entry_get_phys(entry));
+    TEST_ASSERT(paging_entry_is_present(entry));
+}
+
 int main(void)
 {
     TEST_RUN(test_index_vga_buffer);
@@ -55,6 +101,11 @@ int main(void)
     TEST_RUN(test_index_ignores_offset);
     TEST_RUN(test_index_4mib_boundary);
     TEST_RUN(test_index_extremes);
+    TEST_RUN(test_entry_make);
+    TEST_RUN(test_entry_make_masks_fields);
+    TEST_RUN(test_entry_get_phys);
+    TEST_RUN(test_entry_is_present);
+    TEST_RUN(test_entry_round_trip);
 
     return TEST_REPORT("paging_entry");
 }
