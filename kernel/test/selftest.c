@@ -10,6 +10,7 @@
 
 #include "../printf/printf.h"
 #include "../memory/heap.h"
+#include "../memory/paging.h"
 #include "../memory/pmm.h"
 #include "../timer/pit.h"
 #include "../interrupt/exception.h"
@@ -107,18 +108,47 @@ static void test_cpu_read_cr0(void)
     SELFTEST_ASSERT(cpu_read_cr0() & CPU_CR0_PE);
 }
 
-static void test_cpu_cr3_round_trip(void)
+static void test_paging_enabled(void)
 {
-    /* Safe only while paging is off: the CPU ignores CR3 when PG = 0. */
-    SELFTEST_ASSERT(!(cpu_read_cr0() & CPU_CR0_PG));
+    SELFTEST_ASSERT(cpu_read_cr0() & CPU_CR0_PG);
+}
 
-    uint32_t saved = cpu_read_cr3();
+static void test_paging_recursive_entry(void)
+{
+    /* Seen through itself, directory[1023] must point back to CR3. */
+    paging_entry_t *directory = (paging_entry_t *)PAGING_DIRECTORY_VIRT;
+    paging_entry_t self = directory[PAGING_RECURSIVE_INDEX];
 
-    cpu_write_cr3(0x0012F000);
-    SELFTEST_ASSERT(cpu_read_cr3() == 0x0012F000);
+    SELFTEST_ASSERT(paging_entry_is_present(self));
+    SELFTEST_ASSERT(paging_entry_get_phys(self) == cpu_read_cr3());
 
-    cpu_write_cr3(saved);
-    SELFTEST_ASSERT(cpu_read_cr3() == saved);
+    /* The table frames came from the PMM and must stay allocated. */
+    SELFTEST_ASSERT(pmm_is_frame_used(cpu_read_cr3()));
+    SELFTEST_ASSERT(pmm_is_frame_used(paging_entry_get_phys(directory[0])));
+}
+
+static void test_paging_identity_map(void)
+{
+    paging_entry_t *directory = (paging_entry_t *)PAGING_DIRECTORY_VIRT;
+    paging_entry_t *table = (paging_entry_t *)paging_table_virt(0);
+    uintptr_t local = (uintptr_t)&selftest_failures;
+
+    SELFTEST_ASSERT(paging_entry_is_present(directory[0]));
+    SELFTEST_ASSERT(!paging_entry_is_present(directory[1]));
+
+    /* Page 0 is left unmapped to catch null pointers. */
+    SELFTEST_ASSERT(!paging_entry_is_present(table[0]));
+
+    SELFTEST_ASSERT(paging_entry_is_present(table[paging_table_index(0xB8000)]));
+    SELFTEST_ASSERT(paging_entry_get_phys(table[paging_table_index(0xB8000)])
+                    == 0xB8000);
+
+    /* A kernel variable: its page maps to the same physical page. */
+    SELFTEST_ASSERT(paging_entry_get_phys(table[paging_table_index(local)])
+                    == (local & ~(uintptr_t)(PMM_FRAME_SIZE - 1)));
+
+    SELFTEST_ASSERT(paging_entry_get_phys(table[PAGING_ENTRIES_PER_TABLE - 1])
+                    == PAGING_IDENTITY_END - PMM_FRAME_SIZE);
 }
 
 static void test_cpu_invlpg(void)
@@ -202,7 +232,9 @@ void selftest_run(void)
     SELFTEST_RUN(test_pit_ticks);
     SELFTEST_RUN(test_divide_error_exception);
     SELFTEST_RUN(test_cpu_read_cr0);
-    SELFTEST_RUN(test_cpu_cr3_round_trip);
+    SELFTEST_RUN(test_paging_enabled);
+    SELFTEST_RUN(test_paging_recursive_entry);
+    SELFTEST_RUN(test_paging_identity_map);
     SELFTEST_RUN(test_cpu_invlpg);
 
     if (selftest_failures == 0)

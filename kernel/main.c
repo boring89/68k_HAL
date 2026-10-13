@@ -26,6 +26,7 @@
 #include "memory/heap.h"
 #include "memory/pmm.h"
 #include "memory/multiboot.h"
+#include "memory/paging.h"
 
 #include "panic/panic.h"
 
@@ -87,6 +88,10 @@ void kernel_main(
     kernel_log(LOG_INFO, "Kernel Booting...");
     idt_init();
     kernel_log(LOG_INFO, "IDT loaded");
+
+    /* After idt_init so a page fault is reported instead of triple faulting. */
+    paging_init();
+    kernel_log(LOG_INFO, "Paging enabled");
 
     pic_init();
     kernel_log(LOG_INFO, "PIC initialized");
