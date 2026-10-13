@@ -236,6 +236,83 @@ static void test_alloc_without_memory(void)
     TEST_ASSERT_EQ_INT(0, pmm_alloc_frame());
 }
 
+static void test_free_then_reuse(void)
+{
+    reset();
+    add_region(MiB, MiB, MULTIBOOT_MEMORY_AVAILABLE);
+    boot();
+
+    uintptr_t a = pmm_alloc_frame();
+    uintptr_t b = pmm_alloc_frame();
+    uintptr_t c = pmm_alloc_frame();
+
+    TEST_ASSERT_EQ_INT(253, pmm_get_free_frames());
+
+    /* Freeing below the hint pulls it back: b is handed out again. */
+    TEST_ASSERT_EQ_INT(0, pmm_free_frame(b));
+    TEST_ASSERT_EQ_INT(254, pmm_get_free_frames());
+    TEST_ASSERT_EQ_INT(b, pmm_alloc_frame());
+
+    /* Lowest free frame wins when several are freed. */
+    TEST_ASSERT_EQ_INT(0, pmm_free_frame(c));
+    TEST_ASSERT_EQ_INT(0, pmm_free_frame(a));
+    TEST_ASSERT_EQ_INT(a, pmm_alloc_frame());
+    TEST_ASSERT_EQ_INT(c, pmm_alloc_frame());
+}
+
+static void test_free_after_exhaustion(void)
+{
+    reset();
+    add_region(MiB, 0x3000, MULTIBOOT_MEMORY_AVAILABLE);
+    boot();
+
+    pmm_alloc_frame();
+    uintptr_t mid = pmm_alloc_frame();
+    pmm_alloc_frame();
+    TEST_ASSERT_EQ_INT(0, pmm_alloc_frame());
+
+    TEST_ASSERT_EQ_INT(0, pmm_free_frame(mid));
+    TEST_ASSERT_EQ_INT(mid, pmm_alloc_frame());
+}
+
+static void test_free_rejects_double_free(void)
+{
+    reset();
+    add_region(MiB, MiB, MULTIBOOT_MEMORY_AVAILABLE);
+    boot();
+
+    uintptr_t a = pmm_alloc_frame();
+
+    TEST_ASSERT_EQ_INT(0, pmm_free_frame(a));
+    TEST_ASSERT_EQ_INT(-1, pmm_free_frame(a));
+    TEST_ASSERT_EQ_INT(256, pmm_get_free_frames());
+
+    /* Never allocated, still free. */
+    TEST_ASSERT_EQ_INT(-1, pmm_free_frame(0x180000));
+    TEST_ASSERT_EQ_INT(256, pmm_get_free_frames());
+}
+
+static void test_free_rejects_bad_addresses(void)
+{
+    reset();
+    add_region(0x0, 0x9FC00, MULTIBOOT_MEMORY_AVAILABLE);
+    add_region(MiB, MiB, MULTIBOOT_MEMORY_AVAILABLE);
+    boot();
+
+    uintptr_t a = pmm_alloc_frame();
+    size_t free_before = pmm_get_free_frames();
+
+    TEST_ASSERT_EQ_INT(-1, pmm_free_frame(0));
+    TEST_ASSERT_EQ_INT(-1, pmm_free_frame(0xB8000));      /* VGA */
+    TEST_ASSERT_EQ_INT(-1, pmm_free_frame(0x1000));       /* low RAM */
+    TEST_ASSERT_EQ_INT(-1, pmm_free_frame(a + 0x10));     /* unaligned */
+    TEST_ASSERT_EQ_INT(-1, pmm_free_frame(2 * MiB));      /* at limit */
+    TEST_ASSERT_EQ_INT(-1, pmm_free_frame(0xFFFFF000));   /* past RAM */
+
+    TEST_ASSERT_EQ_INT(free_before, pmm_get_free_frames());
+    TEST_ASSERT_EQ_INT(0, pmm_free_frame(a));
+}
+
 int main(void)
 {
     area = mmap(NULL, AREA_SIZE, PROT_READ | PROT_WRITE,
@@ -261,6 +338,10 @@ int main(void)
     TEST_RUN(test_alloc_across_hole);
     TEST_RUN(test_alloc_until_exhausted);
     TEST_RUN(test_alloc_without_memory);
+    TEST_RUN(test_free_then_reuse);
+    TEST_RUN(test_free_after_exhaustion);
+    TEST_RUN(test_free_rejects_double_free);
+    TEST_RUN(test_free_rejects_bad_addresses);
 
     munmap(area, AREA_SIZE);
 
