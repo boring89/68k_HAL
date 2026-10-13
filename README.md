@@ -50,6 +50,37 @@ The goal is to preserve the simplicity, usability, and software philosophy of th
 
 ---
 
+## Building
+
+### Requirements
+
+| Tool | Debian/Ubuntu package | Used for |
+|---|---|---|
+| `make`, `gcc` | `build-essential` | Build the kernel (`-m32`) and host unit tests |
+| `nasm` | `nasm` | Assemble boot and interrupt stubs |
+| `ld` | `binutils` | Link the kernel ELF |
+| `grub-mkrescue` | `grub2-common` | Create the bootable ISO |
+| GRUB BIOS modules | `grub-pc-bin` | Make the ISO bootable on BIOS (QEMU's default firmware) |
+| `xorriso` | `xorriso` | Used by `grub-mkrescue` to write the ISO |
+| `mformat` | `mtools` | Used by `grub-mkrescue` to build the EFI image |
+| `qemu-system-i386` | `qemu-system-x86` | Run the kernel and the in-kernel self tests |
+
+```bash
+sudo apt install build-essential nasm binutils grub2-common grub-pc-bin xorriso mtools qemu-system-x86
+```
+
+### Commands
+
+```bash
+make            # build/kernel.elf
+make iso        # build/68k_HAL.iso
+make run        # boot the ISO in QEMU, serial output on stdio
+make test       # host unit tests + QEMU self tests
+make clean
+```
+
+---
+
 ## Contributing
 
 Contributions are welcome!

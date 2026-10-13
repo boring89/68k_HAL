@@ -19,7 +19,7 @@ make test-qemu  # 以 -DKERNEL_SELFTEST 編譯 kernel，在 QEMU 中執行 kerne
 make clean
 ```
 
-- 需要：`make`、`gcc`（支援 `-m32`）、`nasm`、`ld`、`grub-mkrescue`、`qemu-system-i386`
+- 需要的套件：見 README.md 的 Building 一節。
 - 尚未建立：cross compiler（i686-elf-gcc）。
 
 ### 測試
