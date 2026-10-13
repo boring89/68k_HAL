@@ -51,3 +51,26 @@ void paging_init(void)
     cpu_write_cr3((uint32_t)directory_phys);
     cpu_write_cr0(cpu_read_cr0() | CPU_CR0_PG);
 }
+
+int paging_get_phys(uintptr_t virt, uintptr_t *phys)
+{
+    if (phys == 0)
+        return -1;
+
+    /* Walk the tables through the recursive mapping, like the MMU does. */
+    paging_entry_t *directory = (paging_entry_t *)PAGING_DIRECTORY_VIRT;
+    uint32_t dir_index = paging_dir_index(virt);
+
+    if (!paging_entry_is_present(directory[dir_index]))
+        return -1;
+
+    /* Only valid after the PDE check: otherwise this address faults. */
+    paging_entry_t *table = (paging_entry_t *)paging_table_virt(dir_index);
+    paging_entry_t entry = table[paging_table_index(virt)];
+
+    if (!paging_entry_is_present(entry))
+        return -1;
+
+    *phys = paging_entry_get_phys(entry) | (virt & (PMM_FRAME_SIZE - 1));
+    return 0;
+}

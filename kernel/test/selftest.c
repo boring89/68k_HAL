@@ -151,6 +151,59 @@ static void test_paging_identity_map(void)
                     == PAGING_IDENTITY_END - PMM_FRAME_SIZE);
 }
 
+static void test_paging_get_phys_identity(void)
+{
+    uintptr_t phys = 0;
+    uintptr_t local = (uintptr_t)&selftest_failures;
+
+    SELFTEST_ASSERT(paging_get_phys(0xB8000, &phys) == 0);
+    SELFTEST_ASSERT(phys == 0xB8000);
+
+    /* The offset within the page is carried over. */
+    SELFTEST_ASSERT(paging_get_phys(0xB8123, &phys) == 0);
+    SELFTEST_ASSERT(phys == 0xB8123);
+
+    SELFTEST_ASSERT(paging_get_phys(local, &phys) == 0);
+    SELFTEST_ASSERT(phys == local);
+
+    /* First and last bytes of the identity mapped region. */
+    SELFTEST_ASSERT(paging_get_phys(0x1000, &phys) == 0);
+    SELFTEST_ASSERT(phys == 0x1000);
+    SELFTEST_ASSERT(paging_get_phys(PAGING_IDENTITY_END - 1, &phys) == 0);
+    SELFTEST_ASSERT(phys == PAGING_IDENTITY_END - 1);
+}
+
+static void test_paging_get_phys_unmapped(void)
+{
+    uintptr_t phys = 0x12345678;
+
+    /* Page 0: PDE present, PTE not present. */
+    SELFTEST_ASSERT(paging_get_phys(0, &phys) == -1);
+    SELFTEST_ASSERT(paging_get_phys(0xFFF, &phys) == -1);
+
+    /* Above 4 MiB: PDE not present, so the table is never touched. */
+    SELFTEST_ASSERT(paging_get_phys(PAGING_IDENTITY_END, &phys) == -1);
+    SELFTEST_ASSERT(paging_get_phys(0xC0000000, &phys) == -1);
+
+    /* *phys is left unchanged on failure. */
+    SELFTEST_ASSERT(phys == 0x12345678);
+
+    SELFTEST_ASSERT(paging_get_phys(0xB8000, 0) == -1);
+}
+
+static void test_paging_get_phys_recursive(void)
+{
+    uintptr_t phys = 0;
+    paging_entry_t *directory = (paging_entry_t *)PAGING_DIRECTORY_VIRT;
+
+    /* The recursive region translates to the table frames themselves. */
+    SELFTEST_ASSERT(paging_get_phys(PAGING_DIRECTORY_VIRT, &phys) == 0);
+    SELFTEST_ASSERT(phys == cpu_read_cr3());
+
+    SELFTEST_ASSERT(paging_get_phys(paging_table_virt(0), &phys) == 0);
+    SELFTEST_ASSERT(phys == paging_entry_get_phys(directory[0]));
+}
+
 static void test_cpu_invlpg(void)
 {
     /* Only checks that it executes; its effect is tested with paging. */
@@ -235,6 +288,9 @@ void selftest_run(void)
     SELFTEST_RUN(test_paging_enabled);
     SELFTEST_RUN(test_paging_recursive_entry);
     SELFTEST_RUN(test_paging_identity_map);
+    SELFTEST_RUN(test_paging_get_phys_identity);
+    SELFTEST_RUN(test_paging_get_phys_unmapped);
+    SELFTEST_RUN(test_paging_get_phys_recursive);
     SELFTEST_RUN(test_cpu_invlpg);
 
     if (selftest_failures == 0)

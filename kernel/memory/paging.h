@@ -28,4 +28,11 @@
  */
 void paging_init(void);
 
+/*
+ * Translate virt the way the MMU would. On success stores the physical
+ * address (including the offset within the page) in *phys and returns
+ * 0; returns -1 and leaves *phys unchanged if virt is not mapped.
+ */
+int paging_get_phys(uintptr_t virt, uintptr_t *phys);
+
 #endif
