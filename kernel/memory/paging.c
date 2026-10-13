@@ -52,6 +52,43 @@ void paging_init(void)
     cpu_write_cr0(cpu_read_cr0() | CPU_CR0_PG);
 }
 
+/*
+ * Return page table dir_index through the recursive mapping, creating
+ * it from a zeroed PMM frame if needed. Returns 0 for the recursive
+ * slot (the top 4 MiB is reserved) or if the PMM is out of frames.
+ * Requires paging to be on.
+ */
+static paging_entry_t *paging_get_or_create_table(uint32_t dir_index)
+{
+    if (dir_index == PAGING_RECURSIVE_INDEX)
+        return 0;
+
+    paging_entry_t *directory = (paging_entry_t *)PAGING_DIRECTORY_VIRT;
+    paging_entry_t *table = (paging_entry_t *)paging_table_virt(dir_index);
+
+    if (paging_entry_is_present(directory[dir_index]))
+        return table;
+
+    uintptr_t table_phys = pmm_alloc_frame();
+
+    if (table_phys == 0)
+        return 0;
+
+    /*
+     * The new frame is only reachable through its recursive address
+     * once the PDE exists, so link it first and zero it afterwards.
+     * Restrictions go in the PTEs; the PDE stays permissive.
+     */
+    directory[dir_index] = paging_entry_make(table_phys, PAGING_KERNEL_FLAGS);
+
+    /* Also drops any paging-structure cache entry (Intel SDM Vol.3A 4.10.4.1). */
+    cpu_invlpg((uintptr_t)table);
+
+    k_memset(table, 0, PMM_FRAME_SIZE);
+
+    return table;
+}
+
 int paging_get_phys(uintptr_t virt, uintptr_t *phys)
 {
     if (phys == 0)
@@ -72,5 +109,32 @@ int paging_get_phys(uintptr_t virt, uintptr_t *phys)
         return -1;
 
     *phys = paging_entry_get_phys(entry) | (virt & (PMM_FRAME_SIZE - 1));
+    return 0;
+}
+
+int paging_map(uintptr_t virt, uintptr_t phys, uint32_t flags)
+{
+    if (virt % PMM_FRAME_SIZE != 0 || phys % PMM_FRAME_SIZE != 0)
+        return -1;
+
+    paging_entry_t *table = paging_get_or_create_table(paging_dir_index(virt));
+
+    if (table == 0)
+        return -1;
+
+    paging_entry_t *entry = &table[paging_table_index(virt)];
+
+    /* Remapping silently is usually a bug: callers must unmap first. */
+    if (paging_entry_is_present(*entry))
+        return -1;
+
+    *entry = paging_entry_make(phys, flags | PAGING_PRESENT);
+
+    /*
+     * Not-present entries are not cached, but a new table may have
+     * briefly held stale data before it was zeroed (see above).
+     */
+    cpu_invlpg(virt);
+
     return 0;
 }

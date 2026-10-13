@@ -204,6 +204,116 @@ static void test_paging_get_phys_recursive(void)
     SELFTEST_ASSERT(phys == paging_entry_get_phys(directory[0]));
 }
 
+/* Virtual pages for the paging_map tests: unused, outside the identity map. */
+#define TEST_MAP_VIRT_A 0x40000000u /* directory entry 256 */
+#define TEST_MAP_VIRT_B 0x40001000u /* same page table as A */
+#define TEST_MAP_VIRT_NEW_TABLE PAGING_IDENTITY_END /* directory entry 1 */
+
+static void test_paging_map_alias(void)
+{
+    uintptr_t frame = pmm_alloc_frame();
+    uintptr_t phys = 0;
+
+    SELFTEST_ASSERT(frame != 0);
+    SELFTEST_ASSERT(paging_map(TEST_MAP_VIRT_A, frame, PAGING_WRITABLE) == 0);
+    SELFTEST_ASSERT(paging_map(TEST_MAP_VIRT_B, frame, PAGING_WRITABLE) == 0);
+
+    SELFTEST_ASSERT(paging_get_phys(TEST_MAP_VIRT_A + 4, &phys) == 0);
+    SELFTEST_ASSERT(phys == frame + 4);
+
+    /* Two virtual addresses, one frame: a write through A shows up at B. */
+    volatile uint32_t *a = (volatile uint32_t *)TEST_MAP_VIRT_A;
+    volatile uint32_t *b = (volatile uint32_t *)TEST_MAP_VIRT_B;
+
+    *a = 0xCAFEBABE;
+    SELFTEST_ASSERT(*b == 0xCAFEBABE);
+
+    /* The frame is below 4 MiB, so it is also visible at its identity address. */
+    if (frame < PAGING_IDENTITY_END)
+        SELFTEST_ASSERT(*(volatile uint32_t *)frame == 0xCAFEBABE);
+}
+
+static void test_paging_map_creates_table(void)
+{
+    paging_entry_t *directory = (paging_entry_t *)PAGING_DIRECTORY_VIRT;
+    uint32_t dir_index = paging_dir_index(TEST_MAP_VIRT_NEW_TABLE);
+
+    SELFTEST_ASSERT(!paging_entry_is_present(directory[dir_index]));
+
+    uintptr_t frame = pmm_alloc_frame();
+    size_t free_before = pmm_get_free_frames();
+
+    SELFTEST_ASSERT(paging_map(TEST_MAP_VIRT_NEW_TABLE, frame, PAGING_WRITABLE) == 0);
+
+    /* Exactly one frame was taken for the new page table. */
+    SELFTEST_ASSERT(pmm_get_free_frames() == free_before - 1);
+    SELFTEST_ASSERT(paging_entry_is_present(directory[dir_index]));
+    SELFTEST_ASSERT(pmm_is_frame_used(paging_entry_get_phys(directory[dir_index])));
+
+    /* The new table was zeroed: only the entry just written is present. */
+    paging_entry_t *table = (paging_entry_t *)paging_table_virt(dir_index);
+    int present = 0;
+
+    for (uint32_t i = 0; i < PAGING_ENTRIES_PER_TABLE; i++)
+    {
+        if (paging_entry_is_present(table[i]))
+            present++;
+    }
+
+    SELFTEST_ASSERT(present == 1);
+
+    /* A second page in the same 4 MiB reuses the table. */
+    free_before = pmm_get_free_frames();
+    SELFTEST_ASSERT(paging_map(TEST_MAP_VIRT_NEW_TABLE + PMM_FRAME_SIZE,
+                               frame, PAGING_WRITABLE) == 0);
+    SELFTEST_ASSERT(pmm_get_free_frames() == free_before);
+
+    volatile uint32_t *p = (volatile uint32_t *)TEST_MAP_VIRT_NEW_TABLE;
+
+    *p = 0x12345678;
+    SELFTEST_ASSERT(*p == 0x12345678);
+}
+
+static void test_paging_map_flags(void)
+{
+    uintptr_t frame = pmm_alloc_frame();
+    uintptr_t virt = TEST_MAP_VIRT_A + 2 * PMM_FRAME_SIZE;
+
+    /* No flags at all: PRESENT is added, the page is read-only. */
+    SELFTEST_ASSERT(paging_map(virt, frame, 0) == 0);
+
+    paging_entry_t *table = (paging_entry_t *)paging_table_virt(paging_dir_index(virt));
+    paging_entry_t entry = table[paging_table_index(virt)];
+
+    SELFTEST_ASSERT(entry == (frame | PAGING_PRESENT));
+}
+
+static void test_paging_map_rejects(void)
+{
+    uintptr_t frame = pmm_alloc_frame();
+    uintptr_t phys = 0;
+    uintptr_t virt = TEST_MAP_VIRT_A + 3 * PMM_FRAME_SIZE;
+
+    /* Misaligned addresses. */
+    SELFTEST_ASSERT(paging_map(virt + 1, frame, PAGING_WRITABLE) == -1);
+    SELFTEST_ASSERT(paging_map(virt, frame + 1, PAGING_WRITABLE) == -1);
+    SELFTEST_ASSERT(paging_get_phys(virt, &phys) == -1);
+
+    /* Already mapped: the existing mapping is left alone. */
+    SELFTEST_ASSERT(paging_map(TEST_MAP_VIRT_A, frame, PAGING_WRITABLE) == -1);
+    SELFTEST_ASSERT(paging_get_phys(TEST_MAP_VIRT_A, &phys) == 0);
+    SELFTEST_ASSERT(phys != frame);
+    SELFTEST_ASSERT(paging_map(0xB8000, frame, PAGING_WRITABLE) == -1);
+
+    /* The recursive region must never be mapped over. */
+    SELFTEST_ASSERT(paging_map(PAGING_TABLES_VIRT, frame, PAGING_WRITABLE) == -1);
+    SELFTEST_ASSERT(paging_map(PAGING_DIRECTORY_VIRT, frame, PAGING_WRITABLE) == -1);
+    SELFTEST_ASSERT(paging_get_phys(PAGING_DIRECTORY_VIRT, &phys) == 0);
+    SELFTEST_ASSERT(phys == cpu_read_cr3());
+
+    pmm_free_frame(frame);
+}
+
 static void test_cpu_invlpg(void)
 {
     /* Only checks that it executes; its effect is tested with paging. */
@@ -291,6 +401,10 @@ void selftest_run(void)
     SELFTEST_RUN(test_paging_get_phys_identity);
     SELFTEST_RUN(test_paging_get_phys_unmapped);
     SELFTEST_RUN(test_paging_get_phys_recursive);
+    SELFTEST_RUN(test_paging_map_alias);
+    SELFTEST_RUN(test_paging_map_creates_table);
+    SELFTEST_RUN(test_paging_map_flags);
+    SELFTEST_RUN(test_paging_map_rejects);
     SELFTEST_RUN(test_cpu_invlpg);
 
     if (selftest_failures == 0)

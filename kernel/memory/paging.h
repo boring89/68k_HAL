@@ -35,4 +35,13 @@ void paging_init(void);
  */
 int paging_get_phys(uintptr_t virt, uintptr_t *phys);
 
+/*
+ * Map the 4 KiB page at virt to the frame at phys. PAGING_PRESENT is
+ * always added to flags. Creates the page table if needed.
+ * Returns -1 if virt or phys is not 4 KiB aligned, virt is already
+ * mapped or lies in the reserved top 4 MiB, or the PMM is out of
+ * frames for a new page table. Does not take ownership of phys.
+ */
+int paging_map(uintptr_t virt, uintptr_t phys, uint32_t flags);
+
 #endif
