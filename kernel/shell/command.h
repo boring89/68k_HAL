@@ -18,9 +18,7 @@ typedef enum
     COMMAND_MEMORY,
     COMMAND_HEAP,
     COMMAND_ALLOC,
-    COMMAND_FREE,
-
-    COMMAND_COUNT
+    COMMAND_FREE
 
 } shell_command_id_t;
 

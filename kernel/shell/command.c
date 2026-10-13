@@ -4,6 +4,9 @@
  */
 
 #include "command.h"
+
+#include <stddef.h>
+#include <stdint.h>
 #include "../terminal/terminal.h"
 
 #include "../timer/pit.h"
@@ -12,8 +15,6 @@
 #include "../lib/k_number.h"
 
 #include "../memory/memory.h"
-
-static void *last_alloc = 0;
 
 static void cmd_help(
     int argc,
@@ -85,13 +86,50 @@ static shell_command_entry_t commands[] =
          "Free up last allocation",
          cmd_free}};
 
+#define COMMAND_TABLE_SIZE \
+    ((int)(sizeof(commands) / sizeof(commands[0])))
+
+/* Parse a positive decimal size; rejects signs, junk and overflow. */
+static int parse_size(
+    const char *str,
+    size_t *size)
+{
+    size_t value = 0;
+
+    if (*str == '\0')
+        return -1;
+
+    while (*str)
+    {
+        if (*str < '0' || *str > '9')
+            return -1;
+
+        size_t digit = (size_t)(*str - '0');
+
+        if (value > (SIZE_MAX - digit) / 10)
+            return -1;
+
+        value = value * 10 + digit;
+        str++;
+    }
+
+    if (value == 0)
+        return -1;
+
+    *size = value;
+    return 0;
+}
+
 static void cmd_help(
     int argc,
     char **argv)
 {
+    (void)argc;
+    (void)argv;
+
     terminal_write_line("Available command: \n");
 
-    for (int i = 0; i < COMMAND_COUNT; i++)
+    for (int i = 0; i < COMMAND_TABLE_SIZE; i++)
     {
         terminal_write(commands[i].name);
         terminal_write(" - ");
@@ -104,6 +142,9 @@ static void cmd_clear(
     int argc,
     char **argv)
 {
+    (void)argc;
+    (void)argv;
+
     terminal_clear();
 }
 
@@ -122,8 +163,11 @@ static void cmd_echo(
     terminal_newline();
 }
 
-void cmd_ticks(int argc, char **argv)
+static void cmd_ticks(int argc, char **argv)
 {
+    (void)argc;
+    (void)argv;
+
     char buffer[32];
 
     k_itoa(
@@ -137,6 +181,9 @@ static void cmd_info(
     int argc,
     char **argv)
 {
+    (void)argc;
+    (void)argv;
+
     terminal_write_line("68k_HAL Kernel");
     terminal_write_line("Architecture: x86");
     terminal_write_line("Mode: Protected Mode");
@@ -144,10 +191,13 @@ static void cmd_info(
     terminal_newline();
 }
 
-void cmd_memory(
+static void cmd_memory(
     int argc,
     char **argv)
 {
+    (void)argc;
+    (void)argv;
+
     char buffer[32];
 
     terminal_newline();
@@ -198,6 +248,9 @@ static void cmd_heap(
     int argc,
     char **argv)
 {
+    (void)argc;
+    (void)argv;
+
     heap_block_info_t info;
 
     int i = 0;
@@ -268,18 +321,29 @@ static void cmd_alloc(
         return;
     }
 
-    int argv_buffer;
-    k_atoi(argv[1],
-           &argv_buffer);
+    size_t size;
+
+    if (parse_size(argv[1], &size) != 0)
+    {
+        terminal_write_line(
+            "usage: alloc <size>  (size: positive decimal bytes)");
+        return;
+    }
 
     void *ptr =
-        kmalloc(argv_buffer);
+        kmalloc(size);
+
+    if (ptr == 0)
+    {
+        terminal_write_line("Allocation failed");
+        return;
+    }
 
     char size_buffer[32];
     char addr_buffer[32];
 
     k_utoa(
-        argv_buffer,
+        size,
         size_buffer);
 
     k_utoa_ptr(
@@ -324,7 +388,7 @@ void shell_dispatch(shell_command_t *cmd)
     if (cmd->argc == 0)
         return;
 
-    for (int i = 0; i < COMMAND_COUNT; i++)
+    for (int i = 0; i < COMMAND_TABLE_SIZE; i++)
     {
         if (k_strcmp(
                 cmd->argv[0],

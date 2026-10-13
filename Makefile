@@ -4,7 +4,7 @@ ISO_ROOT=$(BUILD)/iso_root
 ASM=nasm
 CC=gcc
 
-CFLAGS=-m32 -ffreestanding -fno-pie -fno-asynchronous-unwind-tables -nostdlib -MMD -MP $(EXTRA_CFLAGS)
+CFLAGS=-m32 -ffreestanding -Wall -Wextra -Werror -fno-pie -fno-asynchronous-unwind-tables -nostdlib -MMD -MP $(EXTRA_CFLAGS)
 
 HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -fsanitize=address,undefined -MMD -MP

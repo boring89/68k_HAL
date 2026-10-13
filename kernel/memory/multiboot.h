@@ -1,3 +1,8 @@
+/*
+ * Copyright (C) 2026 YuanChi Hsieh
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 #ifndef KERNEL_MEMORY_MULTIBOOT_H
 #define KERNEL_MEMORY_MULTIBOOT_H
 

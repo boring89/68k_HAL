@@ -17,10 +17,6 @@
 
 void pic_init(void)
 {
-    // save mask
-    uint8_t master_mask = inb(PIC1_DATA);
-    uint8_t slave_mask = inb(PIC2_DATA);
-
     // ICW1
     outb(PIC1_COMMAND, 0x11);
     outb(PIC2_COMMAND, 0x11);

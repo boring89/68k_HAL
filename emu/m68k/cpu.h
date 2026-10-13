@@ -6,7 +6,7 @@
 #ifndef EMU_M68K_CPU_H
 #define EMU_M68K_CPU_H
 
-#include "stdint.h"
+#include <stdint.h>
 
 typedef struct
 {
