@@ -1,0 +1,89 @@
+# CLAUDE.md
+
+68k_HAL：在 x86（32-bit 保護模式）上執行的實驗性 OS 核心，長期目標是讓 Classic Mac OS 的架構在現代硬體上延續（參見 README.md）。目前為早期開發階段。
+
+## 回應規則
+
+- 使用繁體中文回應；程式碼、註解、commit message 使用英文。
+- 回應保持精簡：說明做了什麼、為什麼，不重複貼出整段程式碼。
+
+## 建置與執行
+
+```bash
+make            # 產生 build/kernel.elf
+make iso        # 產生 build/68k_HAL.iso（需要 grub-mkrescue）
+make run        # 在 QEMU 中開機，serial 輸出到 stdio
+make test       # test-host + test-qemu，修改後必須通過
+make test-host  # host 單元測試（tests/host/，含 ASan/UBSan）
+make test-qemu  # 以 -DKERNEL_SELFTEST 編譯 kernel，在 QEMU 中執行 kernel/test/selftest.c
+make clean
+```
+
+- 需要：`make`、`gcc`（支援 `-m32`）、`nasm`、`ld`、`grub-mkrescue`、`qemu-system-i386`
+- 尚未建立：cross compiler（i686-elf-gcc）。
+
+### 測試
+
+- 不依賴硬體的模組（`kernel/lib`、`kernel/shell/parser.c`、`emu/m68k`）放在 `tests/host/test_<模組>.c`，使用 `tests/host/test.h` 的巨集。新增可在 host 編譯的模組時，要加入 Makefile 的 `HOST_LIB_SOURCES`。
+- 需要硬體或中斷的測試放在 `kernel/test/selftest.c`，用 `SELFTEST_RUN` 註冊。
+- host 測試在 64-bit 環境執行：把指標轉成 `uint32_t` 的程式碼（例如 heap）目前無法在 host 測試。
+- Makefile 沒有追蹤 header 相依性：修改 header 後若結果異常，先 `make clean`。
+
+## 目錄結構
+
+```
+boot/          Multiboot 進入點（boot.asm）、GDT
+arch/x86/      x86 硬體驅動：vga、serial、io（port I/O）
+kernel/        核心：main.c、interrupt、memory、keyboard、input、terminal、shell、console、log、printf、lib
+emu/m68k/      68k CPU 模擬器（cpu、decoder、effective_address、execute、memory）
+tests/host/    host 單元測試
+docs/          設計文件
+tools/         開發工具
+```
+
+- 資料流：IRQ → keyboard → `input_event` ring buffer → 主迴圈 → terminal → shell
+- Makefile 會自動搜尋 `boot hal kernel arch emu` 下的 `.c` 與 `.asm`，新增檔案不需修改 Makefile。
+- 程式碼在 freestanding 環境執行：沒有 libc，只能使用 `<stdint.h>`、`<stdbool.h>`、`<stdarg.h>`、`<stddef.h>`。字串與記憶體函式使用 `kernel/lib/`（`k_strcmp`、`k_memcpy` 等）。
+
+## 程式風格
+
+- 每個新檔案開頭加上授權標頭：
+  ```c
+  /*
+   * Copyright (C) 2026 YuanChi Hsieh
+   * SPDX-License-Identifier: GPL-3.0-or-later
+   */
+  ```
+  ASM 檔使用 `;` 註解的相同內容。
+- 縮排 4 個空格，大括號換行（Allman 風格）。
+- 函式與型別以模組名稱為前綴：`heap_init`、`m68k_cpu_step`、`input_event_t`。
+- Header guard 依路徑命名，例如 `KERNEL_MEMORY_HEAP_H`、`EMU_M68K_CPU_H`。
+- 回傳值慣例：成功 `0`，失敗 `-1`。
+- 模組內部函式宣告為 `static`。
+- 與既有程式碼保持一致；不要只為了風格而修改無關的程式碼。
+
+## Commit 格式
+
+`<模組路徑>: <小寫開頭的簡短描述>`，例如：
+
+```
+kernel/shell: add command argument support
+emu/m68k: add CCR flag handling
+```
+
+## 工作規則
+
+- **不要自行 commit、push 或建立 branch**，由使用者審核 diff 後決定。
+- 一次只做被要求的任務；發現其他問題時列出來，不要順便修改。
+- 涉及多個檔案或架構的變更，先提出計畫，等使用者確認後再實作。
+- 修改後必須執行 `make test` 並通過；新功能要附上測試。
+- 硬體相關的數值（I/O port、descriptor 位元、68k 指令編碼）要註明出處（Intel SDM、OSDev Wiki、M68000 Programmer's Reference Manual），不確定時明說。
+- 中斷處理程式與主迴圈共用的變數必須宣告 `volatile`。
+- 不要加入任何 Apple ROM、System Software 或其他受版權保護的內容。
+
+## 已知問題（尚未修正）
+
+- `boot/boot.asm` 沒有建立 kernel 堆疊。
+- IDT 只設定了 IRQ0、IRQ1；CPU 例外（0–31）沒有處理函式，發生例外時會 triple fault。
+- heap 沒有對齊，沒有上限，也沒有參考 Multiboot 記憶體表。
+- `emu/m68k` 的 MOVE 和 ADDI 是寫死的（固定立即值存入 D0），沒有 CCR 旗標。
