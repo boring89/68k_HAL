@@ -11,7 +11,7 @@
 #include "kernel/log/log.h"
 #include "kernel/printf/printf.h"
 
-#include "kernel/interrupt/idt.h"
+#include "arch/x86/interrupt/idt.h"
 #include "kernel/interrupt/pic.h"
 #include "kernel/interrupt/irq_callback.h"
 

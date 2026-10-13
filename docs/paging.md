@@ -219,7 +219,7 @@ error code（Intel SDM Vol. 3A §4.7, Figure 4-12）：
 
 例：`*(uint32_t *)0 = 1` → CR2 = `0`、error code = `0x2`（不存在、寫入、kernel）。分頁開啟前同一行會靜默寫壞 BIOS 中斷向量表。
 
-`kernel/interrupt/exception.c` 印出暫存器、CR2 與解讀後的 error code，然後 `panic`。解讀由 `kernel/interrupt/page_fault.c` 的 `page_fault_describe` 負責（host 測試：`tests/host/test_page_fault.c`），位元常數 `EXCEPTION_PF_*` 定義在 `exception.h`：
+`arch/x86/interrupt/exception.c` 印出暫存器、CR2 與解讀後的 error code，然後 `panic`。解讀由 `arch/x86/interrupt/page_fault.c` 的 `page_fault_describe` 負責（host 測試：`tests/host/test_page_fault.c`），位元常數 `EXCEPTION_PF_*` 定義在 `exception.h`：
 
 ```
 CPU exception 14: Page Fault (#PF)

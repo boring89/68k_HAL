@@ -5,7 +5,7 @@
 
 #include "idt.h"
 #include "isr.h"
-#include "irq.h"
+#include "irq_stub.h"
 
 struct idt_entry
 {

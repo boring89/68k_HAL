@@ -7,8 +7,8 @@
 
 #include <stdint.h>
 
-#include "kernel/interrupt/exception.h"
-#include "kernel/interrupt/page_fault.h"
+#include "arch/x86/interrupt/exception.h"
+#include "arch/x86/interrupt/page_fault.h"
 
 static char buf[PAGE_FAULT_DESCRIBE_MAX];
 

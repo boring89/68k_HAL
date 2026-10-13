@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#include "irq.h"
+#include "arch/x86/interrupt/irq_stub.h"
+
 #include "pic.h"
 #include "irq_callback.h"
 

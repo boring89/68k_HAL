@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#ifndef KERNEL_INTERRUPT_PAGE_FAULT_H
-#define KERNEL_INTERRUPT_PAGE_FAULT_H
+#ifndef ARCH_X86_INTERRUPT_PAGE_FAULT_H
+#define ARCH_X86_INTERRUPT_PAGE_FAULT_H
 
 #include <stddef.h>
 #include <stdint.h>

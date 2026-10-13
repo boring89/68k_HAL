@@ -63,7 +63,7 @@ all: $(BUILD)/kernel.elf
 
 # Hardware-independent sources that can be built and tested on the host.
 HOST_LIB_SOURCES := \
-	kernel/interrupt/page_fault.c \
+	arch/x86/interrupt/page_fault.c \
 	kernel/lib/k_string.c \
 	kernel/lib/k_number.c \
 	kernel/lib/k_memory.c \
