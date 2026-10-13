@@ -31,7 +31,7 @@ make clean
 
 ```
 boot/          Multiboot 進入點（boot.asm）、GDT
-arch/x86/      x86 硬體驅動：vga、serial、io（port I/O）
+arch/x86/      x86 硬體驅動：vga、serial、io（port I/O）、cpu（控制暫存器、invlpg）
 kernel/        核心：main.c、interrupt、panic、memory、keyboard、input、terminal、shell、console、log、printf、lib
 emu/m68k/      68k CPU 模擬器（cpu、decoder、effective_address、execute、memory）
 tests/host/    host 單元測試
@@ -107,7 +107,7 @@ Claude 依照上方工作規則直接實作。
 
 協作模式的元件：
 - `kernel/memory/pmm`：實體記憶體管理（已完成，見 `docs/pmm.md`）
-- `kernel/memory/paging`：分頁
+- `kernel/memory/paging`：分頁（已完成，見 `docs/paging.md`）
 
 （之後新增的元件加入此清單）
 
