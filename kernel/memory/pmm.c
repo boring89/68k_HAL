@@ -21,6 +21,12 @@ static uint32_t pmm_bitmap[PMM_MAX_FRAMES / 32];
 static size_t pmm_total_count;
 static size_t pmm_free_count;
 
+/* Search start: every frame below pmm_hint is used. */
+static uint32_t pmm_hint;
+
+/* One past the highest available frame; nothing at or above is ever free. */
+static uint32_t pmm_limit;
+
 static int pmm_test(uint32_t frame)
 {
     return (pmm_bitmap[frame / 32] >> (frame % 32)) & 1;
@@ -82,7 +88,13 @@ static void pmm_free_region(
     uint64_t last =
         pmm_clamp(end) / PMM_FRAME_SIZE;
 
+    if (first >= last)
+        return;
+
     pmm_mark_free(first, last);
+
+    if (last > pmm_limit)
+        pmm_limit = (uint32_t)last;
 }
 
 /* Used region: any frame it touches is used, so round outward. */
@@ -104,6 +116,8 @@ void pmm_init(
 {
     k_memset(pmm_bitmap, 0xFF, sizeof(pmm_bitmap));
     pmm_free_count = 0;
+    pmm_hint = 0;
+    pmm_limit = 0;
 
     const multiboot_mmap_entry_t *entry;
 
@@ -152,6 +166,35 @@ int pmm_reserve_range(
         return -1;
 
     pmm_reserve_region(start, (uint64_t)start + size);
+
+    return 0;
+}
+
+uintptr_t pmm_alloc_frame(void)
+{
+    for (uint32_t word = pmm_hint / 32; word * 32 < pmm_limit; word++)
+    {
+        /* 32 used frames: skip the whole word. */
+        if (pmm_bitmap[word] == 0xFFFFFFFF)
+            continue;
+
+        /* Lowest 0 bit = number of trailing zeros of the inverted word
+         * (BSF, Intel SDM Vol. 2A). ~word != 0 here, so ctz is defined. */
+        uint32_t frame =
+            word * 32 + (uint32_t)__builtin_ctz(~pmm_bitmap[word]);
+
+        if (frame >= pmm_limit)
+            break;
+
+        pmm_set(frame);
+        pmm_free_count--;
+        pmm_hint = frame + 1;
+
+        return (uintptr_t)frame * PMM_FRAME_SIZE;
+    }
+
+    /* Nothing free below the limit. */
+    pmm_hint = pmm_limit;
 
     return 0;
 }

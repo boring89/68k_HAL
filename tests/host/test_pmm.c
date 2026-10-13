@@ -163,6 +163,79 @@ static void test_init_resets_state(void)
     TEST_ASSERT_EQ_INT(256, pmm_get_free_frames());
 }
 
+static void test_alloc_lowest_first(void)
+{
+    reset();
+    add_region(MiB, MiB, MULTIBOOT_MEMORY_AVAILABLE);
+    boot();
+
+    TEST_ASSERT_EQ_INT(0x100000, pmm_alloc_frame());
+    TEST_ASSERT_EQ_INT(0x101000, pmm_alloc_frame());
+    TEST_ASSERT_EQ_INT(254, pmm_get_free_frames());
+}
+
+static void test_alloc_skips_kernel_and_reserved(void)
+{
+    reset();
+    add_region(MiB, MiB, MULTIBOOT_MEMORY_AVAILABLE);
+    boot_with(MULTIBOOT_INFO_MEM_MAP, 0x100000, 0x108800);
+    pmm_reserve_range(0x10A000, 0x1000);
+
+    TEST_ASSERT_EQ_INT(0x109000, pmm_alloc_frame());
+    TEST_ASSERT_EQ_INT(0x10B000, pmm_alloc_frame());
+}
+
+static void test_alloc_across_word_boundary(void)
+{
+    reset();
+
+    /* Frames 0x11F (word 8, bit 31) and 0x120 (word 9, bit 0). */
+    add_region(0x11F000, 0x2000, MULTIBOOT_MEMORY_AVAILABLE);
+    boot();
+
+    TEST_ASSERT_EQ_INT(0x11F000, pmm_alloc_frame());
+    TEST_ASSERT_EQ_INT(0x120000, pmm_alloc_frame());
+    TEST_ASSERT_EQ_INT(0, pmm_alloc_frame());
+}
+
+static void test_alloc_across_hole(void)
+{
+    reset();
+    add_region(MiB, 0x1000, MULTIBOOT_MEMORY_AVAILABLE);
+    add_region(2 * MiB, 0x1000, MULTIBOOT_MEMORY_AVAILABLE);
+    boot();
+
+    TEST_ASSERT_EQ_INT(0x100000, pmm_alloc_frame());
+    TEST_ASSERT_EQ_INT(0x200000, pmm_alloc_frame());
+    TEST_ASSERT_EQ_INT(0, pmm_alloc_frame());
+}
+
+static void test_alloc_until_exhausted(void)
+{
+    reset();
+    add_region(MiB, MiB, MULTIBOOT_MEMORY_AVAILABLE);
+    boot();
+
+    for (int i = 0; i < 256; i++)
+    {
+        uintptr_t frame = pmm_alloc_frame();
+
+        TEST_ASSERT_EQ_INT(MiB + (uintptr_t)i * PMM_FRAME_SIZE, frame);
+    }
+
+    TEST_ASSERT_EQ_INT(0, pmm_get_free_frames());
+    TEST_ASSERT_EQ_INT(0, pmm_alloc_frame());
+    TEST_ASSERT_EQ_INT(0, pmm_alloc_frame());
+}
+
+static void test_alloc_without_memory(void)
+{
+    reset();
+    boot_with(0, MiB, MiB);
+
+    TEST_ASSERT_EQ_INT(0, pmm_alloc_frame());
+}
+
 int main(void)
 {
     area = mmap(NULL, AREA_SIZE, PROT_READ | PROT_WRITE,
@@ -182,6 +255,12 @@ int main(void)
     TEST_RUN(test_above_4gib_clamped);
     TEST_RUN(test_reserve_range);
     TEST_RUN(test_init_resets_state);
+    TEST_RUN(test_alloc_lowest_first);
+    TEST_RUN(test_alloc_skips_kernel_and_reserved);
+    TEST_RUN(test_alloc_across_word_boundary);
+    TEST_RUN(test_alloc_across_hole);
+    TEST_RUN(test_alloc_until_exhausted);
+    TEST_RUN(test_alloc_without_memory);
 
     munmap(area, AREA_SIZE);
 
