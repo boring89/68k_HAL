@@ -11,9 +11,9 @@ HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -fsanitize=address,undefined -
 
 .PHONY: all clean iso run test test-boundary test-host test-qemu
 
-# Only search directories that exist (e.g. hal/ is picked up once created).
+# Only search directories that exist (e.g. drivers/ is picked up once created).
 # emu/ is not part of the kernel; it is only built for host tests.
-SRC_DIRS := $(wildcard boot hal kernel arch)
+SRC_DIRS := $(wildcard arch drivers hal kernel platform)
 
 C_SOURCES := $(shell find $(SRC_DIRS) -name "*.c")
 ASM_SOURCES := $(shell find $(SRC_DIRS) -name "*.asm")

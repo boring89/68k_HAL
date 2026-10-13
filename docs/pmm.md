@@ -68,7 +68,7 @@ frame 編號 = 位址 / 4096 = 位址 >> 12
 
 BIOS（INT 15h, E820）回報記憶體配置，GRUB 整理成表，開機時用 `EBX` 把 `multiboot_info_t` 的位址交給 `kernel_main`。
 
-- 必須先在 Multiboot header 的 flags 設 bit 1（`boot/boot.asm`：`0x2`），GRUB 才會提供記憶體資訊。
+- 必須先在 Multiboot header 的 flags 設 bit 1（`platform/pc/boot/boot.asm`：`0x2`），GRUB 才會提供記憶體資訊。
 - `multiboot_info_t.flags` 的 bit 6 為 1 時，`mmap_addr`、`mmap_length` 才有效。
 
 （出處：Multiboot Specification 0.6.96, §3.1.2、§3.3）
