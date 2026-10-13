@@ -59,8 +59,8 @@ void idt_init(void)
     for (int i = 0; i < ISR_EXCEPTION_COUNT; i++)
         idt_set_gate(i, isr_stub_table[i]);
 
-    idt_set_gate(0x20, (uint32_t)irq0);
-    idt_set_gate(0x21, (uint32_t)irq1);
+    for (int i = 0; i < IRQ_STUB_COUNT; i++)
+        idt_set_gate(IRQ_STUB_VECTOR_BASE + i, irq_stub_table[i]);
 
     lidt(&idtr);
 }

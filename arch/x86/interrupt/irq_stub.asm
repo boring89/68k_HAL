@@ -3,10 +3,17 @@
 
 bits 32
 
-global irq0
-global irq1
-
+global irq_stub_table
 extern irq_handler
+
+; Entry stubs for IRQ lines 0-15. Each pushes its line number so every
+; IRQ reaches irq_common_stub with the same stack layout.
+
+%macro IRQ 1
+irq%1:
+    push dword %1
+    jmp irq_common_stub
+%endmacro
 
 section .text
 
@@ -20,16 +27,23 @@ irq_common_stub:
 
     popa
 
+    ; Drop the line number.
     add esp, 4
     iret
 
+%assign i 0
+%rep 16
+IRQ i
+%assign i i + 1
+%endrep
 
-irq0:
-    push 0
-    jmp irq_common_stub
+section .rodata
 
-irq1:
-    push 1
-    jmp irq_common_stub
+irq_stub_table:
+%assign i 0
+%rep 16
+    dd irq %+ i
+%assign i i + 1
+%endrep
 
 section .note.GNU-stack noalloc noexec nowrite progbits

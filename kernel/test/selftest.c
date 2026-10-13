@@ -14,7 +14,9 @@
 #include "kernel/memory/paging.h"
 #include "kernel/memory/pmm.h"
 #include "kernel/timer/pit.h"
+#include "kernel/interrupt/irq_callback.h"
 #include "arch/x86/interrupt/exception.h"
+#include "arch/x86/interrupt/irq_stub.h"
 
 #include "hal/cpu.h"
 
@@ -585,6 +587,63 @@ static void test_divide_error_exception(void)
     SELFTEST_ASSERT(divide_error_code == 0);
 }
 
+/* IDT gate descriptor (Intel SDM Vol.3A 6.11, Figure 6-2). */
+struct idt_gate
+{
+    uint16_t offset_low;
+    uint16_t selector;
+    uint8_t zero;
+    uint8_t type_attr;
+    uint16_t offset_high;
+} __attribute__((packed));
+
+struct idt_register
+{
+    uint16_t limit;
+    uint32_t base;
+} __attribute__((packed));
+
+static void test_idt_irq_gates(void)
+{
+    struct idt_register idtr;
+
+    asm volatile("sidt %0" : "=m"(idtr));
+
+    const struct idt_gate *idt = (const struct idt_gate *)idtr.base;
+
+    for (int i = 0; i < IRQ_STUB_COUNT; i++)
+    {
+        const struct idt_gate *gate = &idt[IRQ_STUB_VECTOR_BASE + i];
+        uint32_t offset = gate->offset_low | ((uint32_t)gate->offset_high << 16);
+
+        SELFTEST_ASSERT(offset == irq_stub_table[i]);
+        SELFTEST_ASSERT(gate->selector == 0x08);
+        /* P=1, DPL=0, 32-bit interrupt gate. */
+        SELFTEST_ASSERT(gate->type_attr == 0x8E);
+    }
+}
+
+static volatile int irq5_count;
+
+static void irq5_test_handler(void)
+{
+    irq5_count++;
+}
+
+/*
+ * IRQ 5 is masked at the PIC, so only this software INT reaches the
+ * stub. The handler stays registered afterwards; the line is unused.
+ */
+static void test_irq_stub_line_number(void)
+{
+    irq5_count = 0;
+    SELFTEST_ASSERT(irq_register(5, irq5_test_handler) == 0);
+
+    asm volatile("int $0x25" : : : "memory");
+
+    SELFTEST_ASSERT(irq5_count == 1);
+}
+
 static void __attribute__((noreturn)) selftest_exit(uint8_t code)
 {
     outb(QEMU_EXIT_PORT, code);
@@ -608,6 +667,8 @@ void selftest_run(void)
     SELFTEST_RUN(test_heap_region_reserved_in_pmm);
     SELFTEST_RUN(test_pit_ticks);
     SELFTEST_RUN(test_divide_error_exception);
+    SELFTEST_RUN(test_idt_irq_gates);
+    SELFTEST_RUN(test_irq_stub_line_number);
     SELFTEST_RUN(test_cpu_read_cr0);
     SELFTEST_RUN(test_hal_cpu_interrupts);
     SELFTEST_RUN(test_hal_cpu_idle);
