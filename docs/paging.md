@@ -79,13 +79,13 @@ frame 一定 4 KiB 對齊，所以位址的低 12 bits 永遠是 0，空出來�
 兩個細節：
 
 1. PDE 和 PTE 的權限**取較嚴格的**，所以 PDE 設寬鬆（P | RW），限制放在 PTE。
-2. CR0.WP（bit 16）= 0 時，ring 0 可以寫入唯讀頁（Intel SDM Vol. 3A §2.5）。目前 WP = 0，所以 R/W 對 kernel 沒有效果。
+2. CR0.WP（bit 16）= 0 時，ring 0 可以寫入唯讀頁（Intel SDM Vol. 3A §2.5）。`paging_init` 開啟分頁時一併設定 WP = 1，所以 R/W = 0 對 kernel 也有效。
 
 ## 2. 開啟分頁
 
 ```
 mov cr3, <directory 的實體位址>
-mov cr0, <CR0 | 0x80000000>       ; CR0.PG = 1，下一條指令開始翻譯
+mov cr0, <CR0 | 0x80010000>       ; CR0.PG = 1（下一條指令開始翻譯）、CR0.WP = 1
 ```
 
 設定 PG 之後的**下一條指令**就要經過翻譯。如果正在執行的程式碼沒有對應：
@@ -107,7 +107,7 @@ mov cr0, <CR0 | 0x80000000>       ; CR0.PG = 1，下一條指令開始翻譯
 ④ table[1..1023] = identity；table[0] 保持 0          第 0 頁不對應
 ⑤ directory[0] → table；directory[1023] → directory   recursive mapping
 ⑥ cpu_write_cr3(directory)
-⑦ cpu_write_cr0(CR0 | PG)
+⑦ cpu_write_cr0(CR0 | PG | WP)
 ⑧ paging_map_multiboot()                             需要 recursive mapping，所以在最後
 ```
 
@@ -241,7 +241,7 @@ cr2=0 (not present, write, kernel)
 | D5 | API | 見第 8 節 | 未對齊回 `-1`；重複 map 回 `-1`；unmap 不歸還 frame；空表不釋放；`get_phys` 用輸出參數（實體位址 0 可能合法）；PMM 用完回 `-1`；map 自動加 PRESENT |
 | D6 | 測試 | host 測純計算，QEMU 測硬體行為 | map/unmap 的邏輯很短，會出錯的是和硬體的互動 |
 | D7 | 開機位置 | `idt_init` 之後；額外對應 Multiboot 資料 | 設定錯誤時 page fault 有訊息，而不是 triple fault；shell `mmap` 在開機後仍讀記憶體表 |
-| D8 | 保護 | 暫不開 CR0.WP；U/S = 0；不設 PCD | WP 需要把 `.text` 對齊到頁，是另一個任務；沒有 user 程式；VGA 區域已由 MTRR 設為不快取 |
+| D8 | 保護 | 暫不開 CR0.WP；U/S = 0；不設 PCD | WP 需要把 `.text` 對齊到頁，是另一個任務；沒有 user 程式；VGA 區域已由 MTRR 設為不快取。（後來已開啟 WP，見第 7 節第 3 項） |
 
 ### 實作時的決策
 
@@ -261,7 +261,7 @@ cr2=0 (not present, write, kernel)
 
 1. **不阻止 unmap kernel 自己的頁**：unmap `0x00100000` 會立刻當機，由呼叫端負責。
 2. **空的 page table 不釋放**：每張 4 KiB。
-3. **WP = 0**：唯讀頁對 kernel 無效（`test_paging_fault_read_only` 記錄這個行為）。
+3. ~~**WP = 0**：唯讀頁對 kernel 無效~~：已開啟 CR0.WP，kernel 寫入唯讀頁會 page fault（`test_paging_fault_read_only`）。但 identity map 仍把 kernel 全部以 RW 對應，`.text`/`.rodata` 實際上還可以被寫入（見第 11 節）。
 4. **只有一個位址空間**：recursive mapping 只能修改目前 CR3 的表。
 5. **identity map 限制在 4 MiB**：kernel 或 heap 變大超過時 `paging_init` 會 `panic`（KASSERT），要擴大 identity 範圍或改用 higher half。
 6. **不是中斷安全的**：不可在 IRQ handler 中呼叫 map/unmap（PMM 也不是）。
@@ -298,7 +298,7 @@ cr2=0 (not present, write, kernel)
   - `paging_get_phys`：identity、offset、未對應（PDE 層與 PTE 層）、recursive 區域
   - `paging_map`：同一 frame 對應兩個位址（A 寫 B 讀）、建立新表（PMM 少 1、新表只有 1 格存在）、flags = 0、各種拒絕
   - `paging_unmap`：先讓翻譯進入 TLB 再 unmap，讀取必須 page fault（拿掉 `invlpg` 時這個測試會失敗，已驗證）
-  - page fault：CR2 與 error code（未對應的讀取 `0x0`、寫入 `0x2`、null pointer）、WP = 0 時寫入唯讀頁不 fault
+  - page fault：CR2 與 error code（未對應的讀取 `0x0`、寫入 `0x2`、null pointer）、WP = 1 時唯讀頁可讀、寫入 fault（error code `0x3`）
   - Multiboot 資料在分頁後可讀
 
 page fault 測試用 `.byte` 寫死 2 bytes 的 `mov` 指令，hook 記錄 CR2 後 `eip += 2` 跳過它；否則 fault 返回會無限重試同一條指令。
@@ -313,7 +313,7 @@ page fault 測試用 `.byte` 寫死 2 bytes 的 `mov` 指令，hook 記錄 CR2 �
 
 ## 11. 之後的工作
 
-- **CR0.WP + 唯讀 `.text`/`.rodata`**：`linker.ld` 把區段對齊到 4 KiB，再以唯讀對應；`test_paging_fault_read_only` 要跟著改成預期 fault。
+- **唯讀 `.text`/`.rodata`**：CR0.WP 已開啟；還需要讓 `linker.ld` 把區段對齊到 4 KiB，再由 `paging_init` 以唯讀對應這些頁。
 - **heap 自動擴充**：用 `pmm_alloc_frame` + `paging_map` 把散落的 frame 接在 heap 結尾之後，不再需要實體連續（`docs/pmm.md` 第 8 節）。
 - **higher half kernel**：如果之後需要每個程式獨立的低位址空間。
 - **多個位址空間**：每個程式一個 directory，共用 kernel 的 PDE；需要修改非目前位址空間的機制（暫時對應視窗）。

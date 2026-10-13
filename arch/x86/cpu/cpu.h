@@ -10,6 +10,7 @@
 
 /* CR0 bits (Intel SDM Vol.3A 2.5, Figure 2-7). */
 #define CPU_CR0_PE 0x00000001u /* bit 0: protected mode enable */
+#define CPU_CR0_WP 0x00010000u /* bit 16: write protect, ring 0 honours R/W */
 #define CPU_CR0_PG 0x80000000u /* bit 31: paging */
 
 /*

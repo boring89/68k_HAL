@@ -87,7 +87,7 @@ static shell_command_entry_t commands[] =
          cmd_alloc},
         {COMMAND_FREE,
          "free",
-         "Free up last allocation",
+         "Free the allocation at <address>",
          cmd_free},
         {COMMAND_MMAP,
          "mmap",

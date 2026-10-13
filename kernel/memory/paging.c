@@ -95,7 +95,8 @@ void paging_init(void)
         paging_entry_make(directory_phys, PAGING_KERNEL_FLAGS);
 
     cpu_write_cr3((uint32_t)directory_phys);
-    cpu_write_cr0(cpu_read_cr0() | CPU_CR0_PG);
+    /* Without WP, ring 0 writes ignore R/W = 0 (Intel SDM Vol.3A 2.5). */
+    cpu_write_cr0(cpu_read_cr0() | CPU_CR0_PG | CPU_CR0_WP);
 
     /* paging_map works through the recursive mapping, so only now. */
     paging_map_multiboot();

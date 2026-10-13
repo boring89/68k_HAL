@@ -443,18 +443,25 @@ static void test_paging_fault_read_only(void)
 {
     /* TEST_MAP_VIRT_A + 2 pages was mapped without PAGING_WRITABLE. */
     uintptr_t virt = TEST_MAP_VIRT_A + 2 * PMM_FRAME_SIZE;
-    uint32_t cr0 = cpu_read_cr0();
 
-    /* CR0.WP (bit 16) makes ring 0 honour R/W; it is off by default. */
-    SELFTEST_ASSERT(!(cr0 & 0x00010000));
+    /* paging_init sets CR0.WP so ring 0 honours R/W. */
+    SELFTEST_ASSERT(cpu_read_cr0() & CPU_CR0_WP);
 
+    /* Reading is allowed. */
     page_fault_expect();
     test_read(virt);
+    exception_set_test_hook(0);
+
+    SELFTEST_ASSERT(page_fault_count == 0);
+
+    page_fault_expect();
     test_write(virt);
     exception_set_test_hook(0);
 
-    /* With WP = 0 the kernel may write to read-only pages: no fault. */
-    SELFTEST_ASSERT(page_fault_count == 0);
+    SELFTEST_ASSERT(page_fault_count == 1);
+    SELFTEST_ASSERT(page_fault_cr2 == virt);
+    /* Protection violation, write, supervisor. */
+    SELFTEST_ASSERT(page_fault_code == (EXCEPTION_PF_PRESENT | EXCEPTION_PF_WRITE));
 }
 
 static void test_paging_multiboot_mapped(void)
