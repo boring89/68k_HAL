@@ -12,6 +12,8 @@
 
 void memory_init(void);
 
+uint32_t memory_get_kernel_start(void);
+
 uint32_t memory_get_kernel_end(void);
 
 #endif

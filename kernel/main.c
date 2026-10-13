@@ -24,6 +24,7 @@
 
 #include "memory/memory.h"
 #include "memory/heap.h"
+#include "memory/pmm.h"
 #include "memory/multiboot.h"
 
 #ifdef KERNEL_SELFTEST
@@ -70,7 +71,17 @@ void kernel_main(
         mbi_address);
 
     memory_init();
+    pmm_init(memory_get_kernel_start(), memory_get_kernel_end());
+
+    /* Until the heap allocates from the PMM, keep its fixed region out
+     * of the PMM's hands. */
     heap_init((uintptr_t)memory_get_kernel_end(), KERNEL_HEAP_SIZE);
+    pmm_reserve_range(memory_get_kernel_end(), KERNEL_HEAP_SIZE);
+
+    kernel_printf(
+        "PMM: %u / %u frames free\n",
+        (unsigned int)pmm_get_free_frames(),
+        (unsigned int)pmm_get_total_frames());
     kernel_printf("Kernel end: %x\n", memory_get_kernel_end());
 
     kernel_log(LOG_INFO, "Kernel Booting...");
