@@ -10,7 +10,7 @@
 #include "kernel/input/event.h"
 #include "kernel/input/event_buffer.h"
 
-#include "kernel/interrupt/irq_callback.h"
+#include "hal/irq.h"
 
 #include "arch/x86/io/io.h"
 
@@ -18,7 +18,8 @@ void keyboard_init(void)
 {
     scancode_init();
 
-    irq_register(1, keyboard_handler);
+    hal_irq_register(1, keyboard_handler);
+    hal_irq_unmask(1);
 }
 
 void keyboard_handler(void)

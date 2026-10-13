@@ -9,7 +9,7 @@
 
 #include "kernel/printf/printf.h"
 
-#include "kernel/interrupt/irq_callback.h"
+#include "hal/irq.h"
 
 #define PIT_CHANNEL0 0x40
 #define PIT_COMMAND 0x43
@@ -26,7 +26,8 @@ void pit_init(uint32_t frequency)
     outb(PIT_CHANNEL0, divisor & 0xff);
     outb(PIT_CHANNEL0, (divisor >> 8) & 0xff);
     
-    irq_register(0, timer_tick);
+    hal_irq_register(0, timer_tick);
+    hal_irq_unmask(0);
 }
 
 void timer_tick(void)

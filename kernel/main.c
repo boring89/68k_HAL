@@ -12,8 +12,7 @@
 #include "kernel/printf/printf.h"
 
 #include "arch/x86/interrupt/idt.h"
-#include "kernel/interrupt/pic.h"
-#include "kernel/interrupt/irq_callback.h"
+#include "platform/pc/interrupt/pic.h"
 
 #include "kernel/input/event_buffer.h"
 
@@ -96,7 +95,6 @@ void kernel_main(
 
     pic_init();
     kernel_log(LOG_INFO, "PIC initialized");
-    irq_callback_init();
     input_event_buffer_init();
 
     terminal_input_init();

@@ -14,11 +14,11 @@
 #include "kernel/memory/paging.h"
 #include "kernel/memory/pmm.h"
 #include "kernel/timer/pit.h"
-#include "kernel/interrupt/irq_callback.h"
 #include "arch/x86/interrupt/exception.h"
 #include "arch/x86/interrupt/irq_stub.h"
 
 #include "hal/cpu.h"
+#include "hal/irq.h"
 
 #include "arch/x86/cpu/cpu.h"
 #include "arch/x86/io/io.h"
@@ -637,11 +637,80 @@ static void irq5_test_handler(void)
 static void test_irq_stub_line_number(void)
 {
     irq5_count = 0;
-    SELFTEST_ASSERT(irq_register(5, irq5_test_handler) == 0);
+    SELFTEST_ASSERT(hal_irq_register(5, irq5_test_handler) == 0);
 
     asm volatile("int $0x25" : : : "memory");
 
     SELFTEST_ASSERT(irq5_count == 1);
+}
+
+static void test_hal_irq_register_rejects(void)
+{
+    SELFTEST_ASSERT(hal_irq_register(16, irq5_test_handler) == -1);
+    SELFTEST_ASSERT(hal_irq_register(0xFFFFFFFFu, irq5_test_handler) == -1);
+    SELFTEST_ASSERT(hal_irq_register(6, NULL) == -1);
+
+    /* Line 0 belongs to the PIT, line 5 to test_irq_stub_line_number. */
+    SELFTEST_ASSERT(hal_irq_register(0, irq5_test_handler) == -1);
+    SELFTEST_ASSERT(hal_irq_register(5, irq5_test_handler) == -1);
+
+    /* The PIT handler must still be the one running. */
+    uint32_t start = pit_get_ticks();
+    hal_cpu_idle();
+    SELFTEST_ASSERT(pit_get_ticks() != start);
+}
+
+/* 8259A data ports; reading them returns the IMR (OSDev Wiki "8259 PIC"). */
+#define PIC_MASTER_DATA 0x21
+#define PIC_SLAVE_DATA 0xA1
+
+/* pic_init masks everything; only the PIT (0) and keyboard (1) unmask. */
+static void test_pic_boot_mask(void)
+{
+    SELFTEST_ASSERT(inb(PIC_MASTER_DATA) == 0xFC);
+    SELFTEST_ASSERT(inb(PIC_SLAVE_DATA) == 0xFF);
+}
+
+static void test_hal_irq_unmask_rejects(void)
+{
+    SELFTEST_ASSERT(hal_irq_unmask(16) == -1);
+    SELFTEST_ASSERT(hal_irq_unmask(0xFFFFFFFFu) == -1);
+
+    SELFTEST_ASSERT(inb(PIC_MASTER_DATA) == 0xFC);
+    SELFTEST_ASSERT(inb(PIC_SLAVE_DATA) == 0xFF);
+}
+
+static void test_hal_irq_unmask_master(void)
+{
+    uint8_t master = inb(PIC_MASTER_DATA);
+    uint8_t slave = inb(PIC_SLAVE_DATA);
+
+    /* Nothing drives IRQ 5; interrupts stay off while it is unmasked. */
+    hal_cpu_disable_interrupts();
+
+    SELFTEST_ASSERT(hal_irq_unmask(5) == 0);
+    SELFTEST_ASSERT(inb(PIC_MASTER_DATA) == (master & ~(1u << 5)));
+    SELFTEST_ASSERT(inb(PIC_SLAVE_DATA) == slave);
+
+    outb(PIC_MASTER_DATA, master);
+    hal_cpu_enable_interrupts();
+}
+
+/* A slave line also needs the cascade input (master line 2) unmasked. */
+static void test_hal_irq_unmask_slave(void)
+{
+    uint8_t master = inb(PIC_MASTER_DATA);
+    uint8_t slave = inb(PIC_SLAVE_DATA);
+
+    hal_cpu_disable_interrupts();
+
+    SELFTEST_ASSERT(hal_irq_unmask(8) == 0);
+    SELFTEST_ASSERT(inb(PIC_MASTER_DATA) == (master & ~(1u << 2)));
+    SELFTEST_ASSERT(inb(PIC_SLAVE_DATA) == (slave & ~(1u << 0)));
+
+    outb(PIC_SLAVE_DATA, slave);
+    outb(PIC_MASTER_DATA, master);
+    hal_cpu_enable_interrupts();
 }
 
 static void __attribute__((noreturn)) selftest_exit(uint8_t code)
@@ -669,6 +738,11 @@ void selftest_run(void)
     SELFTEST_RUN(test_divide_error_exception);
     SELFTEST_RUN(test_idt_irq_gates);
     SELFTEST_RUN(test_irq_stub_line_number);
+    SELFTEST_RUN(test_hal_irq_register_rejects);
+    SELFTEST_RUN(test_pic_boot_mask);
+    SELFTEST_RUN(test_hal_irq_unmask_rejects);
+    SELFTEST_RUN(test_hal_irq_unmask_master);
+    SELFTEST_RUN(test_hal_irq_unmask_slave);
     SELFTEST_RUN(test_cpu_read_cr0);
     SELFTEST_RUN(test_hal_cpu_interrupts);
     SELFTEST_RUN(test_hal_cpu_idle);
