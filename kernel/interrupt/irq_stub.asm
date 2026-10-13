@@ -11,8 +11,7 @@ extern irq_handler
 section .text
 
 irq_common_stub:
-    cli
-    
+    ; Interrupt gates clear IF on entry (Intel SDM Vol.3 6.12.1.3).
     pusha
 
     push dword [esp + 32]

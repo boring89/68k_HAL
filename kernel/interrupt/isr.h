@@ -6,6 +6,11 @@
 #ifndef KERNEL_INTERRUPT_ISR_H
 #define KERNEL_INTERRUPT_ISR_H
 
-void isr0(void);
+#include <stdint.h>
+
+#define ISR_EXCEPTION_COUNT 32
+
+/* Addresses of the exception stubs for vectors 0-31 (isr.asm). */
+extern const uint32_t isr_stub_table[ISR_EXCEPTION_COUNT];
 
 #endif

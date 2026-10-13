@@ -20,6 +20,9 @@ _start:
 	mov esi, ebx
 	mov edi, eax
 
+	; The Multiboot spec leaves esp undefined, so set up our own stack.
+	mov esp, stack_top
+
 	call gdt_init
 
 	push esi
@@ -30,5 +33,12 @@ hang:
 	cli
 	hlt
 	jmp hang
+
+section .bss
+align 16
+
+stack_bottom:
+	resb 16384
+stack_top:
 
 section .note.GNU-stack noalloc noexec nowrite progbits

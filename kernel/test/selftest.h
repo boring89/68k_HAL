@@ -13,4 +13,7 @@
  */
 void selftest_run(void);
 
+/* Exits QEMU with the FAIL status. Used by panic() in selftest builds. */
+void selftest_abort(void) __attribute__((noreturn));
+
 #endif

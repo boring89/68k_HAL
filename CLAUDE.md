@@ -33,7 +33,7 @@ make clean
 ```
 boot/          Multiboot 進入點（boot.asm）、GDT
 arch/x86/      x86 硬體驅動：vga、serial、io（port I/O）
-kernel/        核心：main.c、interrupt、memory、keyboard、input、terminal、shell、console、log、printf、lib
+kernel/        核心：main.c、interrupt、panic、memory、keyboard、input、terminal、shell、console、log、printf、lib
 emu/m68k/      68k CPU 模擬器（cpu、decoder、effective_address、execute、memory）
 tests/host/    host 單元測試
 docs/          設計文件
@@ -79,6 +79,7 @@ emu/m68k: add CCR flag handling
 - 修改後必須執行 `make test` 並通過；新功能要附上測試。
 - 硬體相關的數值（I/O port、descriptor 位元、68k 指令編碼）要註明出處（Intel SDM、OSDev Wiki、M68000 Programmer's Reference Manual），不確定時明說。
 - 中斷處理程式與主迴圈共用的變數必須宣告 `volatile`。
+- 無法恢復的錯誤使用 `kernel/panic/panic.h` 的 `panic()` / `KASSERT()`。
 - 不要加入任何 Apple ROM、System Software 或其他受版權保護的內容。
 
 ## 開發模式
@@ -111,7 +112,5 @@ Claude 依照上方工作規則直接實作。
 
 ## 已知問題（尚未修正）
 
-- `boot/boot.asm` 沒有建立 kernel 堆疊。
-- IDT 只設定了 IRQ0、IRQ1；CPU 例外（0–31）沒有處理函式，發生例外時會 triple fault。
 - heap 沒有對齊，沒有上限，也沒有參考 Multiboot 記憶體表。
 - `emu/m68k` 的 MOVE 和 ADDI 是寫死的（固定立即值存入 D0），沒有 CCR 旗標。

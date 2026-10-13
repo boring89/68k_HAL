@@ -17,8 +17,9 @@ typedef struct
     uint32_t element_size;
     uint32_t capacity;
 
-    uint32_t read_pos;
-    uint32_t write_pos;
+    /* Shared between IRQ handlers (producer) and the main loop (consumer). */
+    volatile uint32_t read_pos;
+    volatile uint32_t write_pos;
 
 } ring_buffer_t;
 

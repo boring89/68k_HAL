@@ -14,7 +14,8 @@
 #define PIT_CHANNEL0 0x40
 #define PIT_COMMAND 0x43
 
-static uint32_t ticks = 0;
+/* Written by IRQ0, read by the main loop. */
+static volatile uint32_t ticks = 0;
 
 void pit_init(uint32_t frequency)
 {
