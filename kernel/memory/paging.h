@@ -44,4 +44,12 @@ int paging_get_phys(uintptr_t virt, uintptr_t *phys);
  */
 int paging_map(uintptr_t virt, uintptr_t phys, uint32_t flags);
 
+/*
+ * Remove the mapping of the 4 KiB page at virt and flush its TLB entry.
+ * The frame is not returned to the PMM and empty page tables are kept.
+ * Returns -1 if virt is not 4 KiB aligned, lies in the reserved top
+ * 4 MiB, or is not mapped.
+ */
+int paging_unmap(uintptr_t virt);
+
 #endif

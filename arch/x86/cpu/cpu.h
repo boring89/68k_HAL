@@ -41,6 +41,21 @@ static inline void cpu_write_cr0(uint32_t value)
     );
 }
 
+/* Faulting linear address of the last page fault (Intel SDM Vol.3A 2.5). */
+static inline uint32_t cpu_read_cr2(void)
+{
+    uint32_t value;
+
+    asm volatile(
+        "mov %%cr2, %0"
+        : "=r"(value)
+        :
+        : "memory"
+    );
+
+    return value;
+}
+
 static inline uint32_t cpu_read_cr3(void)
 {
     uint32_t value;

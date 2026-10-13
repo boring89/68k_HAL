@@ -138,3 +138,33 @@ int paging_map(uintptr_t virt, uintptr_t phys, uint32_t flags)
 
     return 0;
 }
+
+int paging_unmap(uintptr_t virt)
+{
+    if (virt % PMM_FRAME_SIZE != 0)
+        return -1;
+
+    /* Unmapping here would cut off access to the page tables themselves. */
+    uint32_t dir_index = paging_dir_index(virt);
+
+    if (dir_index == PAGING_RECURSIVE_INDEX)
+        return -1;
+
+    paging_entry_t *directory = (paging_entry_t *)PAGING_DIRECTORY_VIRT;
+
+    if (!paging_entry_is_present(directory[dir_index]))
+        return -1;
+
+    paging_entry_t *table = (paging_entry_t *)paging_table_virt(dir_index);
+    paging_entry_t *entry = &table[paging_table_index(virt)];
+
+    if (!paging_entry_is_present(*entry))
+        return -1;
+
+    *entry = 0;
+
+    /* Without this the CPU may keep using the old translation. */
+    cpu_invlpg(virt);
+
+    return 0;
+}

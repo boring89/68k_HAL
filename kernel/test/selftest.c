@@ -314,6 +314,155 @@ static void test_paging_map_rejects(void)
     pmm_free_frame(frame);
 }
 
+/* Vector 14, Page Fault (Intel SDM Vol.3 Ch.6, Table 6-1). */
+#define EXCEPTION_PAGE_FAULT 14
+
+/* Page fault error code bits (Intel SDM Vol.3A 4.7, Figure 4-12). */
+#define PF_ERR_PRESENT 0x1 /* 0: page not present, 1: protection violation */
+#define PF_ERR_WRITE   0x2 /* 0: read, 1: write */
+
+/* "mov ecx, [eax]" (8B 08) and "mov [eax], ecx" (89 08) are both 2 bytes. */
+#define MOV_EAX_LENGTH 2
+
+static volatile int page_fault_count;
+static volatile uint32_t page_fault_cr2;
+static volatile uint32_t page_fault_code;
+
+static int page_fault_hook(struct interrupt_frame *frame)
+{
+    if (frame->int_no != EXCEPTION_PAGE_FAULT)
+        return -1;
+
+    page_fault_count++;
+    page_fault_cr2 = cpu_read_cr2();
+    page_fault_code = frame->err_code;
+
+    /*
+     * #PF is a fault: returning would retry the same access forever,
+     * so skip the fixed-length mov instead.
+     */
+    frame->eip += MOV_EAX_LENGTH;
+
+    return 0;
+}
+
+/* Reset the counters and install the hook before a faulting access. */
+static void page_fault_expect(void)
+{
+    page_fault_count = 0;
+    page_fault_cr2 = 0xFFFFFFFF;
+    page_fault_code = 0xFFFFFFFF;
+    exception_set_test_hook(page_fault_hook);
+}
+
+static void test_read(uintptr_t address)
+{
+    asm volatile(
+        ".byte 0x8B, 0x08" /* mov ecx, [eax] */
+        :
+        : "a"(address)
+        : "ecx", "memory");
+}
+
+static void test_write(uintptr_t address)
+{
+    asm volatile(
+        ".byte 0x89, 0x08" /* mov [eax], ecx */
+        :
+        : "a"(address), "c"(0xDEADBEEF)
+        : "memory");
+}
+
+static void test_paging_unmap(void)
+{
+    uintptr_t frame = pmm_alloc_frame();
+    uintptr_t virt = TEST_MAP_VIRT_A + 4 * PMM_FRAME_SIZE;
+    uintptr_t phys = 0;
+
+    SELFTEST_ASSERT(paging_map(virt, frame, PAGING_WRITABLE) == 0);
+
+    /* Touch the page so its translation is in the TLB. */
+    *(volatile uint32_t *)virt = 1;
+
+    SELFTEST_ASSERT(paging_unmap(virt) == 0);
+    SELFTEST_ASSERT(paging_get_phys(virt, &phys) == -1);
+
+    /* The frame still belongs to the caller. */
+    SELFTEST_ASSERT(pmm_is_frame_used(frame));
+
+    /* Stale TLB entry would make this read succeed instead of fault. */
+    page_fault_expect();
+    test_read(virt);
+    exception_set_test_hook(0);
+
+    SELFTEST_ASSERT(page_fault_count == 1);
+    SELFTEST_ASSERT(page_fault_cr2 == virt);
+    /* Not present, read, supervisor. */
+    SELFTEST_ASSERT(page_fault_code == 0);
+
+    /* The page can be mapped again after unmapping. */
+    SELFTEST_ASSERT(paging_map(virt, frame, PAGING_WRITABLE) == 0);
+    SELFTEST_ASSERT(*(volatile uint32_t *)virt == 1);
+    SELFTEST_ASSERT(paging_unmap(virt) == 0);
+
+    pmm_free_frame(frame);
+}
+
+static void test_paging_unmap_rejects(void)
+{
+    /* Misaligned, never mapped, PDE not present, already unmapped. */
+    SELFTEST_ASSERT(paging_unmap(TEST_MAP_VIRT_A + 1) == -1);
+    SELFTEST_ASSERT(paging_unmap(0) == -1);
+    SELFTEST_ASSERT(paging_unmap(0xC0000000) == -1);
+    SELFTEST_ASSERT(paging_unmap(TEST_MAP_VIRT_A + 4 * PMM_FRAME_SIZE) == -1);
+
+    /* The recursive region stays mapped. */
+    SELFTEST_ASSERT(paging_unmap(PAGING_TABLES_VIRT) == -1);
+    SELFTEST_ASSERT(paging_unmap(PAGING_DIRECTORY_VIRT) == -1);
+}
+
+static void test_paging_fault_write_unmapped(void)
+{
+    /* Directory entry 512 has no page table: fault at the PDE level. */
+    page_fault_expect();
+    test_write(0x80000000);
+    exception_set_test_hook(0);
+
+    SELFTEST_ASSERT(page_fault_count == 1);
+    SELFTEST_ASSERT(page_fault_cr2 == 0x80000000);
+    SELFTEST_ASSERT(page_fault_code == PF_ERR_WRITE);
+}
+
+static void test_paging_fault_null_pointer(void)
+{
+    /* Page 0 is unmapped, so a null write faults instead of hitting the IVT. */
+    page_fault_expect();
+    test_write(0);
+    exception_set_test_hook(0);
+
+    SELFTEST_ASSERT(page_fault_count == 1);
+    SELFTEST_ASSERT(page_fault_cr2 == 0);
+    SELFTEST_ASSERT(page_fault_code == PF_ERR_WRITE);
+}
+
+static void test_paging_fault_read_only(void)
+{
+    /* TEST_MAP_VIRT_A + 2 pages was mapped without PAGING_WRITABLE. */
+    uintptr_t virt = TEST_MAP_VIRT_A + 2 * PMM_FRAME_SIZE;
+    uint32_t cr0 = cpu_read_cr0();
+
+    /* CR0.WP (bit 16) makes ring 0 honour R/W; it is off by default. */
+    SELFTEST_ASSERT(!(cr0 & 0x00010000));
+
+    page_fault_expect();
+    test_read(virt);
+    test_write(virt);
+    exception_set_test_hook(0);
+
+    /* With WP = 0 the kernel may write to read-only pages: no fault. */
+    SELFTEST_ASSERT(page_fault_count == 0);
+}
+
 static void test_cpu_invlpg(void)
 {
     /* Only checks that it executes; its effect is tested with paging. */
@@ -405,6 +554,11 @@ void selftest_run(void)
     SELFTEST_RUN(test_paging_map_creates_table);
     SELFTEST_RUN(test_paging_map_flags);
     SELFTEST_RUN(test_paging_map_rejects);
+    SELFTEST_RUN(test_paging_unmap);
+    SELFTEST_RUN(test_paging_unmap_rejects);
+    SELFTEST_RUN(test_paging_fault_write_unmapped);
+    SELFTEST_RUN(test_paging_fault_null_pointer);
+    SELFTEST_RUN(test_paging_fault_read_only);
     SELFTEST_RUN(test_cpu_invlpg);
 
     if (selftest_failures == 0)
