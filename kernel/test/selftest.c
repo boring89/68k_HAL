@@ -10,6 +10,7 @@
 
 #include "../printf/printf.h"
 #include "../memory/heap.h"
+#include "../memory/multiboot.h"
 #include "../memory/paging.h"
 #include "../memory/pmm.h"
 #include "../timer/pit.h"
@@ -463,6 +464,34 @@ static void test_paging_fault_read_only(void)
     SELFTEST_ASSERT(page_fault_count == 0);
 }
 
+static void test_paging_multiboot_mapped(void)
+{
+    const multiboot_info_t *mbi = multiboot_get_info();
+    uintptr_t address = (uintptr_t)mbi;
+    uintptr_t phys = 0;
+
+    SELFTEST_ASSERT(paging_get_phys(address, &phys) == 0);
+    SELFTEST_ASSERT(phys == address);
+    SELFTEST_ASSERT(paging_get_phys(address + sizeof(*mbi) - 1, &phys) == 0);
+
+    SELFTEST_ASSERT(mbi->flags & MULTIBOOT_INFO_MEM_MAP);
+
+    uintptr_t mmap_end = (uintptr_t)mbi->mmap_addr + mbi->mmap_length;
+
+    SELFTEST_ASSERT(paging_get_phys(mbi->mmap_addr, &phys) == 0);
+    SELFTEST_ASSERT(phys == mbi->mmap_addr);
+    SELFTEST_ASSERT(paging_get_phys(mmap_end - 1, &phys) == 0);
+
+    /* Walk the map like the shell's mmap command does. */
+    int entries = 0;
+
+    for (const multiboot_mmap_entry_t *entry = multiboot_mmap_first();
+         entry != 0; entry = multiboot_mmap_next(entry))
+        entries++;
+
+    SELFTEST_ASSERT(entries > 0);
+}
+
 static void test_cpu_invlpg(void)
 {
     /* Only checks that it executes; its effect is tested with paging. */
@@ -559,6 +588,7 @@ void selftest_run(void)
     SELFTEST_RUN(test_paging_fault_write_unmapped);
     SELFTEST_RUN(test_paging_fault_null_pointer);
     SELFTEST_RUN(test_paging_fault_read_only);
+    SELFTEST_RUN(test_paging_multiboot_mapped);
     SELFTEST_RUN(test_cpu_invlpg);
 
     if (selftest_failures == 0)
