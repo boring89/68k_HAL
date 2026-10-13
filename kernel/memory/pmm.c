@@ -254,25 +254,44 @@ uintptr_t pmm_alloc_frames(size_t count)
 
 int pmm_free_frame(uintptr_t address)
 {
+    return pmm_free_frames(address, 1);
+}
+
+int pmm_free_frames(
+    uintptr_t address,
+    size_t count)
+{
     /* Check range and alignment before touching the bitmap. The low
      * 1 MiB is never allocated, so freeing it (or 0) is always a bug. */
-    if (address % PMM_FRAME_SIZE != 0 ||
+    if (count == 0 ||
+        address % PMM_FRAME_SIZE != 0 ||
         address < PMM_LOW_MEMORY_END ||
         address / PMM_FRAME_SIZE >= pmm_limit)
         return -1;
 
-    uint32_t frame = (uint32_t)(address / PMM_FRAME_SIZE);
+    uint32_t first = (uint32_t)(address / PMM_FRAME_SIZE);
 
-    /* Already free: double free. */
-    if (!pmm_test(frame))
+    /* Compare counts instead of computing an end address: no overflow. */
+    if (count > pmm_limit - first)
         return -1;
 
-    pmm_clear(frame);
-    pmm_free_count++;
+    uint32_t end = first + (uint32_t)count;
+
+    /* All or nothing: any frame already free is a double free. */
+    for (uint32_t frame = first; frame < end; frame++)
+    {
+        if (!pmm_test(frame))
+            return -1;
+    }
+
+    for (uint32_t frame = first; frame < end; frame++)
+        pmm_clear(frame);
+
+    pmm_free_count += count;
 
     /* Keep "every frame below pmm_hint is used" true. */
-    if (frame < pmm_hint)
-        pmm_hint = frame;
+    if (first < pmm_hint)
+        pmm_hint = first;
 
     return 0;
 }

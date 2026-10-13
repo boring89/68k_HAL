@@ -421,6 +421,82 @@ static void test_alloc_frames_fragmented(void)
     TEST_ASSERT_EQ_INT(0x100000, pmm_alloc_frame());
 }
 
+static void test_free_frames_then_reuse(void)
+{
+    reset();
+    add_region(MiB, MiB, MULTIBOOT_MEMORY_AVAILABLE);
+    boot();
+
+    uintptr_t a = pmm_alloc_frames(4);
+    uintptr_t b = pmm_alloc_frames(4);
+
+    TEST_ASSERT_EQ_INT(0, pmm_free_frames(a, 4));
+    TEST_ASSERT_EQ_INT(252, pmm_get_free_frames());
+
+    /* Hint pulled back to a: the block is reused. */
+    TEST_ASSERT_EQ_INT(a, pmm_alloc_frames(4));
+    TEST_ASSERT_EQ_INT(0, pmm_free_frames(b, 4));
+    TEST_ASSERT_EQ_INT(b, pmm_alloc_frame());
+}
+
+static void test_free_frames_all_or_nothing(void)
+{
+    reset();
+    add_region(MiB, MiB, MULTIBOOT_MEMORY_AVAILABLE);
+    boot();
+
+    uintptr_t a = pmm_alloc_frames(3);
+
+    /* Middle frame already free: nothing is freed. */
+    TEST_ASSERT_EQ_INT(0, pmm_free_frame(a + PMM_FRAME_SIZE));
+    TEST_ASSERT_EQ_INT(254, pmm_get_free_frames());
+
+    TEST_ASSERT_EQ_INT(-1, pmm_free_frames(a, 3));
+    TEST_ASSERT_EQ_INT(254, pmm_get_free_frames());
+
+    /* The first frame is still used, so it can be freed alone. */
+    TEST_ASSERT_EQ_INT(0, pmm_free_frame(a));
+}
+
+static void test_free_frames_rejects_bad_ranges(void)
+{
+    reset();
+    add_region(MiB, MiB, MULTIBOOT_MEMORY_AVAILABLE);
+    boot();
+
+    uintptr_t a = pmm_alloc_frames(256);
+    TEST_ASSERT_EQ_INT(MiB, a);
+
+    TEST_ASSERT_EQ_INT(-1, pmm_free_frames(a, 0));
+    TEST_ASSERT_EQ_INT(-1, pmm_free_frames(a + 0x10, 1));
+    TEST_ASSERT_EQ_INT(-1, pmm_free_frames(0xFF000, 2));     /* starts low */
+
+    /* Runs past the limit by one frame. */
+    TEST_ASSERT_EQ_INT(-1, pmm_free_frames(a, 257));
+
+    /* count * 4096 would overflow; must not wrap around. */
+    TEST_ASSERT_EQ_INT(-1, pmm_free_frames(a, SIZE_MAX));
+    TEST_ASSERT_EQ_INT(-1, pmm_free_frames(a, SIZE_MAX / PMM_FRAME_SIZE + 1));
+
+    TEST_ASSERT_EQ_INT(0, pmm_get_free_frames());
+    TEST_ASSERT_EQ_INT(0, pmm_free_frames(a, 256));
+    TEST_ASSERT_EQ_INT(256, pmm_get_free_frames());
+}
+
+static void test_free_frames_spanning_allocations(void)
+{
+    reset();
+    add_region(MiB, MiB, MULTIBOOT_MEMORY_AVAILABLE);
+    boot();
+
+    /* Accepted limitation: block boundaries are not recorded. */
+    uintptr_t a = pmm_alloc_frames(2);
+    pmm_alloc_frames(2);
+
+    TEST_ASSERT_EQ_INT(0, pmm_free_frames(a, 4));
+    TEST_ASSERT_EQ_INT(256, pmm_get_free_frames());
+}
+
 int main(void)
 {
     area = mmap(NULL, AREA_SIZE, PROT_READ | PROT_WRITE,
@@ -457,6 +533,10 @@ int main(void)
     TEST_RUN(test_alloc_frames_across_word_boundary);
     TEST_RUN(test_alloc_frames_not_across_hole);
     TEST_RUN(test_alloc_frames_fragmented);
+    TEST_RUN(test_free_frames_then_reuse);
+    TEST_RUN(test_free_frames_all_or_nothing);
+    TEST_RUN(test_free_frames_rejects_bad_ranges);
+    TEST_RUN(test_free_frames_spanning_allocations);
 
     munmap(area, AREA_SIZE);
 
