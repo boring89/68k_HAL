@@ -7,15 +7,15 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include "../terminal/terminal.h"
+#include "kernel/terminal/terminal.h"
 
-#include "../timer/pit.h"
+#include "kernel/timer/pit.h"
 
-#include "../lib/k_string.h"
-#include "../lib/k_number.h"
+#include "kernel/lib/k_string.h"
+#include "kernel/lib/k_number.h"
 
-#include "../memory/memory.h"
-#include "../memory/multiboot.h"
+#include "kernel/memory/memory.h"
+#include "kernel/memory/multiboot.h"
 
 static void cmd_help(
     int argc,

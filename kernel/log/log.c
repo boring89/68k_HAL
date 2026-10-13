@@ -4,7 +4,7 @@
  */
 
 #include "log.h"
-#include "../console/console.h"
+#include "kernel/console/console.h"
 
 void log_info(const char *msg)
 {

@@ -5,11 +5,11 @@
 
 #include "pit.h"
 
-#include "../../arch/x86/io/io.h"
+#include "arch/x86/io/io.h"
 
-#include "../printf/printf.h"
+#include "kernel/printf/printf.h"
 
-#include "../interrupt/irq_callback.h"
+#include "kernel/interrupt/irq_callback.h"
 
 #define PIT_CHANNEL0 0x40
 #define PIT_COMMAND 0x43

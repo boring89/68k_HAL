@@ -4,7 +4,7 @@
  */
 #include "ring_buffer.h"
 
-#include "../lib/k_memory.h"
+#include "k_memory.h"
 
 void ring_buffer_init(
     ring_buffer_t *buffer,

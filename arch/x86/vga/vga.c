@@ -4,7 +4,7 @@
  */
 
 #include "vga.h"
-#include "../io/io.h"
+#include "arch/x86/io/io.h"
 
 #define VGA_MEM 0xB8000
 

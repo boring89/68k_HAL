@@ -4,7 +4,7 @@
  */
 
 #include "serial.h"
-#include "../io/io.h"
+#include "arch/x86/io/io.h"
 
 #define COM1 0x3F8
 #define SERIAL_TIMEOUT 100000

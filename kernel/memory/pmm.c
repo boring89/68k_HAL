@@ -6,7 +6,7 @@
 #include "pmm.h"
 
 #include "multiboot.h"
-#include "../lib/k_memory.h"
+#include "kernel/lib/k_memory.h"
 
 /* 32-bit physical address space without PAE: 4 GiB / 4 KiB frames. */
 #define PMM_MAX_FRAMES (1u << 20)

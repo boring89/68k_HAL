@@ -9,7 +9,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "../keyboard/keycode.h"
+#include "kernel/keyboard/keycode.h"
 
 /*
  * Event types

@@ -9,9 +9,9 @@
 #include "memory.h"
 #include "multiboot.h"
 #include "pmm.h"
-#include "../lib/k_memory.h"
-#include "../panic/panic.h"
-#include "../../arch/x86/cpu/cpu.h"
+#include "kernel/lib/k_memory.h"
+#include "kernel/panic/panic.h"
+#include "arch/x86/cpu/cpu.h"
 
 /* Kernel-only, read/write: the only flags used before user mode exists. */
 #define PAGING_KERNEL_FLAGS (PAGING_PRESENT | PAGING_WRITABLE)

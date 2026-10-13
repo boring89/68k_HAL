@@ -7,9 +7,9 @@
 
 #include <stdarg.h>
 
-#include "../console/console.h"
-#include "../lib/k_string.h"
-#include "../lib/k_number.h"
+#include "kernel/console/console.h"
+#include "kernel/lib/k_string.h"
+#include "kernel/lib/k_number.h"
 
 void kernel_vprintf(const char *fmt, va_list args)
 {

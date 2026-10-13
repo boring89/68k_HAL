@@ -6,9 +6,9 @@
 #include "exception.h"
 
 #include "page_fault.h"
-#include "../printf/printf.h"
-#include "../panic/panic.h"
-#include "../../arch/x86/cpu/cpu.h"
+#include "kernel/printf/printf.h"
+#include "kernel/panic/panic.h"
+#include "arch/x86/cpu/cpu.h"
 
 #include <stdint.h>
 

@@ -5,7 +5,7 @@
 
 #include "event_buffer.h"
 
-#include "../lib/ring_buffer.h"
+#include "kernel/lib/ring_buffer.h"
 
 
 #define INPUT_EVENT_BUFFER_SIZE 128

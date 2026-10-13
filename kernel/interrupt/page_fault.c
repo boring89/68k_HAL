@@ -6,7 +6,7 @@
 #include "page_fault.h"
 
 #include "exception.h"
-#include "../lib/k_string.h"
+#include "kernel/lib/k_string.h"
 
 /* Append ", part" (or just "part" at the start); -1 if it does not fit. */
 static int page_fault_append(char *buf, size_t size, size_t *len, const char *part)

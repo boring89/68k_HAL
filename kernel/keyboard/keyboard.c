@@ -7,12 +7,12 @@
 #include "scancode.h"
 #include "keymap.h"
 
-#include "../input/event.h"
-#include "../input/event_buffer.h"
+#include "kernel/input/event.h"
+#include "kernel/input/event_buffer.h"
 
-#include "../interrupt/irq_callback.h"
+#include "kernel/interrupt/irq_callback.h"
 
-#include "../../arch/x86/io/io.h"
+#include "arch/x86/io/io.h"
 
 void keyboard_init(void)
 {

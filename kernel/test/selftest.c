@@ -8,16 +8,16 @@
 
 #include "selftest.h"
 
-#include "../printf/printf.h"
-#include "../memory/heap.h"
-#include "../memory/multiboot.h"
-#include "../memory/paging.h"
-#include "../memory/pmm.h"
-#include "../timer/pit.h"
-#include "../interrupt/exception.h"
+#include "kernel/printf/printf.h"
+#include "kernel/memory/heap.h"
+#include "kernel/memory/multiboot.h"
+#include "kernel/memory/paging.h"
+#include "kernel/memory/pmm.h"
+#include "kernel/timer/pit.h"
+#include "kernel/interrupt/exception.h"
 
-#include "../../arch/x86/cpu/cpu.h"
-#include "../../arch/x86/io/io.h"
+#include "arch/x86/cpu/cpu.h"
+#include "arch/x86/io/io.h"
 
 #include <stdint.h>
 

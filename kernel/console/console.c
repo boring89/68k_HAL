@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#include "../terminal/terminal.h"
-#include "../../arch/x86/serial/serial.h"
+#include "kernel/terminal/terminal.h"
+#include "arch/x86/serial/serial.h"
 #include "console.h"
 
 void console_init(void)

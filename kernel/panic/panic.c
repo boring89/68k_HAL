@@ -5,10 +5,10 @@
 
 #include "panic.h"
 
-#include "../printf/printf.h"
+#include "kernel/printf/printf.h"
 
 #ifdef KERNEL_SELFTEST
-#include "../test/selftest.h"
+#include "kernel/test/selftest.h"
 #endif
 
 #include <stdarg.h>

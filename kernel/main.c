@@ -3,35 +3,35 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#include "console/console.h"
-#include "terminal/terminal.h"
-#include "terminal/input.h"
-#include "shell/shell.h"
+#include "kernel/console/console.h"
+#include "kernel/terminal/terminal.h"
+#include "kernel/terminal/input.h"
+#include "kernel/shell/shell.h"
 
-#include "log/log.h"
-#include "printf/printf.h"
+#include "kernel/log/log.h"
+#include "kernel/printf/printf.h"
 
-#include "interrupt/idt.h"
-#include "interrupt/pic.h"
-#include "interrupt/irq_callback.h"
+#include "kernel/interrupt/idt.h"
+#include "kernel/interrupt/pic.h"
+#include "kernel/interrupt/irq_callback.h"
 
-#include "input/event_buffer.h"
+#include "kernel/input/event_buffer.h"
 
-#include "timer/pit.h"
-#include "keyboard/keyboard.h"
-#include "keyboard/state.h"
-#include "keyboard/keychar.h"
+#include "kernel/timer/pit.h"
+#include "kernel/keyboard/keyboard.h"
+#include "kernel/keyboard/state.h"
+#include "kernel/keyboard/keychar.h"
 
-#include "memory/memory.h"
-#include "memory/heap.h"
-#include "memory/pmm.h"
-#include "memory/multiboot.h"
-#include "memory/paging.h"
+#include "kernel/memory/memory.h"
+#include "kernel/memory/heap.h"
+#include "kernel/memory/pmm.h"
+#include "kernel/memory/multiboot.h"
+#include "kernel/memory/paging.h"
 
-#include "panic/panic.h"
+#include "kernel/panic/panic.h"
 
 #ifdef KERNEL_SELFTEST
-#include "test/selftest.h"
+#include "kernel/test/selftest.h"
 #endif
 
 #include <stdint.h>

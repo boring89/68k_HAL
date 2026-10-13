@@ -5,12 +5,12 @@
 
 #include "shell.h"
 
-#include "../terminal/terminal.h"
+#include "kernel/terminal/terminal.h"
 
 #include "parser.h"
 #include "command.h"
 
-#include "../lib/k_string.h"
+#include "kernel/lib/k_string.h"
 
 void shell_prompt(void)
 {

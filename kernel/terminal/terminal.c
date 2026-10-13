@@ -5,7 +5,7 @@
 
 #include "terminal.h"
 
-#include "../../arch/x86/vga/vga.h"
+#include "arch/x86/vga/vga.h"
 
 static int cursor_x = 0;
 static int cursor_y = 0;
