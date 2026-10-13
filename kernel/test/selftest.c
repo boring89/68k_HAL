@@ -3,6 +3,9 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+/* Only built into the kernel by `make test-qemu` (-DKERNEL_SELFTEST). */
+#ifdef KERNEL_SELFTEST
+
 #include "selftest.h"
 
 #include "../printf/printf.h"
@@ -159,3 +162,5 @@ void selftest_run(void)
     kernel_printf("[TEST] %d failed\n", selftest_failures);
     selftest_exit(QEMU_EXIT_FAIL);
 }
+
+#endif
