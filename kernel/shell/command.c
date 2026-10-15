@@ -14,6 +14,7 @@
 #include "kernel/lib/k_string.h"
 #include "kernel/lib/k_number.h"
 
+#include "kernel/m68k/demo.h"
 #include "kernel/memory/memory.h"
 #include "hal/boot.h"
 
@@ -48,6 +49,9 @@ static void cmd_heap(
     int argc,
     char **argv);
 static void cmd_mmap(
+    int argc,
+    char **argv);
+static void cmd_m68k(
     int argc,
     char **argv);
 
@@ -92,7 +96,11 @@ static shell_command_entry_t commands[] =
         {COMMAND_MMAP,
          "mmap",
          "Display boot memory map",
-         cmd_mmap}};
+         cmd_mmap},
+        {COMMAND_M68K,
+         "m68k",
+         "Run a demo program on the 68k emulator",
+         cmd_m68k}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -487,4 +495,14 @@ void shell_dispatch(shell_command_t *cmd)
 
     terminal_write("Unknown command: ");
     terminal_write_line(cmd->argv[0]);
+}
+
+static void cmd_m68k(
+    int argc,
+    char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    m68k_demo_run();
 }

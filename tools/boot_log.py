@@ -30,6 +30,7 @@ COMMANDS = [
     "alloc 64",
     "heap",
     "mmap",
+    "m68k",
 ]
 
 # (pattern, replacement) applied to every output line.

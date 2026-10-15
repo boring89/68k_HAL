@@ -19,7 +19,8 @@ typedef enum
     COMMAND_HEAP,
     COMMAND_ALLOC,
     COMMAND_FREE,
-    COMMAND_MMAP
+    COMMAND_MMAP,
+    COMMAND_M68K
 
 } shell_command_id_t;
 
