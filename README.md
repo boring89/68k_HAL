@@ -59,6 +59,7 @@ The goal is to preserve the simplicity, usability, and software philosophy of th
 | `make`, `gcc` | `build-essential` | Build the kernel (`-m32`) and host unit tests |
 | `nasm` | `nasm` | Assemble boot and interrupt stubs |
 | `ld` | `binutils` | Link the kernel ELF |
+| `m68k-linux-gnu-as` | `binutils-m68k-linux-gnu` | Assemble the 68k test programs in `tests/m68k/` |
 | `grub-mkrescue` | `grub2-common` | Create the bootable ISO |
 | GRUB BIOS modules | `grub-pc-bin` | Make the ISO bootable on BIOS (QEMU's default firmware) |
 | `xorriso` | `xorriso` | Used by `grub-mkrescue` to write the ISO |
@@ -67,7 +68,7 @@ The goal is to preserve the simplicity, usability, and software philosophy of th
 | `python3` (optional) | `python3` | `tools/boot_log.py`: capture and compare boot logs when refactoring |
 
 ```bash
-sudo apt install build-essential nasm binutils grub2-common grub-pc-bin xorriso mtools qemu-system-x86
+sudo apt install build-essential nasm binutils binutils-m68k-linux-gnu grub2-common grub-pc-bin xorriso mtools qemu-system-x86
 ```
 
 ### Commands

@@ -7,7 +7,8 @@ CC=gcc
 CFLAGS=-m32 -ffreestanding -I. -Wall -Wextra -Werror -fno-pie -fno-asynchronous-unwind-tables -nostdlib -MMD -MP $(EXTRA_CFLAGS)
 
 HOST_CC=gcc
-HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -fsanitize=address,undefined -MMD -MP
+HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
+	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
 .PHONY: all clean iso run test test-boundary test-host test-qemu
 
@@ -81,7 +82,7 @@ HOST_LIB_SOURCES := \
 	platform/pc/boot/multiboot.c \
 	$(wildcard emu/m68k/*.c)
 
-HOST_LIB_OBJECTS := $(HOST_LIB_SOURCES:%.c=$(BUILD)/host/obj/%.o)
+HOST_LIB_OBJECTS = $(HOST_LIB_SOURCES:%.c=$(BUILD)/host/obj/%.o) $(MUSASHI_OBJECTS)
 
 HOST_TESTS := $(patsubst tests/host/%.c,$(BUILD)/host/%,$(wildcard tests/host/test_*.c))
 HOST_TEST_OBJECTS := $(HOST_TESTS:$(BUILD)/host/%=$(BUILD)/host/obj/tests/host/%.o)
@@ -128,11 +129,22 @@ $(BUILD)/host/obj/%.o: %.c
 
 $(BUILD)/host/%: $(BUILD)/host/obj/tests/host/%.o $(HOST_LIB_OBJECTS)
 	mkdir -p $(dir $@)
-	$(HOST_CC) $(HOST_CFLAGS) $^ -o $@
+	$(HOST_CC) $(HOST_CFLAGS) $^ -lm -o $@
+
+# 68k test programs (tests/m68k/*.s), assembled with the GNU m68k binutils
+# and flattened to raw binaries that tests/host/test_m68k.c loads.
+M68K_AS := m68k-linux-gnu-as
+M68K_OBJCOPY := m68k-linux-gnu-objcopy
+M68K_TEST_BINS := $(patsubst tests/m68k/%.s,$(BUILD)/m68k/%.bin,$(wildcard tests/m68k/*.s))
+
+$(BUILD)/m68k/%.bin: tests/m68k/%.s
+	mkdir -p $(dir $@)
+	$(M68K_AS) -m68030 -o $(@:.bin=.o) $<
+	$(M68K_OBJCOPY) -O binary -j .text $(@:.bin=.o) $@
 
 -include $(HOST_LIB_OBJECTS:.o=.d) $(HOST_TEST_OBJECTS:.o=.d)
 
-test-host: $(HOST_TESTS) $(MUSASHI_OBJECTS)
+test-host: $(HOST_TESTS) $(M68K_TEST_BINS)
 	@for t in $(HOST_TESTS); do ./$$t || exit 1; done
 
 # Kernel built with -DKERNEL_SELFTEST, booted directly by QEMU (no ISO).

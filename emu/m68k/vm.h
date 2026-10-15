@@ -1,0 +1,71 @@
+/*
+ * Copyright (C) 2026 YuanChi Hsieh
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+#ifndef EMU_M68K_VM_H
+#define EMU_M68K_VM_H
+
+#include <stdint.h>
+#include <stdbool.h>
+
+/*
+ * Thin wrapper around the Musashi 68k core (third_party/musashi).
+ *
+ * Musashi keeps all CPU state in global variables, so only one VM can exist
+ * at a time. m68k_vm_init() replaces any previous VM.
+ *
+ * Guest memory is a flat byte array starting at guest address 0. The CPU is
+ * big-endian; accesses outside the array read as 0 and writes are dropped.
+ */
+
+typedef enum
+{
+    M68K_VM_CPU_68000,
+    M68K_VM_CPU_68030,
+} m68k_vm_cpu_t;
+
+typedef enum
+{
+    M68K_VM_REG_D0 = 0,     /* D0..D7 = 0..7 */
+    M68K_VM_REG_A0 = 8,     /* A0..A7 = 8..15 */
+    M68K_VM_REG_PC = 16,
+    M68K_VM_REG_SR = 17,
+    M68K_VM_REG_USP = 18,
+    M68K_VM_REG_ISP = 19,
+} m68k_vm_reg_t;
+
+
+/* Attach guest RAM and select the CPU model. Returns 0, or -1 on bad args. */
+int m68k_vm_init(uint8_t *ram, uint32_t size, m68k_vm_cpu_t cpu);
+
+/* Copy data into guest RAM. Returns 0, or -1 if it does not fit. */
+int m68k_vm_load(uint32_t addr, const void *data, uint32_t len);
+
+/*
+ * Write the reset vectors (initial SSP at 0, initial PC at 4) and reset the
+ * CPU, which then starts in supervisor mode at 'entry' with SP = 'sp'.
+ */
+int m68k_vm_reset(uint32_t entry, uint32_t sp);
+
+/*
+ * Run for at most 'cycles' clock cycles, or until the program executes STOP.
+ * Returns the number of cycles used.
+ */
+int m68k_vm_run(int cycles);
+
+/* True once the program has executed a STOP instruction since the reset. */
+bool m68k_vm_halted(void);
+
+uint32_t m68k_vm_get_reg(m68k_vm_reg_t reg);
+void m68k_vm_set_reg(m68k_vm_reg_t reg, uint32_t value);
+
+/* Direct guest memory access (big-endian). Out of range: read 0, write ignored. */
+uint32_t m68k_vm_read8(uint32_t addr);
+uint32_t m68k_vm_read16(uint32_t addr);
+uint32_t m68k_vm_read32(uint32_t addr);
+void m68k_vm_write8(uint32_t addr, uint32_t value);
+void m68k_vm_write16(uint32_t addr, uint32_t value);
+void m68k_vm_write32(uint32_t addr, uint32_t value);
+
+#endif

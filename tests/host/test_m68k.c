@@ -5,74 +5,173 @@
 
 #include "test.h"
 
-#include "emu/m68k/cpu.h"
-#include "emu/m68k/memory.h"
+#include "emu/m68k/vm.h"
+
+#include <stdint.h>
+
+/* Test programs are assembled from the .s files in tests/m68k by the Makefile. */
+#define PROGRAM_DIR "build/m68k/"
+#define PROGRAM_BASE 0x1000
+#define RAM_SIZE 0x10000
+#define STACK_TOP 0x8000
+#define MAX_CYCLES 100000
+
+static uint8_t ram[RAM_SIZE];
+
+/* Load tests/m68k/<name>.s (assembled) and run it until STOP. */
+static void run_program(const char *name, m68k_vm_cpu_t cpu)
+{
+    char path[128];
+    uint8_t image[4096];
+    size_t len;
+    FILE *f;
+
+    snprintf(path, sizeof(path), PROGRAM_DIR "%s.bin", name);
+    f = fopen(path, "rb");
+    if (f == NULL)
+    {
+        fprintf(stderr, "  cannot open %s\n", path);
+        test_failures++;
+        return;
+    }
+    len = fread(image, 1, sizeof(image), f);
+    fclose(f);
+
+    memset(ram, 0, sizeof(ram));
+    TEST_ASSERT_EQ_INT(0, m68k_vm_init(ram, sizeof(ram), cpu));
+    TEST_ASSERT_EQ_INT(0, m68k_vm_load(PROGRAM_BASE, image, (uint32_t)len));
+    TEST_ASSERT_EQ_INT(0, m68k_vm_reset(PROGRAM_BASE, STACK_TOP));
+    m68k_vm_run(MAX_CYCLES);
+    TEST_ASSERT(m68k_vm_halted());
+}
+
+static uint32_t d(int n)
+{
+    return m68k_vm_get_reg((m68k_vm_reg_t)(M68K_VM_REG_D0 + n));
+}
 
 static void test_memory_big_endian(void)
 {
-    m68k_memory_init();
+    memset(ram, 0, sizeof(ram));
+    m68k_vm_init(ram, sizeof(ram), M68K_VM_CPU_68030);
 
-    m68k_memory_write32(0x100, 0x12345678);
+    m68k_vm_write32(0x100, 0x12345678);
 
-    TEST_ASSERT_EQ_INT(0x12, m68k_memory_read8(0x100));
-    TEST_ASSERT_EQ_INT(0x78, m68k_memory_read8(0x103));
-    TEST_ASSERT_EQ_INT(0x1234, m68k_memory_read16(0x100));
-    TEST_ASSERT_EQ_INT(0x12345678, m68k_memory_read32(0x100));
+    TEST_ASSERT_EQ_INT(0x12, ram[0x100]);
+    TEST_ASSERT_EQ_INT(0x78, ram[0x103]);
+    TEST_ASSERT_EQ_INT(0x1234, m68k_vm_read16(0x100));
+    TEST_ASSERT_EQ_INT(0x12345678, m68k_vm_read32(0x100));
 }
 
 static void test_memory_out_of_range(void)
 {
-    m68k_memory_init();
+    memset(ram, 0, sizeof(ram));
+    m68k_vm_init(ram, sizeof(ram), M68K_VM_CPU_68030);
 
-    m68k_memory_write8(M68K_MEMORY_SIZE, 0xFF);
+    m68k_vm_write8(RAM_SIZE, 0xFF);
 
-    TEST_ASSERT_EQ_INT(0, m68k_memory_read8(M68K_MEMORY_SIZE));
+    TEST_ASSERT_EQ_INT(0, m68k_vm_read8(RAM_SIZE));
+    TEST_ASSERT_EQ_INT(-1, m68k_vm_load(RAM_SIZE - 1, "ab", 2));
 }
 
-/* Moved from m68k_emu_test() in kernel/main.c. */
-static void test_move_addi(void)
+static void test_init_rejects_bad_args(void)
 {
-    m68k_cpu_t cpu;
-
-    m68k_memory_init();
-    m68k_cpu_init(&cpu);
-
-    /* MOVE.L #10, D0 */
-    m68k_memory_write16(0x0000, 0x203C);
-    m68k_memory_write32(0x0002, 10);
-
-    /* ADDI.L #5, D0 */
-    m68k_memory_write16(0x0006, 0x0680);
-    m68k_memory_write32(0x0008, 5);
-
-    TEST_ASSERT_EQ_INT(0, m68k_cpu_step(&cpu));
-    TEST_ASSERT_EQ_INT(10, cpu.d[0]);
-    TEST_ASSERT_EQ_INT(6, cpu.pc);
-
-    TEST_ASSERT_EQ_INT(0, m68k_cpu_step(&cpu));
-    TEST_ASSERT_EQ_INT(15, cpu.d[0]);
-    TEST_ASSERT_EQ_INT(12, cpu.pc);
+    TEST_ASSERT_EQ_INT(-1, m68k_vm_init(NULL, 64, M68K_VM_CPU_68030));
+    TEST_ASSERT_EQ_INT(-1, m68k_vm_init(ram, 4, M68K_VM_CPU_68030));
 }
 
-static void test_invalid_opcode(void)
+static void check_move(m68k_vm_cpu_t cpu)
 {
-    m68k_cpu_t cpu;
+    run_program("move", cpu);
 
-    m68k_memory_init();
-    m68k_cpu_init(&cpu);
+    TEST_ASSERT_EQ_INT(0x12345678, d(0));
+    TEST_ASSERT_EQ_INT(0xFFFFFF80, d(1));
+    TEST_ASSERT_EQ_INT(0x1234FFEE, d(2));
+    TEST_ASSERT_EQ_INT(0xAB, d(3));
+    TEST_ASSERT_EQ_INT(0x12345678, d(4));
+    TEST_ASSERT_EQ_INT(0x12, ram[0x2000]);
+    TEST_ASSERT_EQ_INT(0x78, ram[0x2003]);
+}
 
-    /* 0xFFFF is an F-line opcode, not supported. */
-    m68k_memory_write16(0x0000, 0xFFFF);
+static void test_move_68030(void)
+{
+    check_move(M68K_VM_CPU_68030);
+}
 
-    TEST_ASSERT_EQ_INT(-1, m68k_cpu_step(&cpu));
+static void test_move_68000(void)
+{
+    check_move(M68K_VM_CPU_68000);
+}
+
+static void test_arith_ccr_flags(void)
+{
+    run_program("arith", M68K_VM_CPU_68030);
+
+    /* CCR bits: X=0x10 N=0x08 Z=0x04 V=0x02 C=0x01 */
+    TEST_ASSERT_EQ_INT(0x08 | 0x02, d(4) & 0x1F);
+    TEST_ASSERT_EQ_INT(0x10 | 0x04 | 0x01, d(5) & 0x1F);
+    TEST_ASSERT_EQ_INT(0x10 | 0x08 | 0x01, d(6) & 0x1F);
+    /* CMP leaves X unchanged; the SUBQ above set it. */
+    TEST_ASSERT_EQ_INT(0x10 | 0x04, d(7) & 0x1F);
+}
+
+static void test_branch_loop(void)
+{
+    run_program("loop", M68K_VM_CPU_68030);
+
+    TEST_ASSERT_EQ_INT(55, d(0));
+    TEST_ASSERT_EQ_INT(3, d(1));
+    TEST_ASSERT_EQ_INT(1, d(2));
+    TEST_ASSERT_EQ_INT(0, d(3));
+}
+
+static void test_subroutine_stack(void)
+{
+    run_program("subroutine", M68K_VM_CPU_68030);
+
+    TEST_ASSERT_EQ_INT(42, d(0));
+    TEST_ASSERT_EQ_INT(0x11111111, d(1));
+    TEST_ASSERT_EQ_INT(STACK_TOP, m68k_vm_get_reg(M68K_VM_REG_A0 + 7));
+}
+
+static void test_divide_by_zero_exception(void)
+{
+    run_program("divzero", M68K_VM_CPU_68030);
+
+    TEST_ASSERT_EQ_INT(0xDEAD, d(7));
+    TEST_ASSERT_EQ_INT(7, d(0));
+    TEST_ASSERT_EQ_INT(7, d(1));
+}
+
+static void test_run_cycle_limit(void)
+{
+    /* BRA.B -2 (0x60FE) loops forever; run must return at the limit. */
+    static const uint8_t spin[] = { 0x60, 0xFE };
+    int used;
+
+    memset(ram, 0, sizeof(ram));
+    m68k_vm_init(ram, sizeof(ram), M68K_VM_CPU_68030);
+    m68k_vm_load(PROGRAM_BASE, spin, sizeof(spin));
+    m68k_vm_reset(PROGRAM_BASE, STACK_TOP);
+
+    used = m68k_vm_run(1000);
+
+    TEST_ASSERT(used >= 1000);
+    TEST_ASSERT(!m68k_vm_halted());
 }
 
 int main(void)
 {
     TEST_RUN(test_memory_big_endian);
     TEST_RUN(test_memory_out_of_range);
-    TEST_RUN(test_move_addi);
-    TEST_RUN(test_invalid_opcode);
+    TEST_RUN(test_init_rejects_bad_args);
+    TEST_RUN(test_move_68030);
+    TEST_RUN(test_move_68000);
+    TEST_RUN(test_arith_ccr_flags);
+    TEST_RUN(test_branch_loop);
+    TEST_RUN(test_subroutine_stack);
+    TEST_RUN(test_divide_by_zero_exception);
+    TEST_RUN(test_run_cycle_limit);
 
-    return TEST_REPORT("m68k");
+    return TEST_REPORT("test_m68k");
 }
