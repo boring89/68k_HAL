@@ -21,6 +21,7 @@ make clean
 
 - 需要的套件：見 README.md 的 Building 一節。
 - 尚未建立：cross compiler（i686-elf-gcc）。
+- CI：`.github/workflows/test.yml` 在 push 到 main 與 PR 時執行 `make test` 與 `make iso`。
 
 ### 測試
 

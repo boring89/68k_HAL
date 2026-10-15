@@ -1,0 +1,31 @@
+# Copyright (C) 2026 YuanChi Hsieh
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same packages as README.md "Requirements".
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential nasm binutils \
+            grub2-common grub-pc-bin xorriso mtools \
+            qemu-system-x86
+
+      - name: Boundary, host and QEMU self tests
+        run: make test
+
+      - name: Build the bootable ISO
+        run: make iso
