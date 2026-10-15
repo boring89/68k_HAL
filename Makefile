@@ -89,6 +89,38 @@ HOST_TEST_OBJECTS := $(HOST_TESTS:$(BUILD)/host/%=$(BUILD)/host/obj/tests/host/%
 # Keep test objects so make does not delete them as intermediates.
 .SECONDARY: $(HOST_TEST_OBJECTS)
 
+# Musashi (third_party/musashi) is unmodified third-party code. m68kmake
+# generates m68kops.c/h from m68k_in.c. The core always includes its FPU code,
+# which needs softfloat. It is built without -Werror and without sanitizers
+# noise from its own style; our wrapper in emu/m68k/ is built normally.
+MUSASHI := third_party/musashi
+MUSASHI_GEN := $(BUILD)/host/musashi
+MUSASHI_CNF := emu/m68k/m68kconf.h
+MUSASHI_CFLAGS := -std=gnu11 -w -g -I. -I$(MUSASHI) -I$(MUSASHI_GEN) \
+	-DMUSASHI_CNF='"$(MUSASHI_CNF)"' -MMD -MP
+MUSASHI_SOURCES := $(MUSASHI)/m68kcpu.c $(MUSASHI)/softfloat/softfloat.c
+MUSASHI_OBJECTS := $(MUSASHI_SOURCES:%.c=$(BUILD)/host/obj/%.o) \
+	$(BUILD)/host/obj/musashi_gen/m68kops.o
+
+$(MUSASHI_GEN)/m68kmake: $(MUSASHI)/m68kmake.c
+	mkdir -p $(dir $@)
+	$(HOST_CC) -O1 -w $< -o $@
+
+# m68kmake writes m68kops.c and m68kops.h next to each other.
+$(MUSASHI_GEN)/m68kops.c $(MUSASHI_GEN)/m68kops.h: $(MUSASHI_GEN)/m68kmake $(MUSASHI)/m68k_in.c
+	$<  $(MUSASHI_GEN) $(MUSASHI)/m68k_in.c
+
+$(BUILD)/host/obj/musashi_gen/m68kops.o: $(MUSASHI_GEN)/m68kops.c $(MUSASHI_GEN)/m68kops.h
+	mkdir -p $(dir $@)
+	$(HOST_CC) $(MUSASHI_CFLAGS) -c $< -o $@
+
+# The core includes the generated m68kops.h.
+$(BUILD)/host/obj/$(MUSASHI)/%.o: $(MUSASHI)/%.c $(MUSASHI_GEN)/m68kops.h
+	mkdir -p $(dir $@)
+	$(HOST_CC) $(MUSASHI_CFLAGS) -c $< -o $@
+
+-include $(MUSASHI_OBJECTS:.o=.d)
+
 # Each source is compiled separately so -MMD can emit one .d file per object.
 $(BUILD)/host/obj/%.o: %.c
 	mkdir -p $(dir $@)
@@ -100,7 +132,7 @@ $(BUILD)/host/%: $(BUILD)/host/obj/tests/host/%.o $(HOST_LIB_OBJECTS)
 
 -include $(HOST_LIB_OBJECTS:.o=.d) $(HOST_TEST_OBJECTS:.o=.d)
 
-test-host: $(HOST_TESTS)
+test-host: $(HOST_TESTS) $(MUSASHI_OBJECTS)
 	@for t in $(HOST_TESTS); do ./$$t || exit 1; done
 
 # Kernel built with -DKERNEL_SELFTEST, booted directly by QEMU (no ISO).
