@@ -44,6 +44,9 @@ int hal_irq_unmask(unsigned int line)
 /* Called by the x86 IRQ stubs (irq_stub.asm). */
 void irq_handler(uint32_t irq)
 {
+    if (pic_handle_spurious(irq))
+        return;
+
     if (irq < PIC_LINE_COUNT && handlers[irq] != NULL)
         handlers[irq]();
 

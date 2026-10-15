@@ -52,6 +52,23 @@ static void test_hal_cpu_interrupts(void)
     SELFTEST_ASSERT((read_eflags() & EFLAGS_IF) != 0);
 }
 
+static void test_cpu_irq_save_restore(void)
+{
+    /* Interrupts on: save turns them off, restore turns them back on. */
+    uint32_t flags = cpu_irq_save();
+    SELFTEST_ASSERT((flags & CPU_EFLAGS_IF) != 0);
+    SELFTEST_ASSERT((read_eflags() & EFLAGS_IF) == 0);
+
+    /* Nested: the inner pair must leave interrupts off. */
+    uint32_t inner = cpu_irq_save();
+    SELFTEST_ASSERT((inner & CPU_EFLAGS_IF) == 0);
+    cpu_irq_restore(inner);
+    SELFTEST_ASSERT((read_eflags() & EFLAGS_IF) == 0);
+
+    cpu_irq_restore(flags);
+    SELFTEST_ASSERT((read_eflags() & EFLAGS_IF) != 0);
+}
+
 static void test_cpu_read_cr0(void)
 {
     /* The bootloader enters the kernel in protected mode. */
@@ -575,6 +592,7 @@ void selftest_arch_run(void)
     SELFTEST_RUN(test_irq_stub_line_number);
     SELFTEST_RUN(test_cpu_read_cr0);
     SELFTEST_RUN(test_hal_cpu_interrupts);
+    SELFTEST_RUN(test_cpu_irq_save_restore);
     SELFTEST_RUN(test_paging_enabled);
     SELFTEST_RUN(test_paging_recursive_entry);
     SELFTEST_RUN(test_paging_identity_map);

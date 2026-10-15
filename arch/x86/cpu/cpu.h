@@ -13,6 +13,9 @@
 #define CPU_CR0_WP 0x00010000u /* bit 16: write protect, ring 0 honours R/W */
 #define CPU_CR0_PG 0x80000000u /* bit 31: paging */
 
+/* EFLAGS bits (Intel SDM Vol.1 3.4.3, Figure 3-8). */
+#define CPU_EFLAGS_IF 0x00000200u /* bit 9: maskable interrupts enabled */
+
 /*
  * The "memory" clobbers keep the compiler from moving page table writes
  * across these instructions: the CPU reads the tables from memory.
@@ -94,6 +97,33 @@ static inline void cpu_invlpg(uintptr_t virt)
         : "r"(virt)
         : "memory"
     );
+}
+
+/*
+ * Disable maskable interrupts and return the previous EFLAGS, for a short
+ * critical section. cpu_irq_restore puts IF back the way it was, so the
+ * pair also works when interrupts were already off.
+ */
+static inline uint32_t cpu_irq_save(void)
+{
+    uint32_t flags;
+
+    asm volatile(
+        "pushfl\n\t"
+        "popl %0\n\t"
+        "cli"
+        : "=r"(flags)
+        :
+        : "memory"
+    );
+
+    return flags;
+}
+
+static inline void cpu_irq_restore(uint32_t flags)
+{
+    if (flags & CPU_EFLAGS_IF)
+        asm volatile("sti" : : : "memory");
 }
 
 #endif

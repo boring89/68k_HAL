@@ -14,7 +14,9 @@
 #include "hal/timer.h"
 
 #include "platform/pc/boot/multiboot.h"
+#include "platform/pc/interrupt/pic.h"
 
+#include "arch/x86/cpu/cpu.h"
 #include "arch/x86/io/io.h"
 
 #include <stddef.h>
@@ -137,6 +139,51 @@ static void test_hal_irq_unmask_slave(void)
     hal_cpu_enable_interrupts();
 }
 
+/*
+ * Outside an IRQ handler no ISR bit is set, so IRQ 7 and 15 look exactly
+ * like spurious ones; other lines never are.
+ */
+static void test_pic_spurious(void)
+{
+    hal_cpu_disable_interrupts();
+
+    uint32_t before = pic_get_spurious_count();
+
+    SELFTEST_ASSERT(pic_handle_spurious(0) == 0);
+    SELFTEST_ASSERT(pic_handle_spurious(8) == 0);
+    SELFTEST_ASSERT(pic_get_spurious_count() == before);
+
+    SELFTEST_ASSERT(pic_handle_spurious(7) == 1);
+    SELFTEST_ASSERT(pic_handle_spurious(15) == 1);
+    SELFTEST_ASSERT(pic_get_spurious_count() == before + 2);
+
+    /* Reading the ISR must not disturb the masks. */
+    SELFTEST_ASSERT(inb(PIC_MASTER_DATA) == 0xFC);
+    SELFTEST_ASSERT(inb(PIC_SLAVE_DATA) == 0xFF);
+
+    hal_cpu_enable_interrupts();
+}
+
+/* pic_unmask restores IF as it found it. */
+static void test_pic_unmask_keeps_interrupt_flag(void)
+{
+    uint8_t master = inb(PIC_MASTER_DATA);
+
+    hal_cpu_disable_interrupts();
+    SELFTEST_ASSERT(hal_irq_unmask(5) == 0);
+    SELFTEST_ASSERT((cpu_irq_save() & CPU_EFLAGS_IF) == 0);
+    outb(PIC_MASTER_DATA, master);
+    hal_cpu_enable_interrupts();
+
+    uint32_t ticks = hal_timer_ticks();
+
+    /* Interrupts are on again: the timer keeps advancing. */
+    for (int i = 0; i < 1000 && hal_timer_ticks() == ticks; i++)
+        hal_cpu_idle();
+
+    SELFTEST_ASSERT(hal_timer_ticks() != ticks);
+}
+
 void selftest_platform_run(void)
 {
     SELFTEST_RUN(test_hal_timer_frequency);
@@ -145,6 +192,8 @@ void selftest_platform_run(void)
     SELFTEST_RUN(test_hal_irq_unmask_rejects);
     SELFTEST_RUN(test_hal_irq_unmask_master);
     SELFTEST_RUN(test_hal_irq_unmask_slave);
+    SELFTEST_RUN(test_pic_spurious);
+    SELFTEST_RUN(test_pic_unmask_keeps_interrupt_flag);
     SELFTEST_RUN(test_multiboot_data_mapped);
 }
 

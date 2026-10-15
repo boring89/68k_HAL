@@ -135,9 +135,12 @@ kernel_main()（kernel/main.c）
                                                                    │
 IDT[0x20 + n] = irq_stub_table[n]（arch/x86/interrupt/irq_stub.asm）  ▼
    push n → pusha → irq_handler(n)（platform/pc/interrupt/hal_irq.c）
+                       ├─ pic_handle_spurious(n)：假的 IRQ 7/15 → 直接返回
                        ├─ handlers[n]()  → ps2_keyboard_handler → input_event_push
                        └─ pic_send_eoi(n)
 ```
+
+- **Spurious IRQ**：8259 的請求在 CPU 確認前消失時，仍會送出最低優先的線（master 的 IRQ 7、slave 的 IRQ 15），但該線的 ISR（In-Service Register）位元是 0。`pic_handle_spurious` 用 OCW3 讀 ISR 判斷：假的 IRQ 7 不送 EOI；假的 IRQ 15 只送 EOI 給 master（master 的串接線確實收到了請求）。出處：OSDev Wiki「8259 PIC」Spurious IRQs、8259A datasheet。
 
 - 向量起點 `IRQ_STUB_VECTOR_BASE`（0x20）同時用於 IDT 與 PIC 的 ICW2，兩邊不會不一致。
 - 16 條線都有 stub，所以任何一條被 unmask 都不會落到空的 IDT gate。
@@ -217,8 +220,7 @@ IDT[0x20 + n] = irq_stub_table[n]（arch/x86/interrupt/irq_stub.asm）  ▼
 |---|---|
 | 只有一個平台與一個架構 | Makefile 編譯 `arch/`、`platform/` 下的全部檔案；有第二個時再加選擇機制 |
 | 驅動直接使用 port I/O | `drivers/` 可以 include `arch/<arch>/io/`；換到 MMIO 的機器時，需要 HAL 提供 I/O 存取函式 |
-| IMR 讀－改－寫不是原子操作 | `hal_irq_unmask` 目前只在 `sti` 之前呼叫；若之後在中斷處理程式中改 IMR，要先關中斷 |
-| 沒有處理 spurious IRQ 7/15 | 8259 受干擾時可能送出假的 IRQ，此時不該送 EOI（OSDev Wiki「8259 PIC」）。QEMU 上幾乎不會發生 |
+| 只能在 QEMU 中間接測試 spurious IRQ | 無法讓 QEMU 產生真的 spurious IRQ；selftest 在中斷處理之外呼叫 `pic_handle_spurious`（此時 ISR 全為 0），驗證判斷與計數 |
 | 沒有 `hal_irq_mask`、handler 沒有 context 指標 | 目前沒有需要的呼叫者 |
 | `hal_cpu_halt` 沒有自動測試 | 不會返回；只能透過 panic 路徑間接涵蓋 |
 | 驅動的中斷 handler 在中斷關閉時執行 | handler 要短；耗時的工作交給主迴圈（目前鍵盤只推入 input event） |
@@ -228,15 +230,13 @@ IDT[0x20 + n] = irq_stub_table[n]（arch/x86/interrupt/irq_stub.asm）  ▼
 - **host**（`tests/host/`）：`test_console_sink`（註冊與廣播）、`test_terminal`（用假的顯示裝置測換行、捲動、退格、顏色、headless）、`test_ps2_keyboard`（scancode 與 keymap）、`test_multiboot`（含 `hal_boot_*`）、`test_paging_entry`（含 `paging_flags_from_hal`）。
 - **QEMU selftest**：
   - `kernel/test/selftest.c`：框架、heap、`hal_timer_ticks`、`hal_cpu_idle`
-  - `arch/x86/test/selftest_x86.c`：EFLAGS.IF、CR0、分頁、`hal_mmu`、例外、IDT gate、IRQ stub 線號
-  - `platform/pc/test/selftest_pc.c`：開機後 IMR 為 `0xFC`/`0xFF`、`hal_irq_*`、100 Hz、開機資料已對應、QEMU 結束 port
+  - `arch/x86/test/selftest_x86.c`：EFLAGS.IF、`cpu_irq_save`/`cpu_irq_restore`、CR0、分頁、`hal_mmu`、例外、IDT gate、IRQ stub 線號
+  - `platform/pc/test/selftest_pc.c`：開機後 IMR 為 `0xFC`/`0xFF`、`hal_irq_*`、spurious IRQ 判斷、IMR 修改保留中斷旗標、100 Hz、開機資料已對應、QEMU 結束 port
 - **行為不變的驗證**：`tools/boot_log.py` 在 QEMU 中開機、輸入一組 shell 指令，印出 serial log 與每個指令後的 VGA 畫面（隨 kernel 大小變動的數值會被遮蔽）。重構前後各存一份再 `diff`。它不在 `make test` 中，需要 `python3`。
 
 ## 12. 之後的工作
 
 - 第二個平台或架構時：Makefile 的平台／架構選擇、驅動的 I/O 存取抽象化。
-- spurious IRQ 處理；IMR 存取在需要時加上關中斷保護。
 - console sink 目前只能註冊不能移除。
-- shell 的說明文字仍是 `Display PIT ticks`、`Display Multiboot memory map`（為了 M2 行為不變而保留）。
 - `kernel/terminal/terminal.c` 的 `terminal_scroll` 沒有宣告在 header，但也不是 `static`。
 - `drivers/vga` 的 `vga_init`、`vga_get_cell` 沒有使用者。
