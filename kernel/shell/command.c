@@ -67,7 +67,7 @@ static shell_command_entry_t commands[] =
          cmd_echo},
         {COMMAND_TICKS,
          "ticks",
-         "Display PIT ticks",
+         "Display system timer ticks",
          cmd_ticks},
         {COMMAND_INFO,
          "info",
@@ -91,7 +91,7 @@ static shell_command_entry_t commands[] =
          cmd_free},
         {COMMAND_MMAP,
          "mmap",
-         "Display Multiboot memory map",
+         "Display boot memory map",
          cmd_mmap}};
 
 #define COMMAND_TABLE_SIZE \

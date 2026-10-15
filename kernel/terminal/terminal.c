@@ -83,7 +83,7 @@ void terminal_clear(void)
     terminal_update_cursor();
 }
 
-void terminal_scroll(void)
+static void terminal_scroll(void)
 {
     if (display == NULL)
         return;
