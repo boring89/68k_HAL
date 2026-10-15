@@ -9,7 +9,7 @@
 #include <stdint.h>
 #include "kernel/terminal/terminal.h"
 
-#include "kernel/timer/pit.h"
+#include "platform/pc/timer/pit.h"
 
 #include "kernel/lib/k_string.h"
 #include "kernel/lib/k_number.h"

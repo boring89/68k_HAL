@@ -16,7 +16,7 @@
 
 #include "kernel/input/event_buffer.h"
 
-#include "kernel/timer/pit.h"
+#include "platform/pc/timer/pit.h"
 #include "kernel/keyboard/keyboard.h"
 #include "kernel/keyboard/state.h"
 #include "kernel/keyboard/keychar.h"

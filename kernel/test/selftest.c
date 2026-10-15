@@ -13,7 +13,7 @@
 #include "kernel/memory/multiboot.h"
 #include "kernel/memory/paging.h"
 #include "kernel/memory/pmm.h"
-#include "kernel/timer/pit.h"
+#include "platform/pc/timer/pit.h"
 #include "arch/x86/interrupt/exception.h"
 #include "arch/x86/interrupt/irq_stub.h"
 

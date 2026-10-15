@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#ifndef KERNEL_TIMER_PIT_H
-#define KERNEL_TIMER_PIT_H
+#ifndef PLATFORM_PC_TIMER_PIT_H
+#define PLATFORM_PC_TIMER_PIT_H
 
 #include <stdint.h>
 
