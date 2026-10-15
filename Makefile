@@ -121,12 +121,13 @@ test-qemu:
 	fi
 
 # The source tree must pass every rule. Each tests/boundary/<rule>/ is a
-# fixture tree that breaks one rule, so the check must fail on it.
+# fixture tree that breaks that rule, so the check must report <rule>.
 test-boundary:
 	@tools/check_boundary.sh
 	@for fixture in tests/boundary/*/; do \
-		if tools/check_boundary.sh $$fixture >/dev/null; then \
-			echo "boundary check: FAIL ($$fixture not reported)"; \
+		rule=$$(basename $$fixture); \
+		if ! tools/check_boundary.sh $$fixture | grep -q "^boundary: $$rule: "; then \
+			echo "boundary check: FAIL ($$rule not reported for $$fixture)"; \
 			exit 1; \
 		fi; \
 	done

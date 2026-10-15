@@ -4,9 +4,8 @@
  */
 
 /*
- * Fixture for tools/check_boundary.sh: the "relative include" rule must
- * report this file.
- * Never compiled.
+ * Fixture for tools/check_boundary.sh: the "relative_include" rule must
+ * report this file. Never compiled.
  */
 
 #include "../lib/k_string.h"
