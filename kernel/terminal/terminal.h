@@ -6,7 +6,7 @@
 #ifndef KERNEL_TERMINAL_TERMINAL_H
 #define KERNEL_TERMINAL_TERMINAL_H
 
-#include "arch/x86/vga/vga.h"
+#include "drivers/vga/vga.h"
 #include "kernel/console/color.h"
 
 void terminal_init(void);

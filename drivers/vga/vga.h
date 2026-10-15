@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#ifndef ARCH_X86_VGA_VGA_H
-#define ARCH_X86_VGA_VGA_H
+#ifndef DRIVERS_VGA_VGA_H
+#define DRIVERS_VGA_VGA_H
 
 #include <stdint.h>
 
