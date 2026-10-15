@@ -8,8 +8,8 @@
 
 #include "color.h"
 /*
- * Set up the terminal. Other outputs are added afterwards with
- * console_register_sink (sink.h).
+ * Set up the terminal on the registered text display. Sinks
+ * (sink.h) registered before or after also receive all output.
  */
 void console_init(void);
 

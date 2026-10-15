@@ -5,44 +5,58 @@
 
 #include "terminal.h"
 
-#include "drivers/vga/vga.h"
+#include "kernel/display/text_display.h"
+
+#include <stddef.h>
+
+/* NULL on a machine without a display: then every call does nothing. */
+static const text_display_t *display;
 
 static int cursor_x = 0;
 static int cursor_y = 0;
 
-static unsigned char terminal_color = (COLOR_BLACK << 4) | COLOR_LIGHT_GREY;
+static color_t terminal_fg = COLOR_LIGHT_GREY;
+static color_t terminal_bg = COLOR_BLACK;
+
+static void terminal_update_cursor(void)
+{
+    display->set_cursor(cursor_x, cursor_y);
+}
 
 void terminal_init(void)
 {
+    display = text_display_get();
+
     cursor_x = 0;
     cursor_y = 0;
-    terminal_color = (COLOR_BLACK << 4) | COLOR_LIGHT_GREY;
+    terminal_fg = COLOR_LIGHT_GREY;
+    terminal_bg = COLOR_BLACK;
 
-    vga_clear();
+    if (display == NULL)
+        return;
 
-    vga_set_cursor(
-        cursor_x,
-        cursor_y);
+    display->clear();
+
+    terminal_update_cursor();
 }
 
 void terminal_backspace(void)
 {
-    if (cursor_x == 0)
+    if (display == NULL || cursor_x == 0)
     {
         return;
     }
 
     cursor_x--;
 
-    vga_put_cell(
+    display->put_cell(
         cursor_x,
         cursor_y,
         ' ',
-        terminal_color);
+        terminal_fg,
+        terminal_bg);
 
-    vga_set_cursor(
-        cursor_x,
-        cursor_y);
+    terminal_update_cursor();
 }
 
 void terminal_tab(void)
@@ -55,67 +69,78 @@ void terminal_tab(void)
 
 void terminal_clear(void)
 {
-    terminal_color = (COLOR_BLACK << 4) | COLOR_LIGHT_GREY;
+    terminal_fg = COLOR_LIGHT_GREY;
+    terminal_bg = COLOR_BLACK;
 
     cursor_x = 0;
     cursor_y = 0;
 
-    vga_clear();
+    if (display == NULL)
+        return;
 
-    vga_set_cursor(
-        cursor_x,
-        cursor_y);
+    display->clear();
+
+    terminal_update_cursor();
 }
 
 void terminal_scroll(void)
 {
-    for (int y = 1; y < VGA_HEIGHT; y++)
+    if (display == NULL)
+        return;
+
+    for (int y = 1; y < display->height; y++)
     {
-        for (int x = 0; x < VGA_WIDTH; x++)
+        for (int x = 0; x < display->width; x++)
         {
-            vga_copy_cell(x, y, x, y - 1);
+            display->copy_cell(x, y, x, y - 1);
         }
     }
 
-    for (int x = 0; x < VGA_WIDTH; x++)
+    for (int x = 0; x < display->width; x++)
     {
-        vga_put_cell(
+        display->put_cell(
             x,
-            VGA_HEIGHT - 1,
+            display->height - 1,
             ' ',
-            terminal_color);
+            terminal_fg,
+            terminal_bg);
     }
 
-    cursor_y = VGA_HEIGHT - 1;
+    cursor_y = display->height - 1;
     cursor_x = 0;
 
-    vga_set_cursor(cursor_x, cursor_y);
+    terminal_update_cursor();
 }
 
 void terminal_newline(void)
 {
+    if (display == NULL)
+        return;
+
     cursor_x = 0;
 
     cursor_y++;
 
-    if (cursor_y >= VGA_HEIGHT)
+    if (cursor_y >= display->height)
     {
         terminal_scroll();
         return;
     }
 
-    vga_set_cursor(
-        cursor_x,
-        cursor_y);
+    terminal_update_cursor();
 }
 
 void terminal_set_color(color_t foreground, color_t background)
 {
-    terminal_color = (background << 4) | foreground;
+    terminal_fg = foreground;
+    terminal_bg = background;
 }
 
 void terminal_put_char(char c)
 {
+    if (display == NULL)
+        return;
+
     switch (c)
     {
     case '\n':
@@ -134,23 +159,22 @@ void terminal_put_char(char c)
         break;
     }
 
-    vga_put_cell(
+    display->put_cell(
         cursor_x,
         cursor_y,
         c,
-        terminal_color);
+        terminal_fg,
+        terminal_bg);
 
     cursor_x++;
 
-    if (cursor_x >= VGA_WIDTH)
+    if (cursor_x >= display->width)
     {
         terminal_newline();
         return;
     }
 
-    vga_set_cursor(
-        cursor_x,
-        cursor_y);
+    terminal_update_cursor();
 }
 
 void terminal_write(const char *str)
@@ -173,12 +197,14 @@ void terminal_write_line(const char *str)
 
 void terminal_write_color(const char *str, color_t fg, color_t bg)
 {
-    unsigned char old_color = terminal_color;
+    color_t old_fg = terminal_fg;
+    color_t old_bg = terminal_bg;
 
     terminal_set_color(fg, bg);
     terminal_write(str);
 
-    terminal_color = old_color;
+    terminal_fg = old_fg;
+    terminal_bg = old_bg;
 }
 
 void terminal_write_color_line(

@@ -87,3 +87,46 @@ void vga_init(void)
 {
     vga_clear();
 }
+
+/*
+ * VGA attribute colour for each color_t: the default text mode palette
+ * (OSDev Wiki "Printing To Screen"). Bits 3:0 are the foreground,
+ * bits 7:4 the background.
+ */
+static const uint8_t vga_palette[16] = {
+    [COLOR_BLACK] = 0x0,
+    [COLOR_BLUE] = 0x1,
+    [COLOR_GREEN] = 0x2,
+    [COLOR_CYAN] = 0x3,
+    [COLOR_RED] = 0x4,
+    [COLOR_MAGENTA] = 0x5,
+    [COLOR_BROWN] = 0x6,
+    [COLOR_LIGHT_GREY] = 0x7,
+    [COLOR_DARK_GREY] = 0x8,
+    [COLOR_LIGHT_BLUE] = 0x9,
+    [COLOR_LIGHT_GREEN] = 0xA,
+    [COLOR_LIGHT_CYAN] = 0xB,
+    [COLOR_LIGHT_RED] = 0xC,
+    [COLOR_LIGHT_MAGENTA] = 0xD,
+    [COLOR_YELLOW] = 0xE,
+    [COLOR_WHITE] = 0xF,
+};
+
+static uint8_t vga_attribute(color_t fg, color_t bg)
+{
+    return (uint8_t)((vga_palette[bg & 0xF] << 4) | vga_palette[fg & 0xF]);
+}
+
+static void vga_display_put_cell(int x, int y, char c, color_t fg, color_t bg)
+{
+    vga_put_cell(x, y, c, vga_attribute(fg, bg));
+}
+
+const text_display_t vga_text_display = {
+    .width = VGA_WIDTH,
+    .height = VGA_HEIGHT,
+    .put_cell = vga_display_put_cell,
+    .copy_cell = vga_copy_cell,
+    .set_cursor = vga_set_cursor,
+    .clear = vga_clear,
+};

@@ -66,6 +66,7 @@ HOST_LIB_SOURCES := \
 	arch/x86/interrupt/page_fault.c \
 	arch/x86/mmu/paging_entry.c \
 	kernel/console/sink.c \
+	kernel/display/text_display.c \
 	kernel/lib/k_string.c \
 	kernel/lib/k_number.c \
 	kernel/lib/k_memory.c \
@@ -73,6 +74,7 @@ HOST_LIB_SOURCES := \
 	kernel/memory/heap.c \
 	kernel/memory/pmm.c \
 	kernel/shell/parser.c \
+	kernel/terminal/terminal.c \
 	platform/pc/boot/hal_boot.c \
 	platform/pc/boot/multiboot.c \
 	$(wildcard emu/m68k/*.c)

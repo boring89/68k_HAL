@@ -13,8 +13,15 @@
  */
 
 /*
- * Check and record what the boot loader passed in. Call once, first
- * thing after console_init (it logs, and halts on a bad boot). Afterwards
+ * Register the console devices: the text display and the console sinks.
+ * Call once, first thing in kernel_main, before console_init. Must not
+ * log.
+ */
+void hal_init_console(void);
+
+/*
+ * Check and record what the boot loader passed in. Call once, right
+ * after console_init (it logs, and halts on a bad boot). Afterwards
  * hal/boot.h may be used.
  */
 void hal_init_early(void);

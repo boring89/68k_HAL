@@ -6,6 +6,7 @@
 #include "hal/init.h"
 
 #include "drivers/serial/serial.h"
+#include "drivers/vga/vga.h"
 
 #include "platform/pc/boot/multiboot.h"
 #include "platform/pc/interrupt/pic.h"
@@ -44,11 +45,16 @@ void pc_entry(uint32_t magic, uint32_t info)
     kernel_main();
 }
 
-void hal_init_early(void)
+void hal_init_console(void)
 {
+    text_display_register(&vga_text_display);
+
     serial_init();
     console_register_sink(&serial_console_sink);
+}
 
+void hal_init_early(void)
+{
     if (boot_magic != MULTIBOOT_BOOTLOADER_MAGIC)
     {
         kernel_log(LOG_ERROR, "Invalid Multiboot magic");

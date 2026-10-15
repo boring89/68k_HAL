@@ -11,7 +11,6 @@
 void console_init(void)
 {
     terminal_init();
-    console_sinks_reset();
 }
 
 void console_write(const char *str)

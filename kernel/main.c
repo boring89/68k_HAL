@@ -37,6 +37,7 @@
 
 void kernel_main(void)
 {
+    hal_init_console();
     console_init();
 
     hal_init_early();

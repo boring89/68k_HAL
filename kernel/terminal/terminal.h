@@ -6,9 +6,14 @@
 #ifndef KERNEL_TERMINAL_TERMINAL_H
 #define KERNEL_TERMINAL_TERMINAL_H
 
-#include "drivers/vga/vga.h"
 #include "kernel/console/color.h"
 
+/*
+ * Text output with a cursor on the registered text display
+ * (kernel/display/text_display.h). Does nothing without one.
+ */
+
+/* Attach to the registered display and clear it. */
 void terminal_init(void);
 
 void terminal_newline(void);

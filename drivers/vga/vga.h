@@ -8,6 +8,8 @@
 
 #include <stdint.h>
 
+#include "kernel/display/text_display.h"
+
 #define VGA_WIDTH 80
 #define VGA_HEIGHT 25
 
@@ -44,6 +46,9 @@ void vga_set_cursor(
     int x,
     int y
 );
+
+/* The 80x25 text mode screen as the terminal's display. */
+extern const text_display_t vga_text_display;
 
 
 #endif
