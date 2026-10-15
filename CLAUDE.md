@@ -16,10 +16,11 @@ make run        # 在 QEMU 中開機，serial 輸出到 stdio
 make test       # test-host + test-qemu，修改後必須通過
 make test-host  # host 單元測試（tests/host/，含 ASan/UBSan）
 make test-qemu  # 以 -DKERNEL_SELFTEST 編譯 kernel，在 QEMU 中執行 kernel/test/selftest.c
+make test-sst   # SingleStepTests 68000 測資（tests/data/sst/，需自行下載，不在 make test 中；見 docs/m68k.md）
 make clean
 ```
 
-- 需要的套件：見 README.md 的 Building 一節。
+- 需要的套件：見 README.md 的 Building 一節（含 `binutils-m68k-linux-gnu`，組譯 `tests/m68k/*.s`）。
 - 尚未建立：cross compiler（i686-elf-gcc）。
 - CI：`.github/workflows/test.yml` 在 push 到 main 與 PR 時執行 `make test` 與 `make iso`。
 
@@ -37,8 +38,9 @@ hal/           HAL 介面（只有 .h）：cpu、irq、timer、mmu、boot、init
 arch/x86/      CPU：cpu（hal_cpu、控制暫存器）、gdt、interrupt（IDT、例外、IRQ stub）、mmu（分頁、hal_mmu）、io（port I/O）、test
 platform/pc/   PC 平台：boot（Multiboot 進入點、hal_boot）、interrupt（8259 PIC、hal_irq）、timer（PIT、hal_timer）、hal_init.c、test
 drivers/       裝置驅動：vga、serial、ps2_keyboard
-kernel/        與硬體無關的核心：main.c、panic、memory（pmm、heap）、display、console、terminal、keyboard（keycode、state、keychar）、input、shell、log、printf、lib、test
-emu/m68k/      68k CPU 模擬器（cpu、decoder、effective_address、execute、memory）
+kernel/        與硬體無關的核心：main.c、panic、memory（pmm、heap）、display、console、terminal、keyboard（keycode、state、keychar）、input、shell、log、printf、lib、m68k（guest RAM 與示範）、test
+emu/m68k/      68k 虛擬機：Musashi 的封裝層（vm）、A-line trap 分派（trap）、Musashi 設定（m68kconf.h）；freestanding/ 是 kernel 建置用的 libc 替身
+third_party/   第三方原始碼，不修改：musashi（68k CPU 核心，MIT）
 tests/host/    host 單元測試
 docs/          設計文件
 tools/         開發工具
@@ -46,7 +48,7 @@ tools/         開發工具
 
 - 分層與依賴規則、開機流程、介面清單、新增驅動程式的方式：見 `docs/hal.md`。
 - 資料流：IRQ → `drivers/ps2_keyboard` → `input_event` ring buffer → 主迴圈 → terminal → shell
-- Makefile 會自動搜尋 `arch drivers hal kernel platform` 下的 `.c` 與 `.asm`，新增檔案不需修改 Makefile。`emu/` 不編進 kernel，只透過 `HOST_LIB_SOURCES` 在 host 測試中編譯。
+- Makefile 會自動搜尋 `arch drivers emu hal kernel platform` 下的 `.c` 與 `.asm`，新增檔案不需修改 Makefile。`emu/m68k/*.c`（不含子目錄）同時進 host 測試（`HOST_LIB_SOURCES`）；`emu/m68k/freestanding/` 只編進 kernel。`third_party/musashi` 由 Makefile 的 Musashi 區塊另外編譯（`m68kmake` 產生 `m68kops.c`，host 與 kernel 各編一份）。
 - 程式碼在 freestanding 環境執行：沒有 libc，只能使用 `<stdint.h>`、`<stdbool.h>`、`<stdarg.h>`、`<stddef.h>`。字串與記憶體函式使用 `kernel/lib/`（`k_strcmp`、`k_memcpy` 等）。
 
 ## 程式風格
@@ -119,10 +121,11 @@ Claude 依照上方工作規則直接實作。
 - `kernel/memory/pmm`：實體記憶體管理（已完成，見 `docs/pmm.md`）
 - `arch/x86/mmu/paging`：分頁（已完成，見 `docs/paging.md`）
 - HAL：硬體抽象層的邊界（已完成，見 `docs/hal.md`）
+- `emu/m68k`：以 Musashi 為基礎的 68k 虛擬機（M3，已完成，見 `docs/m68k.md`）。注意：這個元件是由使用者睡覺時的自動排程一次做完的，沒有走協作模式的逐步確認，使用者尚未審核；之後修改時請先帶使用者過一遍 `docs/m68k.md`
 
 （之後新增的元件加入此清單）
 
 ## 已知問題（尚未修正）
 
 - heap 大小固定為 1 MiB（開機時由 `pmm_alloc_frames` 提供），用完不會自動擴充（見 `docs/pmm.md` 第 8 節）。
-- `emu/m68k` 的 MOVE 和 ADDI 是寫死的（固定立即值存入 D0），沒有 CCR 旗標。
+- `emu/m68k`（Musashi）的限制：kernel 中不支援 FPU 的 FSIN/FCOS/packed decimal（會 panic，Musashi 的 FPU 無法關閉）；SingleStepTests 中 address error 的測試全部不同（Musashi 沒有 prefetch queue）；其餘差異見 `docs/m68k.md`。guest RAM 固定 4 MiB，映射在虛擬位址 `0x10000000`。
