@@ -15,6 +15,10 @@
 /* Kernel-only, read/write: the only flags used before user mode exists. */
 #define PAGING_KERNEL_FLAGS (PAGING_PRESENT | PAGING_WRITABLE)
 
+/* Page-aligned bounds of .text and .rodata (linker.ld). */
+extern uint8_t _kernel_ro_start[];
+extern uint8_t _kernel_ro_end[];
+
 void paging_init(void)
 {
     /*
@@ -23,6 +27,11 @@ void paging_init(void)
      */
     KASSERT(memory_get_kernel_end() <= PAGING_IDENTITY_END);
     KASSERT(heap_get_start() + KERNEL_HEAP_SIZE <= PAGING_IDENTITY_END);
+
+    uintptr_t ro_start = (uintptr_t)_kernel_ro_start;
+    uintptr_t ro_end = (uintptr_t)_kernel_ro_end;
+
+    KASSERT(ro_start % PMM_FRAME_SIZE == 0 && ro_end % PMM_FRAME_SIZE == 0);
 
     uintptr_t directory_phys = pmm_alloc_frame();
     uintptr_t table_phys = pmm_alloc_frame();
@@ -40,9 +49,21 @@ void paging_init(void)
     k_memset(directory, 0, PMM_FRAME_SIZE);
     k_memset(table, 0, PMM_FRAME_SIZE);
 
-    /* Identity map 0x1000-0x3FFFFF; entry 0 (page 0) stays not present. */
+    /*
+     * Identity map 0x1000-0x3FFFFF; entry 0 (page 0) stays not present.
+     * Kernel code and constants are read-only, so a stray write faults
+     * (with CR0.WP set below) instead of corrupting them.
+     */
     for (uint32_t i = 1; i < PAGING_ENTRIES_PER_TABLE; i++)
-        table[i] = paging_entry_make(i * PMM_FRAME_SIZE, PAGING_KERNEL_FLAGS);
+    {
+        uintptr_t address = i * PMM_FRAME_SIZE;
+        uint32_t flags = PAGING_KERNEL_FLAGS;
+
+        if (address >= ro_start && address < ro_end)
+            flags = PAGING_PRESENT;
+
+        table[i] = paging_entry_make(address, flags);
+    }
 
     directory[0] = paging_entry_make(table_phys, PAGING_KERNEL_FLAGS);
     directory[PAGING_RECURSIVE_INDEX] =

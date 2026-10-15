@@ -105,6 +105,7 @@ mov cr0, <CR0 | 0x80010000>       ; CR0.PG = 1（下一條指令開始翻譯）�
 ② pmm_alloc_frame × 2                                directory、page table 0
 ③ k_memset 清 0                                      PG = 0，可直接用實體位址
 ④ table[1..1023] = identity；table[0] 保持 0          第 0 頁不對應
+   [_kernel_ro_start, _kernel_ro_end) 只設 P（唯讀）     .text、.rodata（linker.ld 的符號）
 ⑤ directory[0] → table；directory[1023] → directory   recursive mapping
 ⑥ cpu_write_cr3(directory)
 ⑦ cpu_write_cr0(CR0 | PG | WP)
@@ -262,7 +263,7 @@ cr2=0 (not present, write, kernel)
 
 1. **不阻止 unmap kernel 自己的頁**：unmap `0x00100000` 會立刻當機，由呼叫端負責。
 2. **空的 page table 不釋放**：每張 4 KiB。
-3. ~~**WP = 0**：唯讀頁對 kernel 無效~~：已開啟 CR0.WP，kernel 寫入唯讀頁會 page fault（`test_paging_fault_read_only`）。但 identity map 仍把 kernel 全部以 RW 對應，`.text`/`.rodata` 實際上還可以被寫入（見第 11 節）。
+3. ~~**WP = 0**：唯讀頁對 kernel 無效~~：已開啟 CR0.WP，kernel 寫入唯讀頁會 page fault（`test_paging_fault_read_only`）。`.text`/`.rodata` 也已以唯讀對應（見第 2 節），寫入會 page fault（`test_paging_kernel_read_only`）。
 4. **只有一個位址空間**：recursive mapping 只能修改目前 CR3 的表。
 5. **identity map 限制在 4 MiB**：kernel 或 heap 變大超過時 `paging_init` 會 `panic`（KASSERT），要擴大 identity 範圍或改用 higher half。
 6. **不是中斷安全的**：不可在 IRQ handler 中呼叫 map/unmap（PMM 也不是）。
@@ -300,6 +301,7 @@ cr2=0 (not present, write, kernel)
   - `paging_map`：同一 frame 對應兩個位址（A 寫 B 讀）、建立新表（PMM 少 1、新表只有 1 格存在）、flags = 0、各種拒絕
   - `paging_unmap`：先讓翻譯進入 TLB 再 unmap，讀取必須 page fault（拿掉 `invlpg` 時這個測試會失敗，已驗證）
   - page fault：CR2 與 error code（未對應的讀取 `0x0`、寫入 `0x2`、null pointer）、WP = 1 時唯讀頁可讀、寫入 fault（error code `0x3`）
+  - kernel 的 `.text`/`.rodata` 寫入會 fault，`.data` 仍可寫入（`test_paging_kernel_read_only`）
   - Multiboot 資料在分頁後可讀
 
 page fault 測試用 `.byte` 寫死 2 bytes 的 `mov` 指令，hook 記錄 CR2 後 `eip += 2` 跳過它；否則 fault 返回會無限重試同一條指令。
@@ -314,7 +316,6 @@ page fault 測試用 `.byte` 寫死 2 bytes 的 `mov` 指令，hook 記錄 CR2 �
 
 ## 11. 之後的工作
 
-- **唯讀 `.text`/`.rodata`**：CR0.WP 已開啟；還需要讓 `linker.ld` 把區段對齊到 4 KiB，再由 `paging_init` 以唯讀對應這些頁。
 - **heap 自動擴充**：用 `pmm_alloc_frame` + `paging_map` 把散落的 frame 接在 heap 結尾之後，不再需要實體連續（`docs/pmm.md` 第 8 節）。
 - **higher half kernel**：如果之後需要每個程式獨立的低位址空間。
 - **多個位址空間**：每個程式一個 directory，共用 kernel 的 PDE；需要修改非目前位址空間的機制（暫時對應視窗）。

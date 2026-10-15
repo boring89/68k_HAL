@@ -474,6 +474,50 @@ static void test_paging_fault_read_only(void)
     SELFTEST_ASSERT(page_fault_code == (EXCEPTION_PF_PRESENT | EXCEPTION_PF_WRITE));
 }
 
+/* Page-aligned bounds of .text and .rodata (linker.ld). */
+extern uint8_t _kernel_ro_start[];
+extern uint8_t _kernel_ro_end[];
+
+static const volatile uint32_t rodata_probe = 0x12345678;
+
+static void test_paging_kernel_read_only(void)
+{
+    /*
+     * The first .text bytes are the Multiboot header, which nothing uses
+     * after boot, so a missing fault would not break the kernel.
+     */
+    uintptr_t text = (uintptr_t)_kernel_ro_start;
+    uintptr_t rodata = (uintptr_t)&rodata_probe;
+
+    SELFTEST_ASSERT(rodata >= (uintptr_t)_kernel_ro_start);
+    SELFTEST_ASSERT(rodata < (uintptr_t)_kernel_ro_end);
+
+    page_fault_expect();
+    test_write(text);
+    exception_set_test_hook(0);
+
+    SELFTEST_ASSERT(page_fault_count == 1);
+    SELFTEST_ASSERT(page_fault_cr2 == text);
+    SELFTEST_ASSERT(page_fault_code == (EXCEPTION_PF_PRESENT | EXCEPTION_PF_WRITE));
+
+    page_fault_expect();
+    test_write(rodata);
+    exception_set_test_hook(0);
+
+    SELFTEST_ASSERT(page_fault_count == 1);
+    SELFTEST_ASSERT(rodata_probe == 0x12345678);
+
+    /* .data right after them stays writable. */
+    static volatile uint32_t data_probe = 1;
+
+    page_fault_expect();
+    test_write((uintptr_t)&data_probe);
+    exception_set_test_hook(0);
+
+    SELFTEST_ASSERT(page_fault_count == 0);
+    SELFTEST_ASSERT(data_probe == 0xDEADBEEF);
+}
+
 static void test_cpu_invlpg(void)
 {
     /* Only checks that it executes; its effect is tested with paging. */
@@ -610,6 +654,7 @@ void selftest_arch_run(void)
     SELFTEST_RUN(test_paging_fault_write_unmapped);
     SELFTEST_RUN(test_paging_fault_null_pointer);
     SELFTEST_RUN(test_paging_fault_read_only);
+    SELFTEST_RUN(test_paging_kernel_read_only);
     SELFTEST_RUN(test_cpu_invlpg);
 }
 

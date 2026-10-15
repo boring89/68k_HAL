@@ -50,4 +50,8 @@ SECTIONS
 
     . = ALIGN(4K);
     _kernel_end = .;
+
+    /* Pages paging_init maps read-only: .text and .rodata. */
+    _kernel_ro_start = ADDR(.text);
+    _kernel_ro_end = ADDR(.data);
 }
