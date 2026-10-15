@@ -64,6 +64,7 @@ The goal is to preserve the simplicity, usability, and software philosophy of th
 | `xorriso` | `xorriso` | Used by `grub-mkrescue` to write the ISO |
 | `mformat` | `mtools` | Used by `grub-mkrescue` to build the EFI image |
 | `qemu-system-i386` | `qemu-system-x86` | Run the kernel and the in-kernel self tests |
+| `python3` (optional) | `python3` | `tools/boot_log.py`: capture and compare boot logs when refactoring |
 
 ```bash
 sudo apt install build-essential nasm binutils grub2-common grub-pc-bin xorriso mtools qemu-system-x86
