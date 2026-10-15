@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "main.h"
+
 #include "kernel/console/console.h"
 #include "kernel/terminal/terminal.h"
 #include "kernel/terminal/input.h"
@@ -20,7 +22,6 @@
 #include "kernel/memory/memory.h"
 #include "kernel/memory/heap.h"
 #include "kernel/memory/pmm.h"
-#include "platform/pc/boot/multiboot.h"
 
 #include "kernel/panic/panic.h"
 
@@ -34,34 +35,11 @@
 
 #include <stdint.h>
 
-void kernel_main(
-    uint32_t magic,
-    uint32_t mbi_address)
+void kernel_main(void)
 {
-
     console_init();
 
-    if (magic != 0x2BADB002)
-    {
-        kernel_log(LOG_ERROR, "Invalid Multiboot magic");
-
-        hal_cpu_halt();
-    }
-
-    multiboot_init(mbi_address);
-
-    kernel_log(LOG_INFO, "Multiboot initialized");
-
-    const multiboot_info_t *mbi =
-        multiboot_get_info();
-
-    kernel_printf(
-        "Multiboot flags: %x\n",
-        mbi->flags);
-
-    kernel_printf(
-        "Multiboot info: %x\n",
-        mbi_address);
+    hal_init_early();
 
     memory_init();
     pmm_init(memory_get_kernel_start(), memory_get_kernel_end());

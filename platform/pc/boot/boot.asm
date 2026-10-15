@@ -13,7 +13,7 @@ section .text
 
 global _start
 
-extern kernel_main
+extern pc_entry
 extern gdt_init
 
 _start:
@@ -27,7 +27,7 @@ _start:
 
 	push esi
 	push edi
-	call kernel_main
+	call pc_entry
 
 hang:
 	cli

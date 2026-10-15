@@ -13,6 +13,13 @@
  */
 
 /*
+ * Check and record what the boot loader passed in. Call once, first
+ * thing after console_init (it logs, and halts on a bad boot). Afterwards
+ * hal/boot.h may be used.
+ */
+void hal_init_early(void);
+
+/*
  * Bring up the CPU tables, the MMU, the interrupt controller and the
  * system timer. Call once, after pmm_init and heap_init, with
  * interrupts disabled; they stay disabled. Afterwards hal/irq.h,

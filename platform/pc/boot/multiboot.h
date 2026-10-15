@@ -8,6 +8,10 @@
 
 #include <stdint.h>
 
+/* EAX at kernel entry when a Multiboot loader started the kernel
+ * (Multiboot Specification 0.6.96, 3.2 Machine state). */
+#define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
+
 /* multiboot_info_t.flags bit 6: mmap_addr / mmap_length are valid
  * (Multiboot Specification 0.6.96, 3.3 Boot information format). */
 #define MULTIBOOT_INFO_MEM_MAP (1u << 6)
