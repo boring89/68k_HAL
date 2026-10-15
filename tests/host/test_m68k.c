@@ -5,6 +5,7 @@
 
 #include "test.h"
 
+#include "emu/m68k/trap.h"
 #include "emu/m68k/vm.h"
 
 #include <stdint.h>
@@ -143,6 +144,69 @@ static void test_divide_by_zero_exception(void)
     TEST_ASSERT_EQ_INT(7, d(1));
 }
 
+static void test_aline_trap_logged(void)
+{
+    m68k_trap_record_t rec;
+
+    run_program("aline", M68K_VM_CPU_68030);
+
+    /* Execution continues after each trap. */
+    TEST_ASSERT_EQ_INT(1, d(0));
+    TEST_ASSERT_EQ_INT(2, d(1));
+    TEST_ASSERT_EQ_INT(3, d(2));
+
+    TEST_ASSERT_EQ_INT(2, m68k_trap_total());
+    TEST_ASSERT_EQ_INT(0, m68k_trap_log_get(0, &rec));
+    TEST_ASSERT_EQ_INT(0xA9F4, rec.opcode);
+    TEST_ASSERT_EQ_INT(PROGRAM_BASE + 2, rec.pc);
+    TEST_ASSERT_EQ_INT(0, m68k_trap_log_get(1, &rec));
+    TEST_ASSERT_EQ_INT(0xA000, rec.opcode);
+    TEST_ASSERT_EQ_INT(-1, m68k_trap_log_get(2, &rec));
+}
+
+static void handler_set_d5(uint16_t opcode, uint32_t pc)
+{
+    (void)pc;
+    m68k_vm_set_reg(M68K_VM_REG_D0 + 5, opcode);
+}
+
+static void test_aline_handler_called(void)
+{
+    static const uint8_t code[] = {
+        0xA9, 0xF4,                 /* A-line trap $A9F4 */
+        0x4E, 0x72, 0x27, 0x00,     /* STOP #$2700 */
+    };
+
+    memset(ram, 0, sizeof(ram));
+    m68k_vm_init(ram, sizeof(ram), M68K_VM_CPU_68030);
+    TEST_ASSERT_EQ_INT(0, m68k_trap_set_handler(0x9F4, handler_set_d5));
+    TEST_ASSERT_EQ_INT(-1, m68k_trap_set_handler(0x1000, handler_set_d5));
+    m68k_vm_load(PROGRAM_BASE, code, sizeof(code));
+    m68k_vm_reset(PROGRAM_BASE, STACK_TOP);
+    m68k_vm_run(MAX_CYCLES);
+
+    TEST_ASSERT_EQ_INT(0xA9F4, d(5));
+    TEST_ASSERT(m68k_vm_halted());
+}
+
+static void test_trap_log_wraps(void)
+{
+    m68k_trap_record_t rec;
+
+    m68k_trap_init();
+    for (uint32_t i = 0; i < M68K_TRAP_LOG_SIZE + 3; i++)
+    {
+        m68k_trap_dispatch((uint16_t)(0xA000 + i), 0x100 + i);
+    }
+
+    TEST_ASSERT_EQ_INT(M68K_TRAP_LOG_SIZE + 3, m68k_trap_total());
+    TEST_ASSERT_EQ_INT(M68K_TRAP_LOG_SIZE, m68k_trap_log_length());
+    TEST_ASSERT_EQ_INT(0, m68k_trap_log_get(0, &rec));
+    TEST_ASSERT_EQ_INT(0xA003, rec.opcode);
+    TEST_ASSERT_EQ_INT(0, m68k_trap_log_get(M68K_TRAP_LOG_SIZE - 1, &rec));
+    TEST_ASSERT_EQ_INT(0xA000 + M68K_TRAP_LOG_SIZE + 2, rec.opcode);
+}
+
 static void test_run_cycle_limit(void)
 {
     /* BRA.B -2 (0x60FE) loops forever; run must return at the limit. */
@@ -171,6 +235,9 @@ int main(void)
     TEST_RUN(test_branch_loop);
     TEST_RUN(test_subroutine_stack);
     TEST_RUN(test_divide_by_zero_exception);
+    TEST_RUN(test_aline_trap_logged);
+    TEST_RUN(test_aline_handler_called);
+    TEST_RUN(test_trap_log_wraps);
     TEST_RUN(test_run_cycle_limit);
 
     return TEST_REPORT("test_m68k");

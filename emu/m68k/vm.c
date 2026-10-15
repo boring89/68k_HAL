@@ -7,11 +7,18 @@
 
 #include <stddef.h>
 
+#include "emu/m68k/trap.h"
 #include "kernel/lib/k_memory.h"
 #include "third_party/musashi/m68k.h"
 
 /* STOP #imm opcode (M68000 Programmer's Reference Manual, STOP). */
 #define OPCODE_STOP 0x4E72
+
+/* A-line opcodes are $Axxx (M68000 Programmer's Reference Manual, 8.2). */
+#define OPCODE_LINE_MASK 0xF000
+#define OPCODE_LINE_A 0xA000
+
+#define MAX_TRAP_CHAIN 65536
 
 static uint8_t *vm_ram;
 static uint32_t vm_ram_size;
@@ -101,10 +108,31 @@ void m68k_write_memory_32(unsigned int address, unsigned int value)
 }
 
 
-/* Called by Musashi before every instruction (see m68kconf.h). */
+/*
+ * Called by Musashi before every instruction (see m68kconf.h).
+ *
+ * A-line opcodes are handled here, in a loop, because Musashi would execute
+ * whatever sits at the new PC (e.g. a STOP right after a trap) without
+ * calling the hook again. The cap keeps a handler that keeps redirecting PC
+ * back to a trap from hanging the host; after it, Musashi takes the normal
+ * line-A exception.
+ */
 void m68k_vm_instr_hook(unsigned int pc)
 {
-    if (m68k_vm_read16(pc) == OPCODE_STOP)
+    uint16_t opcode = (uint16_t)m68k_vm_read16(pc);
+
+    for (uint32_t i = 0;
+         (opcode & OPCODE_LINE_MASK) == OPCODE_LINE_A && i < MAX_TRAP_CHAIN;
+         i++)
+    {
+        /* Skip the opcode first so a handler can redirect PC. */
+        m68k_set_reg(M68K_REG_PC, pc + 2);
+        m68k_trap_dispatch(opcode, pc);
+        pc = m68k_get_reg(NULL, M68K_REG_PC);
+        opcode = (uint16_t)m68k_vm_read16(pc);
+    }
+
+    if (opcode == OPCODE_STOP)
     {
         /* Let STOP execute, then leave the run loop. */
         vm_halted = true;
@@ -123,6 +151,7 @@ int m68k_vm_init(uint8_t *ram, uint32_t size, m68k_vm_cpu_t cpu)
     vm_ram = ram;
     vm_ram_size = size;
     vm_halted = false;
+    m68k_trap_init();
 
     if (!vm_core_initialized)
     {
@@ -157,6 +186,7 @@ int m68k_vm_reset(uint32_t entry, uint32_t sp)
     m68k_vm_write32(0, sp);
     m68k_vm_write32(4, entry);
     vm_halted = false;
+    m68k_trap_clear_log();
     m68k_pulse_reset();
     return 0;
 }
