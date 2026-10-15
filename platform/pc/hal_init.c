@@ -5,6 +5,7 @@
 
 #include "hal/init.h"
 
+#include "drivers/ps2_keyboard/ps2_keyboard.h"
 #include "drivers/serial/serial.h"
 #include "drivers/vga/vga.h"
 
@@ -122,6 +123,7 @@ void hal_init(void)
     pic_init();
     kernel_log(LOG_INFO, "PIC initialized");
 
-    /* After pic_init: the PIT unmasks its line. */
+    /* After pic_init: the PIT and the keyboard unmask their lines. */
     pit_init(PC_TIMER_FREQUENCY);
+    ps2_keyboard_init();
 }

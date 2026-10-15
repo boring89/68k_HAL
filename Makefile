@@ -65,6 +65,8 @@ all: $(BUILD)/kernel.elf
 HOST_LIB_SOURCES := \
 	arch/x86/interrupt/page_fault.c \
 	arch/x86/mmu/paging_entry.c \
+	drivers/ps2_keyboard/keymap.c \
+	drivers/ps2_keyboard/scancode.c \
 	kernel/console/sink.c \
 	kernel/display/text_display.c \
 	kernel/lib/k_string.c \

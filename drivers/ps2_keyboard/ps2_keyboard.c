@@ -14,17 +14,13 @@
 
 #include "arch/x86/io/io.h"
 
-void keyboard_init(void)
-{
-    scancode_init();
+/* 8042 controller data port and the keyboard's IRQ (OSDev Wiki "8042 PS/2 Controller"). */
+#define PS2_DATA_PORT 0x60
+#define PS2_KEYBOARD_IRQ 1
 
-    hal_irq_register(1, keyboard_handler);
-    hal_irq_unmask(1);
-}
-
-void keyboard_handler(void)
+static void ps2_keyboard_handler(void)
 {
-    uint8_t scancode = inb(0x60);
+    uint8_t scancode = inb(PS2_DATA_PORT);
 
     keyboard_key_event_t key;
 
@@ -44,4 +40,12 @@ void keyboard_handler(void)
             input_event_push(&event);
         }
     }
+}
+
+void ps2_keyboard_init(void)
+{
+    scancode_init();
+
+    hal_irq_register(PS2_KEYBOARD_IRQ, ps2_keyboard_handler);
+    hal_irq_unmask(PS2_KEYBOARD_IRQ);
 }

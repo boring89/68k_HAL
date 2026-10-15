@@ -27,10 +27,12 @@ void hal_init_console(void);
 void hal_init_early(void);
 
 /*
- * Bring up the CPU tables, the MMU, the interrupt controller and the
- * system timer. Call once, after pmm_init and heap_init, with
- * interrupts disabled; they stay disabled. Afterwards hal/irq.h,
- * hal/mmu.h and hal/timer.h may be used.
+ * Bring up the CPU tables, the MMU, the interrupt controller, the
+ * system timer and the input devices. Call once, after pmm_init and
+ * heap_init, with interrupts disabled; they stay disabled. Afterwards
+ * hal/irq.h, hal/mmu.h and hal/timer.h may be used. Devices only start
+ * delivering events once interrupts are enabled, so the kernel services
+ * they feed (the input event buffer) must be ready by then.
  */
 void hal_init(void);
 

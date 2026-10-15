@@ -6,9 +6,11 @@
 #ifndef DRIVERS_PS2_KEYBOARD_PS2_KEYBOARD_H
 #define DRIVERS_PS2_KEYBOARD_PS2_KEYBOARD_H
 
-void keyboard_init(void);
-
-void keyboard_handler(void);
+/*
+ * Start the PS/2 keyboard on IRQ 1. Key presses and releases are pushed
+ * to the input event buffer (kernel/input) from the interrupt handler.
+ */
+void ps2_keyboard_init(void);
 
 
 #endif

@@ -15,7 +15,6 @@
 
 #include "kernel/input/event_buffer.h"
 
-#include "drivers/ps2_keyboard/ps2_keyboard.h"
 #include "kernel/keyboard/state.h"
 #include "kernel/keyboard/keychar.h"
 
@@ -69,7 +68,6 @@ void kernel_main(void)
     terminal_input_init();
     terminal_input_set_callback(shell_execute);
     shell_init();
-    keyboard_init();
     keyboard_state_init();
 
     hal_cpu_enable_interrupts();
