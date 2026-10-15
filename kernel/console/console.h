@@ -7,6 +7,10 @@
 #define KERNEL_CONSOLE_CONSOLE_H
 
 #include "color.h"
+/*
+ * Set up the terminal. Other outputs are added afterwards with
+ * console_register_sink (sink.h).
+ */
 void console_init(void);
 
 void console_write(const char *str);

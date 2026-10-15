@@ -58,8 +58,12 @@ void serial_write(const char *str)
     }
 }
 
-void serial_write_line(const char *str)
+static void serial_sink_write_char(char c)
 {
-    serial_write(str);
-    serial_write("\n");
+    serial_write_char(c);
 }
+
+const console_sink_t serial_console_sink = {
+    .write = serial_write,
+    .write_char = serial_sink_write_char,
+};

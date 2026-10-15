@@ -5,6 +5,8 @@
 
 #include "hal/init.h"
 
+#include "drivers/serial/serial.h"
+
 #include "platform/pc/boot/multiboot.h"
 #include "platform/pc/interrupt/pic.h"
 #include "platform/pc/timer/pit.h"
@@ -44,6 +46,9 @@ void pc_entry(uint32_t magic, uint32_t info)
 
 void hal_init_early(void)
 {
+    serial_init();
+    console_register_sink(&serial_console_sink);
+
     if (boot_magic != MULTIBOOT_BOOTLOADER_MAGIC)
     {
         kernel_log(LOG_ERROR, "Invalid Multiboot magic");

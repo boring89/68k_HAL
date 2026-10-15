@@ -65,6 +65,7 @@ all: $(BUILD)/kernel.elf
 HOST_LIB_SOURCES := \
 	arch/x86/interrupt/page_fault.c \
 	arch/x86/mmu/paging_entry.c \
+	kernel/console/sink.c \
 	kernel/lib/k_string.c \
 	kernel/lib/k_number.c \
 	kernel/lib/k_memory.c \
