@@ -11,12 +11,8 @@
 #include "kernel/log/log.h"
 #include "kernel/printf/printf.h"
 
-#include "arch/x86/interrupt/idt.h"
-#include "platform/pc/interrupt/pic.h"
-
 #include "kernel/input/event_buffer.h"
 
-#include "platform/pc/timer/pit.h"
 #include "kernel/keyboard/keyboard.h"
 #include "kernel/keyboard/state.h"
 #include "kernel/keyboard/keychar.h"
@@ -25,11 +21,11 @@
 #include "kernel/memory/heap.h"
 #include "kernel/memory/pmm.h"
 #include "kernel/memory/multiboot.h"
-#include "arch/x86/mmu/paging.h"
 
 #include "kernel/panic/panic.h"
 
 #include "hal/cpu.h"
+#include "hal/init.h"
 #include "hal/timer.h"
 
 #ifdef KERNEL_SELFTEST
@@ -87,15 +83,8 @@ void kernel_main(
     kernel_printf("Kernel end: %x\n", memory_get_kernel_end());
 
     kernel_log(LOG_INFO, "Kernel Booting...");
-    idt_init();
-    kernel_log(LOG_INFO, "IDT loaded");
+    hal_init();
 
-    /* After idt_init so a page fault is reported instead of triple faulting. */
-    paging_init();
-    kernel_log(LOG_INFO, "Paging enabled");
-
-    pic_init();
-    kernel_log(LOG_INFO, "PIC initialized");
     input_event_buffer_init();
 
     terminal_input_init();
@@ -103,8 +92,6 @@ void kernel_main(
     shell_init();
     keyboard_init();
     keyboard_state_init();
-
-    pit_init(100);
 
     hal_cpu_enable_interrupts();
 

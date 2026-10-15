@@ -99,7 +99,7 @@ static void test_heap_region_reserved_in_pmm(void)
 
 static void test_hal_timer_frequency(void)
 {
-    /* main.c starts the PIT at 100 Hz. */
+    /* platform/pc/hal_init.c starts the PIT at 100 Hz. */
     SELFTEST_ASSERT(hal_timer_frequency() == 100);
 }
 
