@@ -5,7 +5,7 @@
 
 #include "pmm.h"
 
-#include "platform/pc/boot/multiboot.h"
+#include "hal/boot.h"
 #include "kernel/lib/k_memory.h"
 
 /* 32-bit physical address space without PAE: 4 GiB / 4 KiB frames. */
@@ -119,43 +119,30 @@ void pmm_init(
     pmm_hint = 0;
     pmm_limit = 0;
 
-    const multiboot_mmap_entry_t *entry;
+    hal_memory_region_t region;
 
     /* Pass 1: free every available region. */
-    for (entry = multiboot_mmap_first();
-         entry != NULL;
-         entry = multiboot_mmap_next(entry))
+    for (unsigned int i = 0; hal_boot_memory_region(i, &region) == 0; i++)
     {
-        if (entry->type == MULTIBOOT_MEMORY_AVAILABLE)
-            pmm_free_region(entry->addr, entry->addr + entry->len);
+        if (region.type == HAL_MEMORY_AVAILABLE)
+            pmm_free_region(region.base, region.base + region.length);
     }
 
     pmm_total_count = pmm_free_count;
 
     /* Pass 2: overlapping non-available regions win (stay conservative). */
-    for (entry = multiboot_mmap_first();
-         entry != NULL;
-         entry = multiboot_mmap_next(entry))
+    for (unsigned int i = 0; hal_boot_memory_region(i, &region) == 0; i++)
     {
-        if (entry->type != MULTIBOOT_MEMORY_AVAILABLE)
-            pmm_reserve_region(entry->addr, entry->addr + entry->len);
+        if (region.type != HAL_MEMORY_AVAILABLE)
+            pmm_reserve_region(region.base, region.base + region.length);
     }
 
     /* Pass 3: memory that is RAM but already in use. */
     pmm_reserve_region(0, PMM_LOW_MEMORY_END);
     pmm_reserve_region(kernel_start, kernel_end);
 
-    const multiboot_info_t *mbi = multiboot_get_info();
-    uint64_t mbi_address = (uintptr_t)mbi;
-
-    pmm_reserve_region(mbi_address, mbi_address + sizeof(*mbi));
-
-    if (mbi->flags & MULTIBOOT_INFO_MEM_MAP)
-    {
-        pmm_reserve_region(
-            mbi->mmap_addr,
-            (uint64_t)mbi->mmap_addr + mbi->mmap_length);
-    }
+    for (unsigned int i = 0; hal_boot_reserved_region(i, &region) == 0; i++)
+        pmm_reserve_region(region.base, region.base + region.length);
 }
 
 int pmm_reserve_range(

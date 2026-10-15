@@ -15,7 +15,7 @@
 #include "kernel/lib/k_number.h"
 
 #include "kernel/memory/memory.h"
-#include "platform/pc/boot/multiboot.h"
+#include "hal/boot.h"
 
 static void cmd_help(
     int argc,
@@ -419,13 +419,13 @@ static const char *mmap_type_name(uint32_t type)
 {
     switch (type)
     {
-    case MULTIBOOT_MEMORY_AVAILABLE:
+    case HAL_MEMORY_AVAILABLE:
         return "available";
-    case MULTIBOOT_MEMORY_ACPI_RECLAIMABLE:
+    case HAL_MEMORY_ACPI_RECLAIMABLE:
         return "ACPI reclaimable";
-    case MULTIBOOT_MEMORY_NVS:
+    case HAL_MEMORY_ACPI_NVS:
         return "ACPI NVS";
-    case MULTIBOOT_MEMORY_BADRAM:
+    case HAL_MEMORY_UNUSABLE:
         return "bad RAM";
     default:
         return "reserved";
@@ -439,10 +439,9 @@ static void cmd_mmap(
     (void)argc;
     (void)argv;
 
-    const multiboot_mmap_entry_t *entry =
-        multiboot_mmap_first();
+    hal_memory_region_t region;
 
-    if (entry == NULL)
+    if (hal_boot_memory_region(0, &region) != 0)
     {
         terminal_write_line("No memory map");
         return;
@@ -450,19 +449,19 @@ static void cmd_mmap(
 
     terminal_write_line("Base              Length            Type");
 
-    for (; entry != NULL; entry = multiboot_mmap_next(entry))
+    for (unsigned int i = 0; hal_boot_memory_region(i, &region) == 0; i++)
     {
         char buffer[32];
 
-        write_hex64(entry->addr);
+        write_hex64(region.base);
         terminal_put_char(' ');
-        write_hex64(entry->len);
+        write_hex64(region.length);
         terminal_put_char(' ');
 
-        k_utoa(entry->type, buffer);
+        k_utoa(region.type, buffer);
         terminal_write(buffer);
         terminal_write(" (");
-        terminal_write(mmap_type_name(entry->type));
+        terminal_write(mmap_type_name(region.type));
         terminal_write_line(")");
     }
 }

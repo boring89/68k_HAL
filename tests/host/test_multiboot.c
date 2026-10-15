@@ -13,6 +13,7 @@
 #include <sys/mman.h>
 
 #include "platform/pc/boot/multiboot.h"
+#include "hal/boot.h"
 
 /*
  * multiboot_info_t stores 32-bit addresses, so the fake boot data must
@@ -158,6 +159,84 @@ static void test_short_size_rejected(void)
     TEST_ASSERT(multiboot_mmap_first() == NULL);
 }
 
+static void test_hal_memory_regions(void)
+{
+    reset();
+
+    uint8_t *end = put_entry(table, 20, 0x0, 0x9FC00, 1);
+    end = put_entry(end, 20, 0x9FC00, 0x400, 2);
+    end = put_entry(end, 20, 0x100000, 0x7EE0000, 1);
+    /* Unknown types pass through unchanged. */
+    end = put_entry(end, 20, 0xFFFC0000, 0x40000, 12);
+    boot(MULTIBOOT_INFO_MEM_MAP, end);
+
+    hal_memory_region_t region;
+
+    TEST_ASSERT_EQ_INT(0, hal_boot_memory_region(0, &region));
+    TEST_ASSERT_EQ_INT(0x0, region.base);
+    TEST_ASSERT_EQ_INT(0x9FC00, region.length);
+    TEST_ASSERT_EQ_INT(HAL_MEMORY_AVAILABLE, region.type);
+
+    TEST_ASSERT_EQ_INT(0, hal_boot_memory_region(1, &region));
+    TEST_ASSERT_EQ_INT(HAL_MEMORY_RESERVED, region.type);
+
+    TEST_ASSERT_EQ_INT(0, hal_boot_memory_region(2, &region));
+    TEST_ASSERT_EQ_INT(0x100000, region.base);
+    TEST_ASSERT_EQ_INT(0x7EE0000, region.length);
+
+    TEST_ASSERT_EQ_INT(0, hal_boot_memory_region(3, &region));
+    TEST_ASSERT_EQ_INT(12, region.type);
+
+    TEST_ASSERT_EQ_INT(-1, hal_boot_memory_region(4, &region));
+    TEST_ASSERT_EQ_INT(-1, hal_boot_memory_region(0, NULL));
+}
+
+static void test_hal_memory_regions_without_map(void)
+{
+    reset();
+
+    uint8_t *end = put_entry(table, 20, 0, 0x9FC00, 1);
+    boot(0, end);
+
+    hal_memory_region_t region;
+
+    TEST_ASSERT_EQ_INT(-1, hal_boot_memory_region(0, &region));
+}
+
+static void test_hal_reserved_regions(void)
+{
+    reset();
+
+    uint8_t *end = put_entry(table, 20, 0, 0x9FC00, 1);
+    boot(MULTIBOOT_INFO_MEM_MAP, end);
+
+    hal_memory_region_t region;
+
+    TEST_ASSERT_EQ_INT(0, hal_boot_reserved_region(0, &region));
+    TEST_ASSERT_EQ_INT(addr32(mbi), region.base);
+    TEST_ASSERT_EQ_INT(sizeof(multiboot_info_t), region.length);
+    TEST_ASSERT_EQ_INT(HAL_MEMORY_RESERVED, region.type);
+
+    TEST_ASSERT_EQ_INT(0, hal_boot_reserved_region(1, &region));
+    TEST_ASSERT_EQ_INT(addr32(table), region.base);
+    TEST_ASSERT_EQ_INT(24, region.length);
+
+    TEST_ASSERT_EQ_INT(-1, hal_boot_reserved_region(2, &region));
+    TEST_ASSERT_EQ_INT(-1, hal_boot_reserved_region(0, NULL));
+}
+
+/* Without flags bit 6 the memory map is not boot data to keep. */
+static void test_hal_reserved_regions_without_map(void)
+{
+    reset();
+    boot(0, table);
+
+    hal_memory_region_t region;
+
+    TEST_ASSERT_EQ_INT(0, hal_boot_reserved_region(0, &region));
+    TEST_ASSERT_EQ_INT(-1, hal_boot_reserved_region(1, &region));
+}
+
 int main(void)
 {
     area = mmap(NULL, AREA_SIZE, PROT_READ | PROT_WRITE,
@@ -176,6 +255,10 @@ int main(void)
     TEST_RUN(test_larger_entry_uses_size_field);
     TEST_RUN(test_truncated_entry_rejected);
     TEST_RUN(test_short_size_rejected);
+    TEST_RUN(test_hal_memory_regions);
+    TEST_RUN(test_hal_memory_regions_without_map);
+    TEST_RUN(test_hal_reserved_regions);
+    TEST_RUN(test_hal_reserved_regions_without_map);
 
     munmap(area, AREA_SIZE);
 

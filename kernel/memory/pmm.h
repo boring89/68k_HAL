@@ -23,9 +23,9 @@
 #define PMM_FRAME_SIZE 4096
 
 /*
- * Build the bitmap from the Multiboot memory map (multiboot_init must
- * have run). Reserves the low 1 MiB, [kernel_start, kernel_end), the
- * Multiboot info structure and the memory map. Resets all state.
+ * Build the bitmap from the boot memory map (hal/boot.h). Reserves the
+ * low 1 MiB, [kernel_start, kernel_end) and the boot information
+ * itself. Resets all state.
  */
 void pmm_init(
     uintptr_t kernel_start,
