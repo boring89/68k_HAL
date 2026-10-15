@@ -1,6 +1,6 @@
 # 分頁（Paging）
 
-`kernel/memory/paging.c`、`kernel/memory/paging.h`、`kernel/memory/paging_entry.c`、`kernel/memory/paging_entry.h`、`arch/x86/cpu/cpu.h`
+`arch/x86/mmu/paging.c`、`arch/x86/mmu/paging.h`、`arch/x86/mmu/paging_entry.c`、`arch/x86/mmu/paging_entry.h`、`arch/x86/cpu/cpu.h`
 
 分頁讓 CPU 在每一次記憶體存取時，把程式使用的**虛擬位址**翻譯成 RAM 上的**實體位址**。翻譯規則寫在 kernel 維護的分頁表裡，由 CPU 的 MMU 自動查詢。目前的用途是抓 bug（null pointer、存取未對應的位址會立刻 page fault），之後是 heap 擴充、記憶體保護與多個位址空間的基礎。
 

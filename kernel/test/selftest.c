@@ -11,7 +11,7 @@
 #include "kernel/printf/printf.h"
 #include "kernel/memory/heap.h"
 #include "kernel/memory/multiboot.h"
-#include "kernel/memory/paging.h"
+#include "arch/x86/mmu/paging.h"
 #include "kernel/memory/pmm.h"
 #include "arch/x86/interrupt/exception.h"
 #include "arch/x86/interrupt/irq_stub.h"

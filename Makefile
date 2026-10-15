@@ -64,13 +64,13 @@ all: $(BUILD)/kernel.elf
 # Hardware-independent sources that can be built and tested on the host.
 HOST_LIB_SOURCES := \
 	arch/x86/interrupt/page_fault.c \
+	arch/x86/mmu/paging_entry.c \
 	kernel/lib/k_string.c \
 	kernel/lib/k_number.c \
 	kernel/lib/k_memory.c \
 	kernel/lib/ring_buffer.c \
 	kernel/memory/heap.c \
 	kernel/memory/multiboot.c \
-	kernel/memory/paging_entry.c \
 	kernel/memory/pmm.c \
 	kernel/shell/parser.c \
 	$(wildcard emu/m68k/*.c)

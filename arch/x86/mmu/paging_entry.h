@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#ifndef KERNEL_MEMORY_PAGING_ENTRY_H
-#define KERNEL_MEMORY_PAGING_ENTRY_H
+#ifndef ARCH_X86_MMU_PAGING_ENTRY_H
+#define ARCH_X86_MMU_PAGING_ENTRY_H
 
 #include <stdint.h>
 

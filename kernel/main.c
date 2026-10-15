@@ -25,7 +25,7 @@
 #include "kernel/memory/heap.h"
 #include "kernel/memory/pmm.h"
 #include "kernel/memory/multiboot.h"
-#include "kernel/memory/paging.h"
+#include "arch/x86/mmu/paging.h"
 
 #include "kernel/panic/panic.h"
 

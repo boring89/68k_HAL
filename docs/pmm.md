@@ -251,4 +251,4 @@ Base              Length            Type
 
 - ~~heap 改向 PMM 要記憶體~~：已完成。`kernel_main` 在 `pmm_init` 之後用 `pmm_alloc_frames(KERNEL_HEAP_SIZE / PMM_FRAME_SIZE)` 取得 1 MiB 連續區域交給 `heap_init`，失敗時 `panic`；過渡期的 `pmm_reserve_range` 已移除。
 - heap 自動擴充：用完 1 MiB 時再向 PMM 要 frame。新的 frame 不一定接在舊區域後面；分頁已完成，可以用 `pmm_alloc_frame` + `paging_map` 把它們接在 heap 結尾的虛擬位址之後（`docs/paging.md` 第 11 節）。
-- ~~分頁（`kernel/memory/paging`）~~：已完成，見 `docs/paging.md`。page table 的 frame 由 `pmm_alloc_frame` 提供，由分頁模組清 0；開機時的 directory 與第一張 page table 是 heap 之後的頭兩個 frame（QEMU 上為 `0x32A000`、`0x32B000`）。
+- ~~分頁（`arch/x86/mmu/paging`）~~：已完成，見 `docs/paging.md`。page table 的 frame 由 `pmm_alloc_frame` 提供，由分頁模組清 0；開機時的 directory 與第一張 page table 是 heap 之後的頭兩個 frame（QEMU 上為 `0x32A000`、`0x32B000`）。

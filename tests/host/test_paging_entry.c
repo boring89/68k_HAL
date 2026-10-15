@@ -7,7 +7,7 @@
 
 #include <stdint.h>
 
-#include "kernel/memory/paging_entry.h"
+#include "arch/x86/mmu/paging_entry.h"
 
 static void test_index_vga_buffer(void)
 {

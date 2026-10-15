@@ -5,10 +5,10 @@
 
 #include "paging.h"
 
-#include "heap.h"
-#include "memory.h"
-#include "multiboot.h"
-#include "pmm.h"
+#include "kernel/memory/heap.h"
+#include "kernel/memory/memory.h"
+#include "kernel/memory/multiboot.h"
+#include "kernel/memory/pmm.h"
 #include "kernel/lib/k_memory.h"
 #include "kernel/panic/panic.h"
 #include "arch/x86/cpu/cpu.h"
