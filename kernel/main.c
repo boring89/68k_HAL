@@ -15,7 +15,7 @@
 
 #include "kernel/input/event_buffer.h"
 
-#include "kernel/keyboard/keyboard.h"
+#include "drivers/ps2_keyboard/ps2_keyboard.h"
 #include "kernel/keyboard/state.h"
 #include "kernel/keyboard/keychar.h"
 

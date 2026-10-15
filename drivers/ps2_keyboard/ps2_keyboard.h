@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#ifndef KERNEL_KEYBOARD_KEYBOARD_H
-#define KERNEL_KEYBOARD_KEYBOARD_H
+#ifndef DRIVERS_PS2_KEYBOARD_PS2_KEYBOARD_H
+#define DRIVERS_PS2_KEYBOARD_PS2_KEYBOARD_H
 
 void keyboard_init(void);
 

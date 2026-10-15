@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#include "keyboard.h"
+#include "ps2_keyboard.h"
 #include "scancode.h"
 #include "keymap.h"
 

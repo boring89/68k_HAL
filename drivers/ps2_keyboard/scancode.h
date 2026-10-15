@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#ifndef KERNEL_KEYBOARD_SCANCODE_H
-#define KERNEL_KEYBOARD_SCANCODE_H
+#ifndef DRIVERS_PS2_KEYBOARD_SCANCODE_H
+#define DRIVERS_PS2_KEYBOARD_SCANCODE_H
 
 #include <stdint.h>
 #include <stdbool.h>
