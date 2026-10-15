@@ -24,23 +24,28 @@ make clean
 
 ### 測試
 
-- 不依賴硬體的模組（`kernel/lib`、`kernel/shell/parser.c`、`emu/m68k`）放在 `tests/host/test_<模組>.c`，使用 `tests/host/test.h` 的巨集。新增可在 host 編譯的模組時，要加入 Makefile 的 `HOST_LIB_SOURCES`。
-- 需要硬體或中斷的測試放在 `kernel/test/selftest.c`，用 `SELFTEST_RUN` 註冊。
+- 不依賴硬體的模組（例如 `kernel/lib`、`kernel/terminal/terminal.c`、`kernel/console/sink.c`、`platform/pc/boot/multiboot.c`、`emu/m68k`；完整清單見 Makefile 的 `HOST_LIB_SOURCES`）放在 `tests/host/test_<模組>.c`，使用 `tests/host/test.h` 的巨集。新增可在 host 編譯的模組時，要加入 `HOST_LIB_SOURCES`。
+- 需要硬體或中斷的測試依所屬的層放在 `kernel/test/selftest.c`、`arch/x86/test/selftest_x86.c` 或 `platform/pc/test/selftest_pc.c`，用 `SELFTEST_ASSERT` 檢查、`SELFTEST_RUN` 執行（`kernel/test/selftest.h`）。
+- `make test` 第一步是 `tools/check_boundary.sh`（層之間的 include 規則，見 `docs/hal.md` 第 7 節）。新增規則時要加上 `tests/boundary/<規則>/` fixture。
+- 重構時用 `tools/boot_log.py` 比較前後的開機 log 與 VGA 畫面（需要 `python3`，不在 `make test` 中）。
 
 ## 目錄結構
 
 ```
-boot/          Multiboot 進入點（boot.asm）、GDT
-arch/x86/      x86 硬體驅動：vga、serial、io（port I/O）、cpu（控制暫存器、invlpg）
-kernel/        核心：main.c、interrupt、panic、memory、keyboard、input、terminal、shell、console、log、printf、lib
+hal/           HAL 介面（只有 .h）：cpu、irq、timer、mmu、boot、init
+arch/x86/      CPU：cpu（hal_cpu、控制暫存器）、gdt、interrupt（IDT、例外、IRQ stub）、mmu（分頁、hal_mmu）、io（port I/O）、test
+platform/pc/   PC 平台：boot（Multiboot 進入點、hal_boot）、interrupt（8259 PIC、hal_irq）、timer（PIT、hal_timer）、hal_init.c、test
+drivers/       裝置驅動：vga、serial、ps2_keyboard
+kernel/        與硬體無關的核心：main.c、panic、memory（pmm、heap）、display、console、terminal、keyboard（keycode、state、keychar）、input、shell、log、printf、lib、test
 emu/m68k/      68k CPU 模擬器（cpu、decoder、effective_address、execute、memory）
 tests/host/    host 單元測試
 docs/          設計文件
 tools/         開發工具
 ```
 
-- 資料流：IRQ → keyboard → `input_event` ring buffer → 主迴圈 → terminal → shell
-- Makefile 會自動搜尋 `boot hal kernel arch` 下的 `.c` 與 `.asm`，新增檔案不需修改 Makefile。`emu/` 不編進 kernel，只透過 `HOST_LIB_SOURCES` 在 host 測試中編譯。
+- 分層與依賴規則、開機流程、介面清單、新增驅動程式的方式：見 `docs/hal.md`。
+- 資料流：IRQ → `drivers/ps2_keyboard` → `input_event` ring buffer → 主迴圈 → terminal → shell
+- Makefile 會自動搜尋 `arch drivers hal kernel platform` 下的 `.c` 與 `.asm`，新增檔案不需修改 Makefile。`emu/` 不編進 kernel，只透過 `HOST_LIB_SOURCES` 在 host 測試中編譯。
 - 程式碼在 freestanding 環境執行：沒有 libc，只能使用 `<stdint.h>`、`<stdbool.h>`、`<stdarg.h>`、`<stddef.h>`。字串與記憶體函式使用 `kernel/lib/`（`k_strcmp`、`k_memcpy` 等）。
 
 ## 程式風格
@@ -56,6 +61,9 @@ tools/         開發工具
 - 縮排 4 個空格，大括號換行（Allman 風格）。
 - 函式與型別以模組名稱為前綴：`heap_init`、`m68k_cpu_step`、`input_event_t`。
 - Header guard 依路徑命名，例如 `KERNEL_MEMORY_HEAP_H`、`EMU_M68K_CPU_H`。
+- include 路徑：跨目錄一律從專案根目錄寫起（`#include "kernel/lib/k_string.h"`，Makefile 有 `-I.`）；同目錄用短名稱（`#include "pmm.h"`）；禁止 `../`。
+- 分層：`kernel/` 只能 include `kernel/` 與 `hal/`，不可有 inline asm 或 port I/O；硬體相關的程式碼放在 `arch/`、`platform/` 或 `drivers/`（規則見 `docs/hal.md` 第 2 節，由 `make test` 檢查）。
+- 實作 `hal/<X>.h` 的檔案命名為 `hal_<X>.c`。
 - 回傳值慣例：成功 `0`，失敗 `-1`。
 - 模組內部函式宣告為 `static`。
 - 與既有程式碼保持一致；不要只為了風格而修改無關的程式碼。
@@ -108,7 +116,8 @@ Claude 依照上方工作規則直接實作。
 
 協作模式的元件：
 - `kernel/memory/pmm`：實體記憶體管理（已完成，見 `docs/pmm.md`）
-- `kernel/memory/paging`：分頁（已完成，見 `docs/paging.md`）
+- `arch/x86/mmu/paging`：分頁（已完成，見 `docs/paging.md`）
+- HAL：硬體抽象層的邊界（已完成，見 `docs/hal.md`）
 
 （之後新增的元件加入此清單）
 
