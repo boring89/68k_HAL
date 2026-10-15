@@ -94,4 +94,11 @@ if [ -d "$root/drivers" ]; then
     done
 fi
 
+# emu/ is the 68k emulator: independent of the machine, so no hal/, arch/,
+# platform/ or drivers/, and from kernel/ only the libraries. Its own core is
+# third_party/musashi. kernel/ may use emu/.
+check emu_includes "$INCLUDE(hal|arch|platform|drivers)/" "" emu
+check emu_includes_kernel "${INCLUDE}kernel/" \
+    "${ALLOWED_INCLUDE}kernel/lib/" emu
+
 exit $status

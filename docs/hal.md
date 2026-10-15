@@ -53,8 +53,11 @@ HAL 是 kernel 與硬體之間的介面。kernel 只呼叫 `hal_irq_unmask(1)`�
 | `hal/` | 只有 `hal/` 與標準 header；只能有 `.h` | 其他一切 |
 | `arch/x86/` | `arch/`、`hal/`、`kernel/` 的 `lib`、`memory`、`panic`、`printf`、`test` | `platform/`、`drivers/` |
 | `drivers/<裝置>/` | `hal/`、`kernel/` 的裝置介面、`arch/<arch>/io/`、自己的目錄 | `platform/`、其他 `arch/`、其他驅動 |
+| `emu/` | `emu/`、`kernel/lib/`、`third_party/musashi/` | `hal/`、`arch/`、`platform/`、`drivers/`、其他 `kernel/` |
 | `platform/pc/` | 全部（它負責組裝） | — |
 | 全部 | 從專案根目錄寫的路徑；同目錄可用短名稱 | `#include "../` |
+
+`emu/`（68k 模擬器）與機器無關：它只拿到一塊 guest RAM，不知道這塊記憶體怎麼來的；`kernel/` 可以使用它（M3 任務 7 起）。
 
 `platform/` 是唯一知道「這台機器有哪些裝置」的地方：它初始化驅動，並把它們註冊到 kernel。kernel 從不 include 任何驅動。
 
