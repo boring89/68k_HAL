@@ -9,7 +9,7 @@
 #include <stdint.h>
 #include "kernel/terminal/terminal.h"
 
-#include "platform/pc/timer/pit.h"
+#include "hal/timer.h"
 
 #include "kernel/lib/k_string.h"
 #include "kernel/lib/k_number.h"
@@ -179,7 +179,7 @@ static void cmd_ticks(int argc, char **argv)
     char buffer[32];
 
     k_itoa(
-        pit_get_ticks(),
+        hal_timer_ticks(),
         buffer);
 
     terminal_write_line(buffer);

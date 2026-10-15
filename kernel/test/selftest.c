@@ -13,12 +13,12 @@
 #include "kernel/memory/multiboot.h"
 #include "kernel/memory/paging.h"
 #include "kernel/memory/pmm.h"
-#include "platform/pc/timer/pit.h"
 #include "arch/x86/interrupt/exception.h"
 #include "arch/x86/interrupt/irq_stub.h"
 
 #include "hal/cpu.h"
 #include "hal/irq.h"
+#include "hal/timer.h"
 
 #include "arch/x86/cpu/cpu.h"
 #include "arch/x86/io/io.h"
@@ -96,15 +96,21 @@ static void test_heap_region_reserved_in_pmm(void)
     SELFTEST_ASSERT(unmarked == 0);
 }
 
-static void test_pit_ticks(void)
+static void test_hal_timer_frequency(void)
 {
-    uint32_t start = pit_get_ticks();
+    /* main.c starts the PIT at 100 Hz. */
+    SELFTEST_ASSERT(hal_timer_frequency() == 100);
+}
+
+static void test_hal_timer_ticks(void)
+{
+    uint32_t start = hal_timer_ticks();
 
     /* Each idle wakes on the next interrupt; PIT runs at 100 Hz. */
-    for (int i = 0; i < 1000 && pit_get_ticks() == start; i++)
+    for (int i = 0; i < 1000 && hal_timer_ticks() == start; i++)
         hal_cpu_idle();
 
-    SELFTEST_ASSERT(pit_get_ticks() != start);
+    SELFTEST_ASSERT(hal_timer_ticks() != start);
 }
 
 /* EFLAGS.IF, bit 9 (Intel SDM Vol.1 3.4.3, Figure 3-8). */
@@ -137,11 +143,11 @@ static void test_hal_cpu_interrupts(void)
 /* No keyboard input during the run, so the wake-up is the PIT tick. */
 static void test_hal_cpu_idle(void)
 {
-    uint32_t start = pit_get_ticks();
+    uint32_t start = hal_timer_ticks();
 
     hal_cpu_idle();
 
-    SELFTEST_ASSERT(pit_get_ticks() != start);
+    SELFTEST_ASSERT(hal_timer_ticks() != start);
 }
 
 static void test_cpu_read_cr0(void)
@@ -655,9 +661,9 @@ static void test_hal_irq_register_rejects(void)
     SELFTEST_ASSERT(hal_irq_register(5, irq5_test_handler) == -1);
 
     /* The PIT handler must still be the one running. */
-    uint32_t start = pit_get_ticks();
+    uint32_t start = hal_timer_ticks();
     hal_cpu_idle();
-    SELFTEST_ASSERT(pit_get_ticks() != start);
+    SELFTEST_ASSERT(hal_timer_ticks() != start);
 }
 
 /* 8259A data ports; reading them returns the IMR (OSDev Wiki "8259 PIC"). */
@@ -734,7 +740,8 @@ void selftest_run(void)
 
     SELFTEST_RUN(test_heap_alloc_free);
     SELFTEST_RUN(test_heap_region_reserved_in_pmm);
-    SELFTEST_RUN(test_pit_ticks);
+    SELFTEST_RUN(test_hal_timer_ticks);
+    SELFTEST_RUN(test_hal_timer_frequency);
     SELFTEST_RUN(test_divide_error_exception);
     SELFTEST_RUN(test_idt_irq_gates);
     SELFTEST_RUN(test_irq_stub_line_number);

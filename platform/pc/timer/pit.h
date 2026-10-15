@@ -8,9 +8,12 @@
 
 #include <stdint.h>
 
+/* Program channel 0 to raise IRQ 0 frequency times per second. */
 void pit_init(uint32_t frequency);
-void timer_tick(void);
 
 uint32_t pit_get_ticks(void);
+
+/* The frequency passed to pit_init. */
+uint32_t pit_get_frequency(void);
 
 #endif

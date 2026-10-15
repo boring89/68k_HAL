@@ -11,14 +11,28 @@
 
 #include "hal/irq.h"
 
+/*
+ * Ports, input clock and the 0x36 command (channel 0, lobyte/hibyte,
+ * mode 3 square wave, binary) from OSDev Wiki "Programmable Interval
+ * Timer".
+ */
 #define PIT_CHANNEL0 0x40
 #define PIT_COMMAND 0x43
 
 /* Written by IRQ0, read by the main loop. */
 static volatile uint32_t ticks = 0;
 
+static uint32_t pit_frequency;
+
+static void timer_tick(void)
+{
+    ticks++;
+}
+
 void pit_init(uint32_t frequency)
 {
+    pit_frequency = frequency;
+
     uint32_t divisor = 1193182 / frequency;
 
     outb(PIT_COMMAND, 0x36);
@@ -30,12 +44,12 @@ void pit_init(uint32_t frequency)
     hal_irq_unmask(0);
 }
 
-void timer_tick(void)
-{
-    ticks++;
-}
-
 uint32_t pit_get_ticks(void)
 {
     return ticks;
+}
+
+uint32_t pit_get_frequency(void)
+{
+    return pit_frequency;
 }

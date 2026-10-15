@@ -30,6 +30,7 @@
 #include "kernel/panic/panic.h"
 
 #include "hal/cpu.h"
+#include "hal/timer.h"
 
 #ifdef KERNEL_SELFTEST
 #include "kernel/test/selftest.h"
@@ -115,9 +116,9 @@ void kernel_main(
 
     while (1)
     {
-        uint32_t tick = pit_get_ticks();
+        uint32_t tick = hal_timer_ticks();
 
-        if (tick - last_tick >= 100)
+        if (tick - last_tick >= hal_timer_frequency())
         {
             // kernel_printf("1 second\n");
             last_tick = tick;
