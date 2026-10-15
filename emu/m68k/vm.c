@@ -24,6 +24,7 @@ static uint8_t *vm_ram;
 static uint32_t vm_ram_size;
 static bool vm_halted;
 static bool vm_core_initialized;
+static m68k_vm_write_watch_t vm_write_watch;
 
 
 uint32_t m68k_vm_read8(uint32_t addr)
@@ -53,6 +54,10 @@ void m68k_vm_write8(uint32_t addr, uint32_t value)
     if (addr < vm_ram_size)
     {
         vm_ram[addr] = (uint8_t)value;
+        if (vm_write_watch != NULL)
+        {
+            vm_write_watch(addr);
+        }
     }
 }
 
@@ -141,6 +146,12 @@ void m68k_vm_instr_hook(unsigned int pc)
 }
 
 
+void m68k_vm_set_write_watch(m68k_vm_write_watch_t watch)
+{
+    vm_write_watch = watch;
+}
+
+
 int m68k_vm_init(uint8_t *ram, uint32_t size, m68k_vm_cpu_t cpu)
 {
     if (ram == NULL || size < 8)
@@ -188,6 +199,9 @@ int m68k_vm_reset(uint32_t entry, uint32_t sp)
     vm_halted = false;
     m68k_trap_clear_log();
     m68k_pulse_reset();
+    /* Musashi charges the reset cycles to the next m68k_execute() call and
+     * runs no instruction in it; get that over with now. */
+    m68k_execute(1);
     return 0;
 }
 

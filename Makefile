@@ -10,7 +10,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: all clean iso run test test-boundary test-host test-qemu
+.PHONY: all clean iso run test test-boundary test-host test-qemu test-sst
 
 # Only search directories that exist (e.g. drivers/ is picked up once created).
 # emu/ is not part of the kernel; it is only built for host tests.
@@ -146,6 +146,17 @@ $(BUILD)/m68k/%.bin: tests/m68k/%.s
 
 test-host: $(HOST_TESTS) $(M68K_TEST_BINS)
 	@for t in $(HOST_TESTS); do ./$$t || exit 1; done
+
+# SingleStepTests 68000 data (https://github.com/SingleStepTests/680x0, put
+# the v1/*.json.gz files in tests/data/sst/). Not part of "make test": it
+# needs the download and takes minutes. Prints the pass rate per instruction.
+test-sst: $(BUILD)/host/sst_run
+	@test -n "$$(ls tests/data/sst/*.json.gz 2>/dev/null)" || \
+		{ echo "no data in tests/data/sst/"; exit 1; }
+	@for f in tests/data/sst/*.json.gz; do \
+		n=$$(basename $$f .json.gz); \
+		python3 -I tools/sst_convert.py $$f | $(BUILD)/host/sst_run $$n || exit 1; \
+	done
 
 # Kernel built with -DKERNEL_SELFTEST, booted directly by QEMU (no ISO).
 # QEMU exits with 33 on PASS (see kernel/test/selftest.c).

@@ -68,4 +68,12 @@ void m68k_vm_write8(uint32_t addr, uint32_t value);
 void m68k_vm_write16(uint32_t addr, uint32_t value);
 void m68k_vm_write32(uint32_t addr, uint32_t value);
 
+/*
+ * Optional callback invoked with the address of every byte written to guest
+ * RAM (by the CPU or by m68k_vm_write*). Tests use it to see which memory a
+ * program touched. Pass NULL to remove it.
+ */
+typedef void (*m68k_vm_write_watch_t)(uint32_t addr);
+void m68k_vm_set_write_watch(m68k_vm_write_watch_t watch);
+
 #endif
