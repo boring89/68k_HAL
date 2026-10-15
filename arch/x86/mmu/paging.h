@@ -25,8 +25,6 @@
  * Build the page directory and the first page table from PMM frames,
  * load CR3 and turn on paging. Must run after pmm_init, heap_init and
  * idt_init. Panics if the kernel or heap lies outside the first 4 MiB.
- * Also identity maps the Multiboot info and memory map wherever the
- * boot loader put them.
  */
 void paging_init(void);
 

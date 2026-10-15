@@ -108,8 +108,9 @@ mov cr0, <CR0 | 0x80010000>       ; CR0.PG = 1（下一條指令開始翻譯）�
 ⑤ directory[0] → table；directory[1023] → directory   recursive mapping
 ⑥ cpu_write_cr3(directory)
 ⑦ cpu_write_cr0(CR0 | PG | WP)
-⑧ paging_map_multiboot()                             需要 recursive mapping，所以在最後
 ```
+
+開啟分頁後，`platform/pc/hal_init.c` 的 `map_boot_data()` 用 `hal_mmu_map` 把 `hal_boot_reserved_region` 回報的開機資料（Multiboot 資訊與記憶體表）以唯讀方式 identity map（需要 recursive mapping，所以在 `paging_init` 之後）。
 
 PMM 給的 frame 不清 0（見 `docs/pmm.md`），內容是垃圾；垃圾中 P = 1 的項目會變成隨機的對應，靜默地寫壞記憶體。清 0 後全部是「不存在」，是安全的起點。
 
@@ -272,7 +273,7 @@ cr2=0 (not present, write, kernel)
 
 | 函式 | 說明 |
 |---|---|
-| `paging_init()` | 建表、identity map、開啟分頁、對應 Multiboot 資料。在 `pmm_init`、`heap_init`、`idt_init` 之後呼叫一次 |
+| `paging_init()` | 建表、identity map、開啟分頁。在 `pmm_init`、`heap_init`、`idt_init` 之後由 `hal_init` 呼叫一次 |
 | `paging_get_phys(virt, &phys)` | 成功回傳 `0`（含 offset），未對應或 `phys == NULL` 回傳 `-1`，失敗時不修改 `*phys` |
 | `paging_map(virt, phys, flags)` | 自動加 PRESENT；需要時建立 page table。未對齊、已對應、最高 4 MiB、PMM 用完回傳 `-1`。不擁有 `phys` |
 | `paging_unmap(virt)` | 清除 PTE 並 `invlpg`。未對齊、最高 4 MiB、未對應回傳 `-1`。不歸還 frame |

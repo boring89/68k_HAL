@@ -7,7 +7,6 @@
 
 #include "kernel/memory/heap.h"
 #include "kernel/memory/memory.h"
-#include "platform/pc/boot/multiboot.h"
 #include "kernel/memory/pmm.h"
 #include "kernel/lib/k_memory.h"
 #include "kernel/panic/panic.h"
@@ -15,51 +14,6 @@
 
 /* Kernel-only, read/write: the only flags used before user mode exists. */
 #define PAGING_KERNEL_FLAGS (PAGING_PRESENT | PAGING_WRITABLE)
-
-/*
- * Identity map every page overlapping [start, end) that is not mapped
- * yet, read-only. Returns -1 if that would map page 0 (the null pointer
- * guard) or paging_map fails. Requires paging to be on.
- */
-static int paging_identity_map_range(uintptr_t start, uintptr_t end)
-{
-    uintptr_t page = start & ~(uintptr_t)(PMM_FRAME_SIZE - 1);
-
-    for (; page < end; page += PMM_FRAME_SIZE)
-    {
-        uintptr_t phys;
-
-        if (paging_get_phys(page, &phys) == 0)
-            continue;
-
-        if (page == 0 || paging_map(page, page, 0) != 0)
-            return -1;
-    }
-
-    return 0;
-}
-
-/*
- * The shell reads the Multiboot memory map long after boot. The boot
- * loader decides where it lives, so it may be outside the first 4 MiB
- * (QEMU -kernel puts it at 0x9500, GRUB at 0x10000 in our tests).
- */
-static void paging_map_multiboot(void)
-{
-    const multiboot_info_t *mbi = multiboot_get_info();
-    uintptr_t mbi_address = (uintptr_t)mbi;
-
-    if (paging_identity_map_range(mbi_address, mbi_address + sizeof(*mbi)) != 0)
-        panic("paging: cannot map Multiboot info at %x", (unsigned int)mbi_address);
-
-    if (!(mbi->flags & MULTIBOOT_INFO_MEM_MAP))
-        return;
-
-    if (paging_identity_map_range(mbi->mmap_addr,
-                                  (uintptr_t)mbi->mmap_addr + mbi->mmap_length) != 0)
-        panic("paging: cannot map the Multiboot memory map at %x",
-              (unsigned int)mbi->mmap_addr);
-}
 
 void paging_init(void)
 {
@@ -97,9 +51,6 @@ void paging_init(void)
     cpu_write_cr3((uint32_t)directory_phys);
     /* Without WP, ring 0 writes ignore R/W = 0 (Intel SDM Vol.3A 2.5). */
     cpu_write_cr0(cpu_read_cr0() | CPU_CR0_PG | CPU_CR0_WP);
-
-    /* paging_map works through the recursive mapping, so only now. */
-    paging_map_multiboot();
 }
 
 /*

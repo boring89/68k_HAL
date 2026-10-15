@@ -14,9 +14,12 @@
 
 #include "kernel/log/log.h"
 #include "kernel/main.h"
+#include "kernel/panic/panic.h"
 #include "kernel/printf/printf.h"
 
+#include "hal/boot.h"
 #include "hal/cpu.h"
+#include "hal/mmu.h"
 
 #include <stdint.h>
 
@@ -56,6 +59,45 @@ void hal_init_early(void)
     kernel_printf("Multiboot info: %x\n", boot_info);
 }
 
+/*
+ * Identity map every page overlapping [start, end) that is not mapped
+ * yet, read-only. Returns -1 if that would map page 0 (the null pointer
+ * guard) or hal_mmu_map fails.
+ */
+static int identity_map_range(uint64_t start, uint64_t end)
+{
+    uint64_t page = start & ~(uint64_t)(HAL_MMU_PAGE_SIZE - 1);
+
+    for (; page < end; page += HAL_MMU_PAGE_SIZE)
+    {
+        uintptr_t phys;
+
+        if (hal_mmu_get_phys((uintptr_t)page, &phys) == 0)
+            continue;
+
+        if (page == 0 || hal_mmu_map((uintptr_t)page, (uintptr_t)page, 0) != 0)
+            return -1;
+    }
+
+    return 0;
+}
+
+/*
+ * The shell reads the boot memory map long after boot. The boot loader
+ * decides where the Multiboot data lives, so it may be outside the
+ * first 4 MiB (QEMU -kernel puts it at 0x9500, GRUB at 0x10000).
+ */
+static void map_boot_data(void)
+{
+    hal_memory_region_t region;
+
+    for (unsigned int i = 0; hal_boot_reserved_region(i, &region) == 0; i++)
+    {
+        if (identity_map_range(region.base, region.base + region.length) != 0)
+            panic("boot: cannot map boot data at %x", (unsigned int)region.base);
+    }
+}
+
 void hal_init(void)
 {
     idt_init();
@@ -63,6 +105,7 @@ void hal_init(void)
 
     /* After idt_init so a page fault is reported instead of triple faulting. */
     paging_init();
+    map_boot_data();
     kernel_log(LOG_INFO, "Paging enabled");
 
     pic_init();

@@ -14,6 +14,8 @@
  * Implemented once per architecture (arch/<arch>/mmu/hal_mmu.c).
  */
 
+#define HAL_MMU_PAGE_SIZE 4096
+
 /* Mapping flags. Without HAL_MMU_WRITABLE a page is read-only. */
 #define HAL_MMU_WRITABLE 0x1u
 #define HAL_MMU_USER     0x2u /* reachable from user mode */
