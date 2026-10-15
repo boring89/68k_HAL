@@ -76,4 +76,11 @@ void m68k_vm_write32(uint32_t addr, uint32_t value);
 typedef void (*m68k_vm_write_watch_t)(uint32_t addr);
 void m68k_vm_set_write_watch(m68k_vm_write_watch_t watch);
 
+/*
+ * Called when the emulator cannot continue (see freestanding/libc.c). Not
+ * defined here: the program that embeds the VM provides it, and it must not
+ * return. Only referenced by the freestanding build.
+ */
+void m68k_vm_fatal(const char *message) __attribute__((noreturn));
+
 #endif

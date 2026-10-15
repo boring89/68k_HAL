@@ -4,7 +4,8 @@ ISO_ROOT=$(BUILD)/iso_root
 ASM=nasm
 CC=gcc
 
-CFLAGS=-m32 -ffreestanding -I. -Wall -Wextra -Werror -fno-pie -fno-asynchronous-unwind-tables -nostdlib -MMD -MP $(EXTRA_CFLAGS)
+CFLAGS=-m32 -ffreestanding -I. -Wall -Wextra -Werror -fno-pie -fno-asynchronous-unwind-tables -nostdlib -MMD -MP \
+	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' $(EXTRA_CFLAGS)
 
 HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
@@ -12,9 +13,66 @@ HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 
 .PHONY: all clean iso run test test-boundary test-host test-qemu test-sst
 
+.DEFAULT_GOAL := all
+
+# Musashi (third_party/musashi) is unmodified third-party code. m68kmake
+# generates m68kops.c/h from m68k_in.c. The core always includes its FPU code,
+# which needs softfloat. Musashi itself is built without -Werror (its style
+# does not pass our warning flags); our wrapper in emu/m68k/ is built normally.
+# The same sources are built twice: for the host tests and, further down, for
+# the kernel (-m32, with the stand-in libc headers and functions in
+# emu/m68k/freestanding/).
+MUSASHI := third_party/musashi
+MUSASHI_GEN := $(BUILD)/host/musashi
+MUSASHI_CNF := emu/m68k/m68kconf.h
+MUSASHI_CFLAGS := -std=gnu11 -w -g -I. -I$(MUSASHI) -I$(MUSASHI_GEN) \
+	-DMUSASHI_CNF='"$(MUSASHI_CNF)"' -MMD -MP
+MUSASHI_SOURCES := $(MUSASHI)/m68kcpu.c $(MUSASHI)/softfloat/softfloat.c
+MUSASHI_OBJECTS := $(MUSASHI_SOURCES:%.c=$(BUILD)/host/obj/%.o) \
+	$(BUILD)/host/obj/musashi_gen/m68kops.o
+
+$(MUSASHI_GEN)/m68kmake: $(MUSASHI)/m68kmake.c
+	mkdir -p $(dir $@)
+	$(HOST_CC) -O1 -w $< -o $@
+
+# m68kmake writes m68kops.c and m68kops.h next to each other.
+$(MUSASHI_GEN)/m68kops.c $(MUSASHI_GEN)/m68kops.h: $(MUSASHI_GEN)/m68kmake $(MUSASHI)/m68k_in.c
+	$<  $(MUSASHI_GEN) $(MUSASHI)/m68k_in.c
+
+$(BUILD)/host/obj/musashi_gen/m68kops.o: $(MUSASHI_GEN)/m68kops.c $(MUSASHI_GEN)/m68kops.h
+	mkdir -p $(dir $@)
+	$(HOST_CC) $(MUSASHI_CFLAGS) -c $< -o $@
+
+# The core includes the generated m68kops.h.
+$(BUILD)/host/obj/$(MUSASHI)/%.o: $(MUSASHI)/%.c $(MUSASHI_GEN)/m68kops.h
+	mkdir -p $(dir $@)
+	$(HOST_CC) $(MUSASHI_CFLAGS) -c $< -o $@
+
+-include $(MUSASHI_OBJECTS:.o=.d)
+
+# Kernel build of Musashi. The stand-in headers come first (-isystem) because
+# the build machine has no 32-bit libc headers.
+KMUSASHI_CFLAGS := -m32 -ffreestanding -O2 -w -fno-pie -fno-stack-protector \
+	-fno-asynchronous-unwind-tables -nostdlib -I. -I$(MUSASHI) \
+	-I$(MUSASHI_GEN) -DMUSASHI_CNF='"$(MUSASHI_CNF)"' \
+	-isystem emu/m68k/freestanding/include -MMD -MP
+KMUSASHI_OBJECTS := $(MUSASHI_SOURCES:%.c=$(BUILD)/%.o) \
+	$(BUILD)/musashi_gen/m68kops.o
+
+$(BUILD)/musashi_gen/m68kops.o: $(MUSASHI_GEN)/m68kops.c $(MUSASHI_GEN)/m68kops.h
+	mkdir -p $(dir $@)
+	$(CC) $(KMUSASHI_CFLAGS) -c $< -o $@
+
+$(BUILD)/$(MUSASHI)/%.o: $(MUSASHI)/%.c $(MUSASHI_GEN)/m68kops.h
+	mkdir -p $(dir $@)
+	$(CC) $(KMUSASHI_CFLAGS) -c $< -o $@
+
+-include $(KMUSASHI_OBJECTS:.o=.d)
+
+
 # Only search directories that exist (e.g. drivers/ is picked up once created).
-# emu/ is not part of the kernel; it is only built for host tests.
-SRC_DIRS := $(wildcard arch drivers hal kernel platform)
+# emu/ (the 68k emulator) is built into the kernel as well as for host tests.
+SRC_DIRS := $(wildcard arch drivers emu hal kernel platform)
 
 C_SOURCES := $(shell find $(SRC_DIRS) -name "*.c")
 ASM_SOURCES := $(shell find $(SRC_DIRS) -name "*.asm")
@@ -22,7 +80,7 @@ ASM_SOURCES := $(shell find $(SRC_DIRS) -name "*.asm")
 C_OBJECTS := $(C_SOURCES:%.c=$(BUILD)/%.o)
 ASM_OBJECTS := $(ASM_SOURCES:%.asm=$(BUILD)/%.o)
 
-OBJECTS := $(C_OBJECTS) $(ASM_OBJECTS)
+OBJECTS := $(C_OBJECTS) $(ASM_OBJECTS) $(KMUSASHI_OBJECTS)
 
 $(info C sources: $(C_SOURCES))
 $(info ASM sources: $(ASM_SOURCES))
@@ -90,37 +148,6 @@ HOST_TEST_OBJECTS := $(HOST_TESTS:$(BUILD)/host/%=$(BUILD)/host/obj/tests/host/%
 # Keep test objects so make does not delete them as intermediates.
 .SECONDARY: $(HOST_TEST_OBJECTS)
 
-# Musashi (third_party/musashi) is unmodified third-party code. m68kmake
-# generates m68kops.c/h from m68k_in.c. The core always includes its FPU code,
-# which needs softfloat. It is built without -Werror and without sanitizers
-# noise from its own style; our wrapper in emu/m68k/ is built normally.
-MUSASHI := third_party/musashi
-MUSASHI_GEN := $(BUILD)/host/musashi
-MUSASHI_CNF := emu/m68k/m68kconf.h
-MUSASHI_CFLAGS := -std=gnu11 -w -g -I. -I$(MUSASHI) -I$(MUSASHI_GEN) \
-	-DMUSASHI_CNF='"$(MUSASHI_CNF)"' -MMD -MP
-MUSASHI_SOURCES := $(MUSASHI)/m68kcpu.c $(MUSASHI)/softfloat/softfloat.c
-MUSASHI_OBJECTS := $(MUSASHI_SOURCES:%.c=$(BUILD)/host/obj/%.o) \
-	$(BUILD)/host/obj/musashi_gen/m68kops.o
-
-$(MUSASHI_GEN)/m68kmake: $(MUSASHI)/m68kmake.c
-	mkdir -p $(dir $@)
-	$(HOST_CC) -O1 -w $< -o $@
-
-# m68kmake writes m68kops.c and m68kops.h next to each other.
-$(MUSASHI_GEN)/m68kops.c $(MUSASHI_GEN)/m68kops.h: $(MUSASHI_GEN)/m68kmake $(MUSASHI)/m68k_in.c
-	$<  $(MUSASHI_GEN) $(MUSASHI)/m68k_in.c
-
-$(BUILD)/host/obj/musashi_gen/m68kops.o: $(MUSASHI_GEN)/m68kops.c $(MUSASHI_GEN)/m68kops.h
-	mkdir -p $(dir $@)
-	$(HOST_CC) $(MUSASHI_CFLAGS) -c $< -o $@
-
-# The core includes the generated m68kops.h.
-$(BUILD)/host/obj/$(MUSASHI)/%.o: $(MUSASHI)/%.c $(MUSASHI_GEN)/m68kops.h
-	mkdir -p $(dir $@)
-	$(HOST_CC) $(MUSASHI_CFLAGS) -c $< -o $@
-
--include $(MUSASHI_OBJECTS:.o=.d)
 
 # Each source is compiled separately so -MMD can emit one .d file per object.
 $(BUILD)/host/obj/%.o: %.c
