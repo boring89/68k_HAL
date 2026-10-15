@@ -20,7 +20,7 @@
 #include "kernel/memory/memory.h"
 #include "kernel/memory/heap.h"
 #include "kernel/memory/pmm.h"
-#include "kernel/memory/multiboot.h"
+#include "platform/pc/boot/multiboot.h"
 
 #include "kernel/panic/panic.h"
 

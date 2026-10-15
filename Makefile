@@ -70,9 +70,9 @@ HOST_LIB_SOURCES := \
 	kernel/lib/k_memory.c \
 	kernel/lib/ring_buffer.c \
 	kernel/memory/heap.c \
-	kernel/memory/multiboot.c \
 	kernel/memory/pmm.c \
 	kernel/shell/parser.c \
+	platform/pc/boot/multiboot.c \
 	$(wildcard emu/m68k/*.c)
 
 HOST_LIB_OBJECTS := $(HOST_LIB_SOURCES:%.c=$(BUILD)/host/obj/%.o)

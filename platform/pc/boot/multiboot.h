@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#ifndef KERNEL_MEMORY_MULTIBOOT_H
-#define KERNEL_MEMORY_MULTIBOOT_H
+#ifndef PLATFORM_PC_BOOT_MULTIBOOT_H
+#define PLATFORM_PC_BOOT_MULTIBOOT_H
 
 #include <stdint.h>
 

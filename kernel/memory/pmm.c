@@ -5,7 +5,7 @@
 
 #include "pmm.h"
 
-#include "multiboot.h"
+#include "platform/pc/boot/multiboot.h"
 #include "kernel/lib/k_memory.h"
 
 /* 32-bit physical address space without PAE: 4 GiB / 4 KiB frames. */

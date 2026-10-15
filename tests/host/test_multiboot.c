@@ -12,7 +12,7 @@
 #include <stdint.h>
 #include <sys/mman.h>
 
-#include "kernel/memory/multiboot.h"
+#include "platform/pc/boot/multiboot.h"
 
 /*
  * multiboot_info_t stores 32-bit addresses, so the fake boot data must

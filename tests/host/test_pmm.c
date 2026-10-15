@@ -11,7 +11,7 @@
 #include <stdint.h>
 #include <sys/mman.h>
 
-#include "kernel/memory/multiboot.h"
+#include "platform/pc/boot/multiboot.h"
 #include "kernel/memory/pmm.h"
 
 /*

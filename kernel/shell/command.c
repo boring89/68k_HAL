@@ -15,7 +15,7 @@
 #include "kernel/lib/k_number.h"
 
 #include "kernel/memory/memory.h"
-#include "kernel/memory/multiboot.h"
+#include "platform/pc/boot/multiboot.h"
 
 static void cmd_help(
     int argc,

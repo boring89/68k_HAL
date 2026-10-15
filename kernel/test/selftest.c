@@ -10,7 +10,7 @@
 
 #include "kernel/printf/printf.h"
 #include "kernel/memory/heap.h"
-#include "kernel/memory/multiboot.h"
+#include "platform/pc/boot/multiboot.h"
 #include "arch/x86/mmu/paging.h"
 #include "kernel/memory/pmm.h"
 #include "arch/x86/interrupt/exception.h"
