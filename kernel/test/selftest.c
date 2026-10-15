@@ -19,6 +19,7 @@
 #include "hal/cpu.h"
 #include "hal/irq.h"
 #include "hal/timer.h"
+#include "hal/mmu.h"
 
 #include "arch/x86/cpu/cpu.h"
 #include "arch/x86/io/io.h"
@@ -334,6 +335,50 @@ static void test_paging_map_flags(void)
     paging_entry_t entry = table[paging_table_index(virt)];
 
     SELFTEST_ASSERT(entry == (frame | PAGING_PRESENT));
+}
+
+/* Pages for the hal_mmu tests, after the ones used by paging_map tests. */
+#define TEST_HAL_MMU_VIRT (TEST_MAP_VIRT_A + 16 * PMM_FRAME_SIZE)
+
+static paging_entry_t test_get_pte(uintptr_t virt)
+{
+    paging_entry_t *table = (paging_entry_t *)paging_table_virt(paging_dir_index(virt));
+
+    return table[paging_table_index(virt)];
+}
+
+static void test_hal_mmu_map_flags(void)
+{
+    uintptr_t frame = pmm_alloc_frame();
+    uintptr_t phys = 0;
+
+    SELFTEST_ASSERT(hal_mmu_map(TEST_HAL_MMU_VIRT, frame, 0) == 0);
+    SELFTEST_ASSERT(test_get_pte(TEST_HAL_MMU_VIRT) == (frame | PAGING_PRESENT));
+
+    SELFTEST_ASSERT(hal_mmu_map(TEST_HAL_MMU_VIRT + PMM_FRAME_SIZE, frame,
+                                HAL_MMU_WRITABLE | HAL_MMU_USER) == 0);
+    SELFTEST_ASSERT(test_get_pte(TEST_HAL_MMU_VIRT + PMM_FRAME_SIZE)
+                    == (frame | PAGING_PRESENT | PAGING_WRITABLE | PAGING_USER));
+
+    SELFTEST_ASSERT(hal_mmu_get_phys(TEST_HAL_MMU_VIRT + 8, &phys) == 0);
+    SELFTEST_ASSERT(phys == frame + 8);
+
+    SELFTEST_ASSERT(hal_mmu_unmap(TEST_HAL_MMU_VIRT) == 0);
+    SELFTEST_ASSERT(hal_mmu_unmap(TEST_HAL_MMU_VIRT + PMM_FRAME_SIZE) == 0);
+    SELFTEST_ASSERT(hal_mmu_get_phys(TEST_HAL_MMU_VIRT, &phys) == -1);
+
+    pmm_free_frame(frame);
+}
+
+static void test_hal_mmu_map_rejects_unknown_flags(void)
+{
+    uintptr_t frame = pmm_alloc_frame();
+    uintptr_t phys = 0;
+
+    SELFTEST_ASSERT(hal_mmu_map(TEST_HAL_MMU_VIRT, frame, 0x4) == -1);
+    SELFTEST_ASSERT(hal_mmu_get_phys(TEST_HAL_MMU_VIRT, &phys) == -1);
+
+    pmm_free_frame(frame);
 }
 
 static void test_paging_map_rejects(void)
@@ -763,6 +808,8 @@ void selftest_run(void)
     SELFTEST_RUN(test_paging_map_creates_table);
     SELFTEST_RUN(test_paging_map_flags);
     SELFTEST_RUN(test_paging_map_rejects);
+    SELFTEST_RUN(test_hal_mmu_map_flags);
+    SELFTEST_RUN(test_hal_mmu_map_rejects_unknown_flags);
     SELFTEST_RUN(test_paging_unmap);
     SELFTEST_RUN(test_paging_unmap_rejects);
     SELFTEST_RUN(test_paging_fault_write_unmapped);

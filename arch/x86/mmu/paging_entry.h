@@ -67,6 +67,12 @@ paging_entry_t paging_entry_make(uintptr_t phys, uint32_t flags);
 /* Frame address stored in an entry (bits 31:12). */
 uintptr_t paging_entry_get_phys(paging_entry_t entry);
 
+/*
+ * Convert HAL_MMU_* flags (hal/mmu.h) to PAGING_* entry flags in *flags.
+ * Returns -1 and leaves *flags unchanged if hal_flags has unknown bits.
+ */
+int paging_flags_from_hal(uint32_t hal_flags, uint32_t *flags);
+
 /* Nonzero if the P bit is set. */
 int paging_entry_is_present(paging_entry_t entry);
 

@@ -5,6 +5,8 @@
 
 #include "paging_entry.h"
 
+#include "hal/mmu.h"
+
 #define PAGING_DIR_SHIFT 22
 #define PAGING_TABLE_SHIFT 12
 #define PAGING_INDEX_MASK (PAGING_ENTRIES_PER_TABLE - 1)
@@ -32,6 +34,24 @@ paging_entry_t paging_entry_make(uintptr_t phys, uint32_t flags)
 uintptr_t paging_entry_get_phys(paging_entry_t entry)
 {
     return entry & PAGING_ADDRESS_MASK;
+}
+
+int paging_flags_from_hal(uint32_t hal_flags, uint32_t *flags)
+{
+    if (hal_flags & ~(HAL_MMU_WRITABLE | HAL_MMU_USER))
+        return -1;
+
+    uint32_t result = 0;
+
+    if (hal_flags & HAL_MMU_WRITABLE)
+        result |= PAGING_WRITABLE;
+
+    if (hal_flags & HAL_MMU_USER)
+        result |= PAGING_USER;
+
+    *flags = result;
+
+    return 0;
 }
 
 int paging_entry_is_present(paging_entry_t entry)
