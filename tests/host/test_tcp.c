@@ -37,6 +37,7 @@ static int sent_count;
 static int drop_every;        /* drop every n-th segment (0 = none) */
 static int drop_all;          /* 1: nothing gets through */
 static int drop_syn_count;    /* drop this many SYNs at the start */
+static int drop_next_to_a;    /* drop the next segment sent by B (for example a window update) */
 
 static uint64_t now_ms(void *context)
 {
@@ -57,6 +58,13 @@ static int wire_send(void *context, const uint8_t destination_ip[4], const uint8
 
     if (drop_every > 0 && sent_count % drop_every == 0)
         return 0;
+
+    if (!from_a && drop_next_to_a > 0)
+    {
+        drop_next_to_a--;
+
+        return 0;
+    }
 
     if (drop_syn_count > 0 && (segment[13] & NET_TCP_SYN))
     {
@@ -88,6 +96,7 @@ static void setup(void)
     drop_every = 0;
     drop_all = 0;
     drop_syn_count = 0;
+    drop_next_to_a = 0;
     tcp_init(&stack_a, &env_a);
     tcp_init(&stack_b, &env_b);
 }
@@ -334,6 +343,79 @@ static void test_flow_control(void)
     tcp_abort(&stack_b, server);
 }
 
+/* The window update that opens a closed window is lost: the sender must find out by probing. */
+static void test_lost_window_update(void)
+{
+    setup();
+
+    int server;
+    int client = open_connection(&server);
+    static uint8_t block[TCP_BUFFER];
+    static uint8_t sink[TCP_BUFFER];
+    size_t sent = 0;
+
+    memset(block, 0x33, sizeof(block));
+
+    /* Fill everything: B's buffer is full and its window is closed, A's send buffer too. */
+    for (int i = 0; i < 3000; i++)
+    {
+        int n = tcp_send(&stack_a, client, block, sizeof(block));
+
+        if (n > 0)
+            sent += (size_t)n;
+
+        step();
+    }
+
+    TEST_ASSERT_EQ_INT(TCP_BUFFER, tcp_receive_available(&stack_b, server));
+
+    /* B reads it all; the ACK that says "window open" never arrives. */
+    drop_next_to_a = 1;
+
+    size_t got = 0;
+    int n = tcp_recv(&stack_b, server, sink, sizeof(sink));
+
+    TEST_ASSERT(n > 0);
+    got += (size_t)n;
+
+    /* Nothing else is lost; A has data waiting and has to ask. */
+    for (int i = 0; i < 40000 && got < sent; i++)
+    {
+        n = tcp_recv(&stack_b, server, sink, sizeof(sink));
+
+        if (n > 0)
+            got += (size_t)n;
+
+        step();
+    }
+
+    TEST_ASSERT_EQ_INT((int)sent, (int)got);
+    tcp_abort(&stack_a, client);
+    tcp_abort(&stack_b, server);
+}
+
+static void test_listener_close_drops_children(void)
+{
+    setup();
+
+    int listener = tcp_listen(&stack_b, 80);
+    int client = tcp_connect(&stack_a, ip_b, 80);
+
+    run_ms(20);
+    TEST_ASSERT(client >= 0);
+
+    /* The connection is established but nobody accepts it; closing the listener frees its slot. */
+    tcp_abort(&stack_b, listener);
+
+    int used = 0;
+
+    for (int i = 0; i < TCP_MAX_CONNECTIONS; i++)
+        used += stack_b.connection[i].used;
+
+    TEST_ASSERT_EQ_INT(0, used);
+    tcp_abort(&stack_a, client);
+}
+
 static void test_timeout(void)
 {
     setup();
@@ -381,6 +463,8 @@ int main(void)
     TEST_RUN(test_refused);
     TEST_RUN(test_reset);
     TEST_RUN(test_flow_control);
+    TEST_RUN(test_lost_window_update);
+    TEST_RUN(test_listener_close_drops_children);
     TEST_RUN(test_timeout);
     TEST_RUN(test_ports_and_slots);
 

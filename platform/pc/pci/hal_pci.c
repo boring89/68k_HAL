@@ -131,10 +131,11 @@ static void read_bars(hal_pci_device_t *dev)
     hal_pci_config_write(dev, PCI_COMMAND, 2, command);
 }
 
-static void add_function(uint8_t bus, uint8_t device, uint8_t function)
+/* Returns 0 if the function was added, -1 if the table is full. */
+static int add_function(uint8_t bus, uint8_t device, uint8_t function)
 {
     if (device_count == HAL_PCI_MAX_DEVICES)
-        return;
+        return -1;
 
     hal_pci_device_t *dev = &devices[device_count++];
     uint32_t ids = read_raw(bus, device, function, PCI_VENDOR_ID, 4);
@@ -158,6 +159,8 @@ static void add_function(uint8_t bus, uint8_t device, uint8_t function)
 
     if (dev->header_type == 0)
         read_bars(dev);
+
+    return 0;
 }
 
 static void scan_bus(uint8_t bus, unsigned int depth);
@@ -174,7 +177,8 @@ static void scan_device(uint8_t bus, uint8_t device, unsigned int depth)
         if (read_raw(bus, device, (uint8_t)function, PCI_VENDOR_ID, 2) == 0xFFFF)
             continue;
 
-        add_function(bus, device, (uint8_t)function);
+        if (add_function(bus, device, (uint8_t)function) != 0)
+            return;
 
         const hal_pci_device_t *added = &devices[device_count - 1];
 

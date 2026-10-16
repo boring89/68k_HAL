@@ -535,7 +535,7 @@ static int32_t sock_connect(int fd, uint32_t address, uint32_t length)
     int connection = net_tcp_connect(ip, port, 10000);
 
     if (connection < 0)
-        return -K_ECONNREFUSED;
+        return -tcp_error_to_errno(net_tcp_connect_error());
 
     s->connection = connection;
     s->connected = 1;

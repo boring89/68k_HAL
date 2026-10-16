@@ -132,7 +132,8 @@ void net_configure(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gat
     k_memcpy(config.dns, dns, 4);
     config.configured = !is_zero_ip(ip);
 
-    if (config.configured)
+    /* The TCP stack holds our address; connections only end if that changed. */
+    if (config.configured && (!tcp_ready || !same_ip(tcp_stack.env.local_ip, config.ip)))
         tcp_restart();
 }
 
@@ -509,8 +510,17 @@ static int connected(void *context)
     return state != TCP_SYN_SENT && state != TCP_SYN_RECEIVED;
 }
 
+static int connect_error;
+
+int net_tcp_connect_error(void)
+{
+    return connect_error;
+}
+
 int net_tcp_connect(const uint8_t ip[4], uint16_t port, uint32_t timeout_ms)
 {
+    connect_error = TCP_ERROR_REFUSED;
+
     if (device == NULL || !config.configured || !tcp_ready)
         return -1;
 
@@ -522,6 +532,12 @@ int net_tcp_connect(const uint8_t ip[4], uint16_t port, uint32_t timeout_ms)
     if (wait_until(connected, &connection, timeout_ms) != 0 ||
         tcp_state(&tcp_stack, connection) != TCP_ESTABLISHED)
     {
+        /* Say why: a reset or refusal, or no answer at all. */
+        connect_error = tcp_error(&tcp_stack, connection);
+
+        if (connect_error == 0)
+            connect_error = TCP_ERROR_TIMEOUT;
+
         tcp_abort(&tcp_stack, connection);
 
         return -1;

@@ -7,6 +7,8 @@
 
 #include "user.h"
 
+#include "hal/cpu.h"
+
 #include "arch/x86/cpu/cpu.h"
 #include "arch/x86/gdt/gdt.h"
 #include "arch/x86/interrupt/interrupt_frame.h"
@@ -33,6 +35,35 @@ void hal_user_init(hal_user_syscall_handler_t syscall,
 int hal_user_run(uint32_t entry, uint32_t stack)
 {
     KASSERT(initialized);
+
+    /*
+     * A fresh program starts with the FPU as after power-up: no state from the
+     * program before (control word, stack, xmm registers). The kernel itself
+     * never uses them, so nothing needs saving. No xmm clobbers are listed: the
+     * kernel is built without SSE, so the compiler never holds anything there.
+     */
+    const hal_cpu_info_t *cpu = hal_cpu_info();
+
+    if (cpu->features & HAL_CPU_FEATURE_FPU)
+        asm volatile("fninit");
+
+    if ((cpu->features & HAL_CPU_FEATURE_SSE) && (cpu_read_cr4() & CPU_CR4_OSFXSR))
+    {
+        static const uint32_t default_mxcsr = 0x1F80; /* all exceptions masked, round to nearest */
+
+        asm volatile(
+            "pxor %%xmm0, %%xmm0\n\t"
+            "pxor %%xmm1, %%xmm1\n\t"
+            "pxor %%xmm2, %%xmm2\n\t"
+            "pxor %%xmm3, %%xmm3\n\t"
+            "pxor %%xmm4, %%xmm4\n\t"
+            "pxor %%xmm5, %%xmm5\n\t"
+            "pxor %%xmm6, %%xmm6\n\t"
+            "pxor %%xmm7, %%xmm7\n\t"
+            "ldmxcsr %0"
+            :
+            : "m"(default_mxcsr));
+    }
 
     int status = user_run_asm(entry, stack);
 

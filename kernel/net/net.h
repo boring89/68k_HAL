@@ -101,6 +101,9 @@ tcp_stack_t *net_tcp(void);
 /* Open a connection and wait for the handshake. Returns the connection number, or -1 (refused, no answer within timeout_ms, no route). */
 int net_tcp_connect(const uint8_t ip[4], uint16_t port, uint32_t timeout_ms);
 
+/* Why the last net_tcp_connect failed: a TCP_ERROR_* (refused, reset or timed out). */
+int net_tcp_connect_error(void);
+
 /* Send all of the data, waiting for room as needed. Returns 0 or -1 (the connection failed or timeout_ms passed). */
 int net_tcp_send_all(int connection, const void *data, size_t length, uint32_t timeout_ms);
 

@@ -62,11 +62,12 @@ typedef struct
     uint32_t length;
 } __attribute__((packed)) used_entry_t;
 
+/* Written by the device behind our back: volatile. */
 typedef struct
 {
-    uint16_t flags;
-    uint16_t index;
-    used_entry_t ring[];
+    volatile uint16_t flags;
+    volatile uint16_t index;
+    volatile used_entry_t ring[];
 } __attribute__((packed)) used_t;
 
 /* The header in front of every frame (5.1.6; no merged receive buffers, 10 bytes). */
@@ -95,8 +96,7 @@ typedef struct
     uint32_t rx_buffers_phys;
     uint8_t *tx_buffers;
     uint32_t tx_buffers_phys;
-    unsigned int tx_next;
-    unsigned int tx_inflight;
+    uint8_t tx_busy[TX_BUFFERS]; /* the device still owns this buffer */
 } virtio_net_t;
 
 static virtio_net_t card;
@@ -170,20 +170,31 @@ static int virtio_send(net_device_t *device, const void *frame, uint32_t length)
         return -1;
 
     queue_t *q = &card.tx;
-    unsigned int i = card.tx_next;
+    unsigned int i = TX_BUFFERS;
 
-    /* Recycle finished buffers; if all are in use, wait for the device (up to 100 ms). */
+    /* Find a buffer the device has finished with; if none, wait for the device (up to 100 ms). */
     uint64_t end = hal_timer_ns() + 100000000u;
 
     for (;;)
     {
+        /* The used ring names the buffers the device is done with, in any order. */
         while (q->last_used != q->used->index)
         {
+            uint32_t id = q->used->ring[q->last_used % q->size].id;
+
+            if (id < TX_BUFFERS)
+                card.tx_busy[id] = 0;
+
             q->last_used++;
-            card.tx_inflight--;
         }
 
-        if (card.tx_inflight < TX_BUFFERS)
+        for (unsigned int k = 0; k < TX_BUFFERS && i == TX_BUFFERS; k++)
+        {
+            if (!card.tx_busy[k])
+                i = k;
+        }
+
+        if (i < TX_BUFFERS)
             break;
 
         if (hal_timer_ns() > end)
@@ -200,11 +211,10 @@ static int virtio_send(net_device_t *device, const void *frame, uint32_t length)
     q->descriptors[i].flags = 0;
     q->descriptors[i].next = 0;
 
+    card.tx_busy[i] = 1;
     q->available->ring[q->available->index % q->size] = (uint16_t)i;
     asm volatile("" ::: "memory");
     q->available->index++;
-    card.tx_inflight++;
-    card.tx_next = (i + 1) % TX_BUFFERS;
     notify(QUEUE_TX);
 
     return 0;
@@ -216,7 +226,7 @@ static void virtio_poll(net_device_t *device)
 
     while (q->last_used != q->used->index)
     {
-        used_entry_t entry = q->used->ring[q->last_used % q->size];
+        used_entry_t entry = {q->used->ring[q->last_used % q->size].id, q->used->ring[q->last_used % q->size].length};
 
         q->last_used++;
 

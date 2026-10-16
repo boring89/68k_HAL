@@ -10,6 +10,7 @@
 #include "stack.h"
 
 #include "hal/boot.h"
+#include "kernel/boot/module.h"
 #include "hal/mmu.h"
 #include "hal/usermode.h"
 #include "hal/timer.h"
@@ -443,20 +444,6 @@ static void mount_or_warn(const char *path, vfs_fs_t *fs)
         kernel_log(LOG_WARN, "cannot mount a file system");
 }
 
-/*
- * The boot loader's string for a module is "<file> <name>" (QEMU) or
- * the line after "module" (GRUB): the module is the one whose last word
- * is name.
- */
-static int module_is_named(const char *string, const char *name)
-{
-    size_t wanted = k_strlen(name);
-    size_t length = k_strlen(string);
-
-    return length >= wanted && k_strcmp(string + length - wanted, name) == 0 &&
-           (length == wanted || string[length - wanted - 1] == ' ');
-}
-
 void user_init(void)
 {
     hal_user_init(on_syscall, on_fault);
@@ -465,17 +452,12 @@ void user_init(void)
     vfs_fs_t *root = NULL;
     hal_boot_module_t module;
 
-    for (unsigned int i = 0; hal_boot_module(i, &module) == 0; i++)
+    if (boot_module_find("initrd", &module) != NULL)
     {
-        if (module_is_named(module.name, "initrd"))
-        {
-            root = tarfs_create((const void *)(uintptr_t)module.base, (size_t)module.length);
+        root = tarfs_create((const void *)(uintptr_t)module.base, (size_t)module.length);
 
-            if (root == NULL)
-                kernel_log(LOG_WARN, "initrd is not a tar archive");
-
-            break;
-        }
+        if (root == NULL)
+            kernel_log(LOG_WARN, "initrd is not a tar archive");
     }
 
     mount_or_warn("/", root != NULL ? root : ramfs_create());

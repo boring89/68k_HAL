@@ -149,6 +149,13 @@ static void output(tcp_stack_t *stack, tcp_connection_t *c)
         start_timer(stack, c);
     }
 
+    /*
+     * Blocked by a closed window with nothing in flight: no ACK will come by
+     * itself, so keep a timer running; when it fires one byte is sent as a probe.
+     */
+    if (c->tx_length > c->tx_sent && c->snd_wnd == 0 && c->tx_sent == 0)
+        start_timer(stack, c);
+
     if (c->fin_queued && !c->fin_sent && c->tx_sent == c->tx_length)
     {
         send_segment(stack, c, NET_TCP_FIN | NET_TCP_ACK, c->snd_nxt, NULL, 0, 0);
@@ -351,6 +358,16 @@ void tcp_abort(tcp_stack_t *stack, int id)
     if (c->state == TCP_ESTABLISHED || c->state == TCP_FIN_WAIT_1 || c->state == TCP_FIN_WAIT_2 ||
         c->state == TCP_CLOSE_WAIT || c->state == TCP_SYN_RECEIVED)
         send_segment(stack, c, NET_TCP_RST | NET_TCP_ACK, c->snd_nxt, NULL, 0, 0);
+
+    /* Connections that were waiting to be accepted by this listener have no owner any more. */
+    if (c->state == TCP_LISTEN)
+    {
+        for (int i = 0; i < TCP_MAX_CONNECTIONS; i++)
+        {
+            if (stack->connection[i].used && stack->connection[i].parent == id)
+                tcp_abort(stack, i);
+        }
+    }
 
     c->used = 0;
     c->state = TCP_CLOSED;
@@ -561,6 +578,8 @@ static void handle_ack(tcp_stack_t *stack, tcp_connection_t *c, const net_tcp_t 
 
         if (c->snd_wnd > 0)
             c->probe = 0;
+        else
+            c->retries = 0; /* the peer answers (with a closed window): it is alive, keep probing */
     }
 }
 

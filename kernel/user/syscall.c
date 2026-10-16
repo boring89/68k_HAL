@@ -740,16 +740,30 @@ static int32_t clock_ns(uint32_t clock, int64_t *seconds, int64_t *nanoseconds)
 {
     if (clock == 0 || clock == 5 || clock == 8) /* REALTIME, REALTIME_COARSE, BOOTTIME-ish */
     {
-        hal_datetime_t now;
-        int64_t base = 0;
+        /*
+         * The RTC is read once; after that the time is that moment plus the
+         * monotonic clock's progress, so it never jumps backwards (the RTC
+         * only has whole seconds and ticks at its own phase).
+         */
+        static int have_base;
+        static uint64_t base_ns;
+        static uint64_t timer_at_base;
 
-        if (hal_clock_now(&now) == 0)
-            base = k_epoch_from_civil(now.year, now.month, now.day, now.hour, now.minute, now.second);
+        if (!have_base)
+        {
+            hal_datetime_t now;
 
-        /* Seconds from the RTC, sub-second part from the monotonic clock's fraction. */
-        uint64_t ns = hal_timer_ns();
+            if (hal_clock_now(&now) == 0)
+                base_ns = (uint64_t)k_epoch_from_civil(now.year, now.month, now.day, now.hour,
+                                                       now.minute, now.second) * 1000000000u;
 
-        *seconds = base;
+            timer_at_base = hal_timer_ns();
+            have_base = 1;
+        }
+
+        uint64_t ns = base_ns + (hal_timer_ns() - timer_at_base);
+
+        *seconds = (int64_t)(ns / 1000000000u);
         *nanoseconds = (int64_t)(ns % 1000000000u);
 
         return 0;

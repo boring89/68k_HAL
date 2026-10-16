@@ -30,6 +30,10 @@ static uint32_t line_consumed; /* how much of a complete line read() has taken *
 
 static void feed_key(char c)
 {
+    /* A complete line waits for read(): typing more would edit text already handed out. */
+    if (line_ready)
+        return;
+
     if (c == '\b' || c == 0x7F)
     {
         if (line_length > 0)

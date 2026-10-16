@@ -15,6 +15,7 @@
 #include "hal/timer.h"
 #include "kernel/lib/k_time.h"
 #include "kernel/block/block.h"
+#include "kernel/boot/module.h"
 #include "kernel/display/fb_scale.h"
 #include "kernel/sound/sound.h"
 #include "kernel/input/event_buffer.h"
@@ -130,28 +131,6 @@ static int overlay_write(void *ctx, uint32_t offset, const void *buf,
                  (const uint8_t *)buf + done, BLOCK_SIZE);
     }
     return 0;
-}
-
-
-/* The loader's string for a module is "<file> <args>" (QEMU) or the line
- * after "module" (GRUB): the module is the one whose last word is 'name'. */
-static const hal_boot_module_t *find_module(const char *name,
-                                            hal_boot_module_t *storage)
-{
-    size_t wanted = k_strlen(name);
-
-    for (unsigned int i = 0; hal_boot_module(i, storage) == 0; i++)
-    {
-        size_t length = k_strlen(storage->name);
-
-        if (length >= wanted &&
-            k_strcmp(storage->name + length - wanted, name) == 0 &&
-            (length == wanted || storage->name[length - wanted - 1] == ' '))
-        {
-            return storage;
-        }
-    }
-    return NULL;
 }
 
 
@@ -407,10 +386,10 @@ int mac_machine_run(uint32_t frames)
         goto out;
     }
     /* The disk: the boot module mac_disk (changes stay in memory), or else the ATA drive (changes are written). */
-    bool disk_in_memory = find_module(MAC_MODULE_DISK, &disk_module) != NULL;
+    bool disk_in_memory = boot_module_find(MAC_MODULE_DISK, &disk_module) != NULL;
     block_device_t *drive = disk_in_memory ? NULL : block_device_find("ata0");
 
-    if (find_module(MAC_MODULE_ROM, &rom_module) == NULL || (!disk_in_memory && drive == NULL))
+    if (boot_module_find(MAC_MODULE_ROM, &rom_module) == NULL || (!disk_in_memory && drive == NULL))
     {
         kernel_printf("%s\n", "mac: needs the boot module mac_rom and a disk (module mac_disk or an ATA drive)");
         goto out;
