@@ -161,6 +161,7 @@ HOST_LIB_SOURCES := \
 	kernel/pci/pci_names.c \
 	kernel/memory/pmm.c \
 	kernel/shell/parser.c \
+	kernel/usb/usb.c \
 	kernel/sound/sound.c \
 	kernel/user/elf.c \
 	kernel/user/region.c \
@@ -469,6 +470,7 @@ $(INITRD): $(USERLAND_BINS) $(wildcard userland/data/*) $(wildcard userland/expe
 # Kernel built with -DKERNEL_SELFTEST, booted directly by QEMU (no ISO).
 # QEMU exits with 33 on PASS (see kernel/test/selftest.c).
 QEMU_TEST_FLAGS := -display none -serial stdio -no-reboot -smp 4 \
+	-device qemu-xhci -device usb-ehci -device piix3-usb-uhci \
 	-device ich9-ahci,id=ahci -drive id=sata0,file=$(BUILD)/test/ahci_test.img,format=raw,if=none \
 	-device ide-hd,drive=sata0,bus=ahci.0 \
 	-netdev user,id=n0 -device e1000,netdev=n0 \
@@ -517,6 +519,7 @@ test-shell: iso
 	QEMU_ARGS="-netdev user,id=n0 -device e1000,netdev=n0" \
 	python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
 		"lspci=Host bridge" \
+		"usb=xHCI" \
 		"net=MAC:" \
 		"dhcp=Address: 10.0.2.15" \
 		"ping 10.0.2.2=reply from 10.0.2.2" \

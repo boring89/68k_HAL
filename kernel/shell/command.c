@@ -30,6 +30,7 @@
 #include "kernel/display/fb_pattern.h"
 #include "kernel/net/net.h"
 #include "kernel/sound/sound.h"
+#include "kernel/usb/usb.h"
 #include "kernel/pci/pci_names.h"
 
 static void cmd_help(
@@ -114,6 +115,9 @@ static void cmd_video(
     int argc,
     char **argv);
 static void cmd_http(
+    int argc,
+    char **argv);
+static void cmd_usb(
     int argc,
     char **argv);
 static void cmd_mac(
@@ -233,7 +237,11 @@ static shell_command_entry_t commands[] =
         {COMMAND_HTTP,
          "http",
          "Fetch a web page over TCP (http <host> [port [path]])",
-         cmd_http}};
+         cmd_http},
+        {COMMAND_USB,
+         "usb",
+         "List the USB host controllers",
+         cmd_usb}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -1518,4 +1526,57 @@ static void cmd_http(
         terminal_write_line("http: the connection broke off");
 
     net_tcp_close(connection);
+}
+
+static void cmd_usb(
+    int argc,
+    char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    if (usb_host_count() == 0)
+    {
+        terminal_write_line("No USB host controllers");
+        return;
+    }
+
+    for (unsigned int i = 0; i < usb_host_count(); i++)
+    {
+        usb_host_info_t host;
+        char number[16];
+
+        usb_host_get(i, &host);
+
+        /* 00:03.0 xHCI (USB 3.x) version 1.0, 4 ports, 64 slots */
+        write_hex_padded(host.bus, 2);
+        terminal_put_char(':');
+        write_hex_padded(host.device, 2);
+        terminal_put_char('.');
+        write_hex_padded(host.function, 1);
+        terminal_write(" ");
+        terminal_write(usb_host_type_name(host.type));
+        terminal_write(" (USB ");
+        terminal_write(usb_host_speed_name(host.type));
+        terminal_write(") version ");
+        k_utoa(host.version >> 8, number);
+        terminal_write(number);
+        terminal_put_char('.');
+        k_utoa((host.version >> 4) & 0xF, number);
+        terminal_write(number);
+        terminal_write(", ");
+        k_utoa(host.ports, number);
+        terminal_write(number);
+        terminal_write(" ports");
+
+        if (host.slots != 0)
+        {
+            k_utoa(host.slots, number);
+            terminal_write(", ");
+            terminal_write(number);
+            terminal_write(" device slots");
+        }
+
+        terminal_newline();
+    }
 }

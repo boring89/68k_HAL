@@ -37,7 +37,8 @@ typedef enum
     COMMAND_DNS,
     COMMAND_BEEP,
     COMMAND_VIDEO,
-    COMMAND_HTTP
+    COMMAND_HTTP,
+    COMMAND_USB
 
 } shell_command_id_t;
 

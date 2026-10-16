@@ -21,6 +21,7 @@
 #include "kernel/net/net.h"
 #include "kernel/printf/printf.h"
 #include "kernel/sound/sound.h"
+#include "kernel/usb/usb.h"
 #include "kernel/user/console.h"
 #include "kernel/user/process.h"
 #include "kernel/vfs/vfs.h"
@@ -376,6 +377,46 @@ static void test_ahci_disk(void)
     check_write_roundtrip(disk, 0, 128); /* more than one command */
 }
 
+/*
+ * test-qemu adds one controller of each of three kinds: qemu-xhci, usb-ehci and
+ * piix3-usb-uhci. They must be found with the right type, version and ports.
+ */
+static void test_usb_hosts(void)
+{
+    int xhci = -1;
+    int ehci = -1;
+    int uhci = -1;
+
+    for (unsigned int i = 0; i < usb_host_count(); i++)
+    {
+        usb_host_info_t host;
+
+        usb_host_get(i, &host);
+
+        if (host.type == USB_HOST_XHCI)
+        {
+            xhci = (int)i;
+            SELFTEST_ASSERT(host.version == 0x0100);
+            SELFTEST_ASSERT(host.ports >= 4);
+            SELFTEST_ASSERT(host.slots >= 1);
+        }
+        else if (host.type == USB_HOST_EHCI)
+        {
+            ehci = (int)i;
+            SELFTEST_ASSERT(host.version == 0x0100);
+            SELFTEST_ASSERT(host.ports >= 4);
+        }
+        else if (host.type == USB_HOST_UHCI)
+        {
+            uhci = (int)i;
+            SELFTEST_ASSERT(host.version == 0x0100);
+            SELFTEST_ASSERT(host.ports == 2);
+        }
+    }
+
+    SELFTEST_ASSERT(xhci >= 0 && ehci >= 0 && uhci >= 0);
+}
+
 /* The guest RAM is 8 MiB by default and can be resized. */
 static void test_m68k_guest_ram_size(void)
 {
@@ -700,6 +741,7 @@ void selftest_run(void)
     SELFTEST_RUN(test_ata_disk);
     SELFTEST_RUN(test_ata_write);
     SELFTEST_RUN(test_ahci_disk);
+    SELFTEST_RUN(test_usb_hosts);
     SELFTEST_RUN(test_m68k_guest_ram_size);
     SELFTEST_RUN(test_m68k_guest_program);
     SELFTEST_RUN(test_m68k_guest_divide_64);
