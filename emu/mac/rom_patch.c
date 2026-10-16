@@ -72,6 +72,17 @@
 #define PATCH_INIT_MMU 0x430A
 #define OP_CMP_B_D0_D0 0xB000
 
+/* SCSI Manager: "wait for the target to raise BSY" with a timeout of minutes
+ * at our speed. Nothing is on the bus, so answer "timeout" (D0 = 2, flags set
+ * by tst.w) at once. */
+#define PATCH_SCSI_WAIT_BSY 0x7860
+#define OP_MOVEQ_2_D0 0x7002
+#define OP_TST_W_D0 0x4A40
+
+/* _SCSIDispatch handler: the SCSI Manager. The bus is empty, so the whole
+ * manager is replaced by a native one that reports "no target answered". */
+#define PATCH_SCSI_DISPATCH 0x7460
+
 
 static void put16(uint8_t *rom, uint32_t off, uint16_t v)
 {
@@ -120,6 +131,12 @@ int mac_rom_patch(uint8_t *rom, uint32_t size)
     {
         put16(rom, PATCH_ADB_WAIT + 2 * i, OP_NOP);
     }
+
+    put16(rom, PATCH_SCSI_DISPATCH, MAC_EMUL_OP_SCSI_DISPATCH);
+
+    put16(rom, PATCH_SCSI_WAIT_BSY, OP_MOVEQ_2_D0);
+    put16(rom, PATCH_SCSI_WAIT_BSY + 2, OP_TST_W_D0);
+    put16(rom, PATCH_SCSI_WAIT_BSY + 4, OP_RTS);
 
     put16(rom, PATCH_INIT_MMU, OP_CMP_B_D0_D0);
     put16(rom, PATCH_INIT_MMU + 2, OP_NOP);

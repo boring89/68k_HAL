@@ -63,6 +63,12 @@ typedef struct
     uint8_t in_a, in_b;         /* levels the outside world drives on the pins */
 } mac_via_t;
 
+/* NCR 5380 SCSI controller with an empty bus (see scsi.c). */
+typedef struct
+{
+    uint8_t reg[8];             /* values the ROM wrote (read-write ones) */
+} mac_scsi_t;
+
 /* Apple IWM floppy controller, reduced to what the ROM's probe needs. */
 typedef struct
 {
@@ -98,6 +104,7 @@ typedef struct
     uint32_t rtc_seconds;       /* seconds since 1 Jan 1904, set by the host */
 
     mac_iwm_t iwm;
+    mac_scsi_t scsi;
 
     mac_via_t via1;
     uint64_t cycles;            /* CPU cycles since reset */
@@ -127,6 +134,7 @@ int mac_rom_patch(uint8_t *rom, uint32_t size);
 #define MAC_EMUL_OP_RESET 0x7103
 #define MAC_EMUL_OP_CLKNOMEM 0x7104
 #define MAC_EMUL_OP_HWINFO 0x7105
+#define MAC_EMUL_OP_SCSI_DISPATCH 0x7128
 
 /* VIA registers: 'reg' is 0-15. */
 uint32_t mac_via_read(mac_via_t *via, uint32_t reg);
@@ -143,6 +151,10 @@ bool mac_via_irq(const mac_via_t *via);
 #define VIA_INT_SR 0x04
 #define VIA_INT_T2 0x20
 #define VIA_INT_T1 0x40
+
+/* SCSI registers: one byte access at 'offset' from 0x50F10000. */
+uint32_t mac_scsi_access(mac_scsi_t *scsi, uint32_t offset, bool write,
+                         uint32_t value);
 
 /* IWM registers: one byte access at 'offset' from 0x50F16000. */
 uint32_t mac_iwm_access(mac_iwm_t *iwm, uint32_t offset, bool write,

@@ -9,6 +9,7 @@
  * Usage: mac_run [-n instructions] [-t N] <rom-file>
  *
  *   -n   run at most this many instructions (default 1000000)
+ *   -m   print 16 bytes of guest memory at this address (hex) at the end
  *   -s   after a -b break, run this many more instructions
  *   -a   list all remembered unimplemented accesses (default: the first 24)
  *   -u   collapse loops in the trace tail (hide addresses seen recently)
@@ -132,6 +133,8 @@ int main(int argc, char **argv)
     uint32_t tail = 32;
     uint32_t head = 0;
     uint32_t break_pc = 0;
+    uint32_t dump[8];
+    int ndump = 0;
     uint32_t extra = 0;
     uint32_t break_hi = 0;
     bool flow = false;
@@ -149,6 +152,10 @@ int main(int argc, char **argv)
         if (argv[i][0] == '-' && argv[i][1] == 'n' && i + 1 < argc)
         {
             max_insns = strtoul(argv[++i], NULL, 0);
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'm' && i + 1 < argc && ndump < 8)
+        {
+            dump[ndump++] = strtoul(argv[++i], NULL, 16);
         }
         else if (argv[i][0] == '-' && argv[i][1] == 's' && i + 1 < argc)
         {
@@ -294,6 +301,15 @@ int main(int argc, char **argv)
         printf("   ... %u repeated\n", skipped);
     }
 
+    for (int k = 0; k < ndump; k++)
+    {
+        printf("mem %08X:", dump[k]);
+        for (uint32_t b = 0; b < 16; b += 2)
+        {
+            printf(" %04X", m68k_vm_read16(dump[k] + b));
+        }
+        printf("\n");
+    }
     if (flow)
     {
         printf("-- ROM blocks in first-seen order (insn: address) --\n");

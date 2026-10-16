@@ -10,6 +10,9 @@
 #include "emu/m68k/vm.h"
 #include "kernel/lib/k_memory.h"
 
+#define SCSI_BASE 0x50F10000u
+#define SCSI_SPAN 0x2000u
+
 #define IWM_BASE 0x50F16000u
 #define IWM_SPAN 0x2000u
 
@@ -113,6 +116,11 @@ static uint32_t io_access(mac_t *mac, uint32_t addr, bool write, uint32_t value)
             return 0;
         }
         return mac_via_read(&mac->via1, reg);
+    }
+
+    if (addr >= SCSI_BASE && addr < SCSI_BASE + SCSI_SPAN)
+    {
+        return mac_scsi_access(&mac->scsi, addr - SCSI_BASE, write, value);
     }
 
     if (addr >= IWM_BASE && addr < IWM_BASE + IWM_SPAN)
@@ -367,6 +375,57 @@ static void emul_clknomem(mac_t *mac)
 }
 
 
+/*
+ * SCSI_DISPATCH: the classic SCSI Manager entry ($A815). The stack holds the
+ * return address, the selector word, the arguments and, for these Pascal
+ * functions, room for the result word (Inside Macintosh: Devices, "SCSI
+ * Manager"). Every call succeeds except selecting a target, which fails with
+ * scCommErr because nobody answers.
+ */
+#define SCSI_SEL_SELECT 2
+#define SCSI_SEL_SELATN 11
+#define SCSI_SEL_COUNT 14
+#define SCSI_ERR_COMM 2
+#define SR_CCR_MASK 0x1F
+#define SR_ZERO 0x04
+
+static void emul_scsi_dispatch(mac_t *mac)
+{
+    /* Bytes of arguments per selector (reset, get, select, cmd, complete,
+     * read, write, inquiry slot, rblind, wblind, stat, selatn, msgin,
+     * msgout). */
+    static const uint8_t arg_bytes[SCSI_SEL_COUNT] = {
+        0, 0, 2, 6, 10, 4, 4, 0, 4, 4, 0, 2, 4, 2,
+    };
+    uint32_t sp = m68k_vm_get_reg(M68K_VM_REG_A0 + 7);
+    uint32_t ret = m68k_vm_read32(sp);
+    uint32_t sel = m68k_vm_read16(sp + 4);
+    uint32_t args;
+    int result = 0;
+
+    if (sel >= SCSI_SEL_COUNT)
+    {
+        log_unimpl(mac, sp, 2, false, sel);
+        sel = 0;
+    }
+    if (sel == SCSI_SEL_SELECT || sel == SCSI_SEL_SELATN)
+    {
+        result = SCSI_ERR_COMM;
+    }
+    args = arg_bytes[sel];
+    sp += 6 + args;                 /* now at the result word */
+    mac_bus_write(mac, sp, 2, (uint32_t)result);
+    m68k_vm_set_reg(M68K_VM_REG_A0 + 7, sp);
+    m68k_vm_set_reg(M68K_VM_REG_PC, ret);
+
+    /* Callers test the result with the condition codes (tst.w D0). */
+    m68k_vm_set_reg(M68K_VM_REG_D0, (uint32_t)result);
+    m68k_vm_set_reg(M68K_VM_REG_SR,
+                    (m68k_vm_get_reg(M68K_VM_REG_SR) & ~SR_CCR_MASK) |
+                        (result == 0 ? SR_ZERO : 0));
+}
+
+
 static void emul_op(mac_t *mac, uint32_t pc, uint16_t op)
 {
     switch (op)
@@ -382,6 +441,9 @@ static void emul_op(mac_t *mac, uint32_t pc, uint16_t op)
         break;
     case MAC_EMUL_OP_CLKNOMEM:
         emul_clknomem(mac);
+        break;
+    case MAC_EMUL_OP_SCSI_DISPATCH:
+        emul_scsi_dispatch(mac);
         break;
     default:
         log_unimpl(mac, pc, 2, false, op);
@@ -436,7 +498,10 @@ static void insn_hook(void *ctx, uint32_t pc)
     if (opcode >= MAC_EMUL_OP_BASE && opcode <= MAC_EMUL_OP_LAST)
     {
         emul_op(mac, pc, opcode);
-        m68k_vm_set_reg(M68K_VM_REG_PC, pc + 2);
+        if (m68k_vm_get_reg(M68K_VM_REG_PC) == pc)
+        {
+            m68k_vm_set_reg(M68K_VM_REG_PC, pc + 2);
+        }
     }
 }
 
@@ -480,6 +545,7 @@ int mac_reset(mac_t *mac)
     mac->via_cycles = 0;
     mac->next_tick = CPU_HZ / TICK_HZ;
     k_memset(&mac->iwm, 0, sizeof mac->iwm);
+    k_memset(&mac->scsi, 0, sizeof mac->scsi);
     mac->overlay = true;
     mac->insn_count = 0;
     mac->flow_count = 0;
