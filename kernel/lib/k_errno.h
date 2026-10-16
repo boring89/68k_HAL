@@ -29,6 +29,7 @@
 #define K_EMFILE 24
 #define K_ENOTTY 25
 #define K_EFBIG 27
+#define K_ENODEV 19
 #define K_ENOSPC 28
 #define K_ESPIPE 29
 #define K_EROFS 30

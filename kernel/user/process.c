@@ -6,6 +6,7 @@
 #include "process.h"
 
 #include "console.h"
+#include "fbdev.h"
 #include "elf.h"
 #include "stack.h"
 
@@ -63,6 +64,17 @@ static int32_t map_page(uint32_t virt)
     return 0;
 }
 
+static int is_device_page(uint32_t virt)
+{
+    for (unsigned int i = 0; i < user_process.device_count; i++)
+    {
+        if (virt >= user_process.device[i].start && virt < user_process.device[i].end)
+            return 1;
+    }
+
+    return 0;
+}
+
 static void unmap_page(uint32_t virt)
 {
     uintptr_t phys;
@@ -71,7 +83,10 @@ static void unmap_page(uint32_t virt)
         return;
 
     hal_mmu_unmap(virt);
-    pmm_free_frame(phys & ~(uintptr_t)(PAGE - 1));
+
+    /* Device memory is not ours to free. */
+    if (!is_device_page(virt))
+        pmm_free_frame(phys & ~(uintptr_t)(PAGE - 1));
 }
 
 int32_t user_map(uint32_t start, uint32_t end)
@@ -89,6 +104,35 @@ int32_t user_map(uint32_t start, uint32_t end)
             user_regions_remove(&user_process.regions, page, end);
 
             return status;
+        }
+    }
+
+    return 0;
+}
+
+int32_t user_map_device(uint32_t start, uint32_t size, uintptr_t phys)
+{
+    uint32_t end = start + size;
+
+    if (user_process.device_count == sizeof(user_process.device) / sizeof(user_process.device[0]))
+        return -K_ENOMEM;
+
+    if (user_regions_add(&user_process.regions, start, end) != 0)
+        return -K_ENOMEM;
+
+    /* Recorded first: user_unmap must not free these frames, whatever happens next. */
+    user_process.device[user_process.device_count].start = start;
+    user_process.device[user_process.device_count].end = end;
+    user_process.device_count++;
+
+    for (uint32_t offset = 0; offset < size; offset += PAGE)
+    {
+        if (hal_mmu_map(start + offset, phys + offset, HAL_MMU_WRITABLE | HAL_MMU_USER) != 0)
+        {
+            user_unmap(start, start + offset);
+            user_regions_remove(&user_process.regions, start + offset, end);
+
+            return -K_ENOMEM;
         }
     }
 
@@ -450,6 +494,7 @@ int32_t user_run(const char *path, const char *const *argv, const char *const *e
 
     user_console_reset();
     cleanup();
+    fbdev_program_ended();
 
     return exit_status & 0xFF;
 }

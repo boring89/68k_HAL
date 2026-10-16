@@ -45,6 +45,12 @@ typedef struct
     uint32_t brk_start;
     uint32_t brk;
     uint32_t mmap_next;
+    struct
+    {
+        uint32_t start;
+        uint32_t end;
+    } device[4]; /* ranges mapped onto device memory (user_map_device) */
+    unsigned int device_count;
     vfs_file_t *fd[USER_MAX_FDS];
     uint32_t tls_base;
     char name[64];
@@ -56,6 +62,12 @@ extern user_process_t user_process;
 
 /* Map zeroed, user-accessible pages over [start, end) (page aligned) and record the region. Returns 0 or -errno. */
 int32_t user_map(uint32_t start, uint32_t end);
+
+/*
+ * Map size bytes (page aligned) of device memory at physical address phys at start, writable,
+ * and record the region. The frames are not RAM: unmapping never gives them to the allocator.
+ */
+int32_t user_map_device(uint32_t start, uint32_t size, uintptr_t phys);
 
 /* Undo user_map for [start, end): unmap and free the frames, forget the regions. */
 void user_unmap(uint32_t start, uint32_t end);

@@ -142,6 +142,7 @@ HOST_LIB_SOURCES := \
 	drivers/ps2_keyboard/scancode.c \
 	drivers/ps2_mouse/mouse_packet.c \
 	kernel/input/event.c \
+	kernel/input/linux_keys.c \
 	kernel/keyboard/keychar.c \
 	kernel/keyboard/keyseq.c \
 	kernel/mac/adbkeys.c \
@@ -447,7 +448,7 @@ USERLAND_BINS := $(patsubst userland/%.c,build/initrd/bin/%,$(USERLAND_SOURCES))
 # musl and the runtime helpers (downloads musl on the first run).
 sdk: $(SDK_LIBC)
 
-$(SDK_LIBC): tools/build_sdk.sh sdk/rt/divdi3.c
+$(SDK_LIBC): tools/build_sdk.sh sdk/rt/divdi3.c $(wildcard sdk/include/linux/*.h)
 	tools/build_sdk.sh
 
 build/initrd/bin/%: userland/%.c $(SDK_LIBC) tools/68khal-cc
@@ -562,6 +563,9 @@ test-shell: iso
 		"run /bin/readline=Type something" \
 		"{ctrl-c}=^C" \
 		"run /bin/hello=Hello from user mode!" \
+		"run /bin/evtest=reading events" \
+		"{mouse_move 7 3}=rel 0 7" \
+		"a{up}q=key 103 1" \
 		"run /bin/kilo /tmp/note.txt=HELP:" \
 		"hello kilo{ctrl-s}=bytes written on disk" \
 		"{ctrl-q}{ctrl-q}{ctrl-q}{ctrl-q}=" \

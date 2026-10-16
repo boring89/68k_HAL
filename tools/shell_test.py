@@ -34,6 +34,7 @@ def keys_for(text):
         return
 
     # "{up}" is a key by its QEMU name (sendkey): {up}, {f1}, {ctrl-c}, {delete}...
+    # "{mouse_move dx dy}" moves the mouse.
     pending = None
 
     for ch in text:
@@ -137,7 +138,8 @@ def main():
         for command, expected in steps:
             mark = len(output())
             for key in keys_for(command + "\n"):
-                send("sendkey " + key)
+                # "{mouse_move 7 3}" is a monitor command, not a key.
+                send(key if key.startswith("mouse_") else "sendkey " + key)
             if expected == "":
                 # Nothing to wait for on the serial port (the command prints
                 # nothing): give it time before the next one is typed.

@@ -15,6 +15,8 @@
 #include "kernel/memory/heap.h"
 #include "kernel/terminal/ansi.h"
 #include "kernel/terminal/terminal.h"
+#include "fbdev.h"
+#include "inputdev.h"
 #include "process.h"
 
 #include "hal/cpu.h"
@@ -637,21 +639,57 @@ vfs_file_t *console_file_open(uint32_t flags)
     return file;
 }
 
-/* A directory listing for /dev: just the names. */
+/*
+ * The devices of /dev. A name with a slash ("input/event0") can be opened but is not
+ * listed (there are no directories in /dev). seekable: lseek works (the framebuffer).
+ * available: NULL, or says whether the device exists on this machine (-ENODEV when not).
+ */
 static const struct
 {
     const char *name;
     const vfs_file_ops_t *ops;
+    int seekable;
+    int (*available)(void);
 } devices[] = {
-    {"console", &console_ops},
-    {"tty", &console_ops},
-    {"null", &null_ops},
-    {"zero", &zero_ops},
-    {"urandom", &random_ops},
-    {"random", &random_ops},
+    {"console", &console_ops, 0, NULL},
+    {"tty", &console_ops, 0, NULL},
+    {"null", &null_ops, 0, NULL},
+    {"zero", &zero_ops, 0, NULL},
+    {"urandom", &random_ops, 0, NULL},
+    {"random", &random_ops, 0, NULL},
+    {"fb0", &fbdev_ops, 1, fbdev_available},
+    {"input/event0", &inputdev_ops, 0, NULL},
 };
 
 #define DEVICE_COUNT ((int)(sizeof(devices) / sizeof(devices[0])))
+
+static int has_slash(const char *name)
+{
+    while (*name != '\0')
+    {
+        if (*name++ == '/')
+            return 1;
+    }
+
+    return 0;
+}
+
+static int is_listed(int index)
+{
+    return !has_slash(devices[index].name) && (devices[index].available == NULL || devices[index].available());
+}
+
+/* The index-th listed device, or -1. */
+static int listed_device(uint32_t index)
+{
+    for (int i = 0; i < DEVICE_COUNT; i++)
+    {
+        if (is_listed(i) && index-- == 0)
+            return i;
+    }
+
+    return -1;
+}
 
 static int32_t dir_readdir(vfs_file_t *file, uint32_t index, vfs_dirent_t *entry)
 {
@@ -666,11 +704,13 @@ static int32_t dir_readdir(vfs_file_t *file, uint32_t index, vfs_dirent_t *entry
         return 0;
     }
 
-    if (index - 2 >= (uint32_t)DEVICE_COUNT)
+    int device = listed_device(index - 2);
+
+    if (device < 0)
         return 1;
 
-    k_strcpy(entry->name, devices[index - 2].name);
-    entry->inode = index;
+    k_strcpy(entry->name, devices[device].name);
+    entry->inode = (uint32_t)device + 2;
     entry->type = VFS_DT_CHR;
 
     return 0;
@@ -712,12 +752,18 @@ static int32_t devfs_open(vfs_fs_t *fs, const char *path, uint32_t flags,
     {
         if (k_strcmp(path, devices[i].name) == 0)
         {
+            if (devices[i].available != NULL && !devices[i].available())
+                return -K_ENODEV;
+
             *file = vfs_file_new(devices[i].ops, NULL, flags);
 
             if (*file == NULL)
                 return -K_ENOMEM;
 
-            (*file)->seekable = 0;
+            (*file)->seekable = devices[i].seekable;
+
+            if (devices[i].ops == &inputdev_ops)
+                inputdev_flush();
 
             return 0;
         }

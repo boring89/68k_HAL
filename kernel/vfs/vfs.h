@@ -98,6 +98,11 @@ typedef struct
     uint32_t (*poll)(vfs_file_t *file, uint32_t events);
     /* ioctl(): request and arg as the program gave them (arg is usually a user address). Returns 0 or -errno; -ENOTTY without it. */
     int32_t (*ioctl)(vfs_file_t *file, uint32_t request, uint32_t arg);
+    /*
+     * mmap() of a device: set *phys to the physical address of byte offset of the file (the
+     * device memory is contiguous); the program's pages are mapped onto it directly. 0 or -errno.
+     */
+    int32_t (*mmap)(vfs_file_t *file, uint32_t length, uint32_t offset, uintptr_t *phys);
     void (*close)(vfs_file_t *file);
 } vfs_file_ops_t;
 

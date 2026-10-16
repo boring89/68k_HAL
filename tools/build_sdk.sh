@@ -54,4 +54,8 @@ rm -f "$sysroot/lib/librt68k.a"
 ar rc "$sysroot/lib/librt68k.a" "$out/divdi3.o"
 ranlib "$sysroot/lib/librt68k.a"
 
+# Our own headers for the device interfaces of 68k_HAL (linux/fb.h, linux/input.h).
+mkdir -p "$sysroot/include/linux"
+cp "$root/sdk/include/linux/"*.h "$sysroot/include/linux/"
+
 echo "sdk: ready in $sysroot"

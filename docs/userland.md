@@ -87,7 +87,7 @@ compiled by tcc: fib(20)=6765 1099511627 ok 6.28
 ```
 /        程式光碟（initrd，唯讀）：/bin、/data、/expected
 /tmp     RAM 檔案系統（可讀寫，重開機就消失）
-/dev     console（螢幕 + 序列埠輸出、鍵盤輸入）、tty、null、zero、urandom
+/dev     console（螢幕 + 序列埠輸出、鍵盤輸入）、tty、null、zero、urandom、fb0（圖形模式）、input/event0（鍵盤與滑鼠事件）
 /hfs     Mac 磁碟的 HFS volume（唯讀；資料叉；Mac 文字檔用 CR 換行）
 ```
 
@@ -129,7 +129,7 @@ compiled by tcc: fib(20)=6765 1099511627 ok 6.28
 | 訊號 | `rt_sigaction`、`rt_sigprocmask`（接受並忽略）；`kill`/`tgkill` 對自己 = 結束程式 |
 | 網路 | `socketcall`（`socket`、`bind`、`connect`、`listen`、`accept`、`send`/`recv`/`sendto`/`recvfrom`/`sendmsg`/`recvmsg`、`shutdown`、`getsockname`/`getpeername`、`setsockopt`/`getsockopt`，見 `docs/net.md` 3.5） |
 | 等待 | `poll`、`ppoll`、`_newselect`、`pselect6`（檔案、console 與 socket） |
-| 其他 | `ioctl`（console：termios、視窗大小、`FIONREAD`；其他檔案 `ENOTTY`，見 5.5）、`getrandom` |
+| 其他 | `ioctl`（console：termios、視窗大小、`FIONREAD`，見 5.5；`/dev/fb0`，見 5.6；其他檔案 `ENOTTY`）、`getrandom` |
 
 沒實作的呼叫回傳 `-ENOSYS`，並在 console 印一次：
 
@@ -154,6 +154,35 @@ compiled by tcc: fib(20)=6765 1099511627 ok 6.28
 | `ICRNL` | Enter 的 `\r` 轉成 `\n` |
 
 按鍵變成的位元組（xterm／Linux console）：方向鍵 `ESC [ A/B/C/D`、Home／End `ESC [ H`／`ESC [ F`、Delete `ESC [ 3 ~`、F1–F4 `ESC O P…S`、F5–F12 `ESC [ 15~…24~`、Alt+鍵 = ESC 加上該鍵、Backspace = 0x7F、Enter = `\r`。程式結束（或被 Ctrl-C 終止）時 termios 與顏色回到預設，所以 shell 不會被留在 raw 模式。`ioctl(TIOCGWINSZ)` 回傳螢幕的列數與欄數（文字模式 25×80）。
+
+### 5.6 圖形與輸入：`/dev/fb0`、`/dev/input/event0`
+
+比喻：framebuffer 是一張「直接貼在螢幕上的畫布」；程式把畫布借過來（`mmap`），畫什麼螢幕就顯示什麼，不用經過任何 kernel 呼叫。輸入事件則像一條「按鍵與滑鼠的傳送帶」，每個事件是一張 16 位元組的小卡片（誰、按下或放開）。
+
+**`/dev/fb0`**（`kernel/user/fbdev.c`，Linux fbdev 介面；標頭 `<linux/fb.h>` 在 `sdk/include/linux/`）：
+
+```c
+int fd = open("/dev/fb0", O_RDWR);
+struct fb_var_screeninfo var;  ioctl(fd, FBIOGET_VSCREENINFO, &var);   /* xres, yres, bits_per_pixel = 32, red.offset = 16 */
+struct fb_fix_screeninfo fix;  ioctl(fd, FBIOGET_FSCREENINFO, &fix);   /* line_length（每列位元組數） */
+uint32_t *px = mmap(NULL, fix.line_length * var.yres, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+px[y * (fix.line_length / 4) + x] = 0x00RRGGBB;
+```
+
+`mmap` 把使用者頁面**直接映射到顯示卡的記憶體**（`vfs_file_ops_t.mmap` 回傳實體位址；`user_map_device` 記錄這段範圍，所以 `munmap` 與程式結束時不會把這些 frame 還給 PMM，它們不是 RAM）。也可以 `lseek` + `write`。`FBIOPUT_VSCREENINFO` 給另一個 `xres/yres` 會要求顯示卡切模式（QEMU 標準 VGA 可以，見 `docs/gpu.md`）。程式結束時 kernel 把文字終端重畫（`fbdev_program_ended`；可能是新模式）。文字模式的核心沒有 framebuffer：`open` 回 `ENODEV`，`ls /dev` 也不列出 `fb0`；請用 GRUB 的 graphics 項目。
+
+**`/dev/input/event0`**（`kernel/user/inputdev.c`，標頭 `<linux/input.h>`）：鍵盤與滑鼠合在一起，格式與 Linux evdev 相同：
+
+| 事件 | type / code / value |
+|---|---|
+| 按鍵 | `EV_KEY` / Linux 的 `KEY_*`（`kernel/input/linux_keys.c`：Q = 16、Enter = 28、↑ = 103…）/ 1 按下、0 放開（沒有重複） |
+| 滑鼠移動 | `EV_REL` / `REL_X` 0、`REL_Y` 1（+y 向下）/ 位移 |
+| 滑鼠按鍵 | `EV_KEY` / `BTN_LEFT` 0x110、`BTN_RIGHT` 0x111、`BTN_MIDDLE` 0x112 / 1、0 |
+| 一組結束 | `EV_SYN` / 0 / 0 |
+
+`read` 一次給整數個事件（緩衝區至少 16 位元組）；沒有事件時等待，`O_NONBLOCK` 回 `EAGAIN`；`poll`/`select` 可用。打開時丟掉之前累積的事件。注意：鍵盤事件同時只有一個消費者：讀 `event0` 的程式在跑的時候，console 的行編輯收不到按鍵。
+
+範例：`userland/evtest.c`（印出事件，Q 結束）、`userland/fbdemo.c`（在 `/dev/fb0` 畫方塊，Q 結束）。
 
 ### 遇到 ENOSYS 時怎麼補
 
@@ -193,5 +222,5 @@ compiled by tcc: fib(20)=6765 1099511627 ok 6.28
 - `tests/host/test_elf.c`、`test_user_stack.c`、`test_region.c`、`test_vfs.c`：不需硬體的部分。
 - `kernel/test/selftest.c` 的 `test_user_programs`：在 QEMU 中執行 `userland/` 的範例程式，比對輸出與 `userland/expected/*.txt`（同一份輸出在 host 上用 `unshare -Ur chroot` 跑也相同，這就是預期檔的來源）。
 - `arch/x86/test/selftest_x86.c`：手寫機器碼測試 ring 3 切換、系統呼叫、page fault、特權指令。
-- `make test-shell`：開機 ISO，用 QEMU monitor 打字執行 `run …`，檢查序列埠輸出（`tools/shell_test.py`；`{up}`、`{f1}`、`{ctrl-c}` 這種寫法是按那個鍵）。raw 模式的 `rawkeys` 驗證按鍵序列，Ctrl-C 結束 `readline`。
+- `make test-shell`：開機 ISO，用 QEMU monitor 打字執行 `run …`，檢查序列埠輸出（`tools/shell_test.py`；`{up}`、`{f1}`、`{ctrl-c}` 這種寫法是按那個鍵）。raw 模式的 `rawkeys` 驗證按鍵序列，Ctrl-C 結束 `readline`；`evtest` 驗證鍵盤與滑鼠事件（`{mouse_move 7 3}` 是移動滑鼠）。`make test-fb`（`tools/fb_check.py`）開圖形模式執行 `fbdemo`，從 screendump 檢查 `/dev/fb0` 畫出的方塊，並檢查結束後終端回來。
 - `tests/host/test_ansi.c`（解析器）、`test_keyseq.c`（按鍵序列）；`selftest` 的 `test_user_ansi` 把螢幕換成記錄用的假螢幕，執行 `userland/ansi.c`，檢查字元、位置與顏色；`userland/termios.c`（raw、VMIN/VTIME、還原）在 `user_tests` 表。

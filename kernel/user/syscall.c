@@ -593,6 +593,31 @@ static int32_t sys_mmap2(uint32_t addr, uint32_t length, uint32_t prot, uint32_t
             return -K_EBADF;
     }
 
+    /* A device (the framebuffer) is mapped directly onto its memory. */
+    if (file != NULL && file->ops->mmap != NULL)
+    {
+        uintptr_t phys;
+        int32_t result = file->ops->mmap(file, length, pgoffset * PAGE, &phys);
+
+        if (result != 0)
+            return result;
+
+        uint32_t at = p->mmap_next;
+
+        result = user_map_device(at, size, phys);
+
+        if (result != 0)
+            return result;
+
+        p->mmap_next = at + size;
+
+        /* A read-only mapping of device memory. */
+        if (!(prot & 2))
+            protect_pages(at, size, prot);
+
+        return (int32_t)at;
+    }
+
     uint32_t start = p->mmap_next;
     int32_t status = user_map(start, start + size);
 

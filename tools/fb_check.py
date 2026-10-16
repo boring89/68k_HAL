@@ -53,6 +53,10 @@ def main():
         os.makedirs(os.path.join(root, "boot", "grub"))
         subprocess.run(["cp", kernel, os.path.join(root, "boot", "kernel-gfx.elf")],
                        check=True)
+        # The program disk, if it was built: the test runs /bin/fbdemo from it.
+        initrd = os.path.join(os.path.dirname(kernel), "initrd.tar")
+        if os.path.exists(initrd):
+            subprocess.run(["cp", initrd, os.path.join(root, "boot", "initrd.tar")], check=True)
         with open("grub.cfg") as f:
             cfg = f.read().replace("set default=0", "set default=1", 1)
         with open(os.path.join(root, "boot", "grub", "grub.cfg"), "w") as f:
@@ -65,6 +69,18 @@ def main():
         monitor = os.path.join(tmp, "monitor.sock")
         shot = os.path.join(tmp, "screen.ppm")
         shot2 = os.path.join(tmp, "screen2.ppm")
+        shot3 = os.path.join(tmp, "screen3.ppm")
+        shot4 = os.path.join(tmp, "screen4.ppm")
+        have_initrd = os.path.exists(os.path.join(root, "boot", "initrd.tar"))
+
+        def wait_serial(text, seconds):
+            end = time.monotonic() + seconds
+            while time.monotonic() < end:
+                with open(serial_path, errors="replace") as f:
+                    if text in f.read():
+                        return
+                time.sleep(0.3)
+            sys.exit(f"FAIL: serial output never showed '{text}'")
         process = subprocess.Popen(
             ["qemu-system-i386", "-cdrom", iso, "-vga", "std",
              "-display", "none", "-no-reboot",
@@ -96,6 +112,21 @@ def main():
                 time.sleep(1.5)
                 s.sendall(f"screendump {shot2}\n".encode())
                 time.sleep(1.0)
+
+                if have_initrd:
+                    # A program draws on /dev/fb0; Q ends it and the console comes back.
+                    for key in "run spc slash b i n slash f b d e m o ret".replace("run", "r u n").split():
+                        s.sendall(f"sendkey {key}\n".encode())
+                        time.sleep(0.1)
+                    wait_serial("fbdemo: 640x480", 15)
+                    time.sleep(1.0)
+                    s.sendall(f"screendump {shot3}\n".encode())
+                    time.sleep(1.0)
+                    s.sendall(b"sendkey q\n")
+                    wait_serial("fbdemo: done", 10)
+                    time.sleep(1.0)
+                    s.sendall(f"screendump {shot4}\n".encode())
+                    time.sleep(1.0)
         finally:
             process.kill()
             process.wait()
@@ -124,6 +155,23 @@ def main():
         lit = sum(1 for y in range(64, 200) for x in range(0, 320) if pixel(x, y) != (0, 0, 0))
         if lit < 300:
             sys.exit(f"FAIL: the command's output is not on the screen ({lit} lit pixels)")
+
+        if have_initrd:
+            # While fbdemo runs: its squares and frame are on the screen.
+            width, height, pixel = read_ppm(shot3)
+            for (x, y), want, what in [((130, 130), (255, 0, 0), "red square"),
+                                       ((230, 130), (0, 255, 0), "green square"),
+                                       ((320, 300), (0, 0, 64), "background"),
+                                       ((0, 240), (255, 255, 255), "frame")]:
+                if pixel(x, y) != want:
+                    sys.exit(f"FAIL: fbdemo {what} at {x},{y} is {pixel(x, y)}, expected {want}")
+
+            # After it: the console is drawn again (the prompt, the command's text).
+            width, height, pixel = read_ppm(shot4)
+            lit = sum(1 for y in range(0, 120) for x in range(0, 320) if pixel(x, y) != (0, 0, 0))
+            if lit < 100 or pixel(130, 130) == (255, 0, 0):
+                sys.exit(f"FAIL: the console did not come back after fbdemo ({lit} lit pixels)")
+            print("fb_check: /dev/fb0 ok")
         print("fb_check: PASS")
 
 
