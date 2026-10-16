@@ -41,6 +41,20 @@ QEMU 預設網卡是 Intel 82540EM（PCI 8086:100E）。資料來源：Intel 825
 - **DMA 記憶體**用 `hal_dma_alloc`（實體連續）；描述子裡放的是實體位址。
 - **中斷**：註冊 PCI 給的 IRQ 線，處理函式只讀 `ICR`（讀即確認）；封包由 `net_poll()` 取走（主迴圈與所有等待的函式都會呼叫它）。這樣協定程式不在中斷內執行。
 
+## 2.5 virtio-net（`drivers/virtio_net`，Q11）
+
+virtio 是「為虛擬機設計的裝置」：不模擬舊硬體，而是主機與客體共用幾個**環（virtqueue）**。比喻：兩條輸送帶，一條是我們放「空碗」讓主機把收到的封包裝進來（接收佇列），一條是我們放「裝好的碗」讓主機送出去（傳送佇列）。
+
+```
+ 描述子表（每個 16 位元組：緩衝區位址、長度、旗標）
+ available 環：驅動寫「這幾個描述子可以給裝置用了」，再把 index 加一，然後按鈴（寫 QUEUE_NOTIFY）
+ used 環：裝置寫「這個描述子用完了，長度 n」
+```
+
+用 transitional 裝置的**傳統（legacy）PCI 介面**（PCI 1AF4:1000，I/O BAR 0）：重置 → ACKNOWLEDGE → DRIVER → 讀裝置功能位元（只用 `VIRTIO_NET_F_MAC`）→ 設定兩個佇列（把「環結構的頁框號」寫進 `QUEUE_ADDRESS`）→ `DRIVER_OK`。每個封包前有 10 位元組的 virtio-net 標頭（全 0：不用校驗和與分段卸載）。接收：先給裝置 32 個 2048 位元組的緩衝區；`virtio_poll` 讀 used 環、把封包交給堆疊、再把緩衝區還給裝置。資料來源：Virtual I/O Device (VIRTIO) Specification 1.1（2.6、4.1.4.8、5.1）。限制：只有 legacy 介面（沒有 1.0 的 modern 介面、沒有 offload、沒有多佇列）。
+
+驗證：`make test-virtio-net`：QEMU `-device virtio-net-pci`，shell 的 `net`（顯示 `virtio-net`）、`dhcp`、`ping`、`dns` 都通過。堆疊一次只用一張網卡（先註冊的那張）。
+
 ## 3. 堆疊（`kernel/net/`）
 
 - `packet.c`：所有封包的**組裝與解析**（純函式，`tests/host/test_net_packet.c` 涵蓋）：Internet checksum（RFC 1071）、Ethernet、ARP、IPv4、ICMP echo、UDP（含 pseudo header）、DHCP（RFC 2131）、DNS（RFC 1035，含壓縮指標）。

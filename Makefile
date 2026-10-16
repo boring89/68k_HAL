@@ -11,7 +11,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -549,6 +549,15 @@ test-net: iso
 		"run /bin/dnsquery=localhost is 127.0.0.1"; \
 	status=$$?; kill $$server 2>/dev/null; exit $$status
 
+# The same network checks with a virtio-net card instead of the e1000.
+test-virtio-net: iso
+	QEMU_ARGS="-netdev user,id=n0 -device virtio-net-pci,netdev=n0" \
+	python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
+		"net=Card:     virtio-net" \
+		"dhcp=Address: 10.0.2.15" \
+		"ping 10.0.2.2=reply from 10.0.2.2" \
+		"dns localhost=address: 127.0.0.1"
+
 # The source tree must pass every rule. Each tests/boundary/<rule>/ is a
 # fixture tree that breaks that rule, so the check must report <rule>.
 test-boundary:
@@ -562,4 +571,4 @@ test-boundary:
 	done
 	@echo "boundary check: PASS"
 
-test: test-boundary test-host test-qemu test-shell test-video test-net
+test: test-boundary test-host test-qemu test-shell test-video test-net test-virtio-net
