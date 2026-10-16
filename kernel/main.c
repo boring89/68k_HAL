@@ -107,7 +107,6 @@ void kernel_main(void)
     shell_complete_set_commands(shell_command_count, shell_command_name);
     terminal_input_set_completer(shell_complete);
     terminal_input_set_prompt(SHELL_PROMPT);
-    shell_init();
     keyboard_state_init();
 
     hal_cpu_enable_interrupts();
@@ -131,6 +130,10 @@ void kernel_main(void)
 #ifdef KERNEL_SELFTEST
     selftest_run();
 #endif
+
+    /* The prompt comes last, after every boot message, so typing starts on
+     * the prompt's line. */
+    shell_init();
 
     uint32_t last_tick = 0;
 
