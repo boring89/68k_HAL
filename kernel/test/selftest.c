@@ -145,6 +145,30 @@ static void test_m68k_guest_divide_64(void)
     SELFTEST_ASSERT(m68k_vm_get_reg(M68K_VM_REG_D0 + 2) == 2);
 }
 
+/* The guest has no FPU: an F-line opcode must reach its vector 11 handler. */
+static void test_m68k_guest_fline_exception(void)
+{
+    static const uint8_t program[] = {
+        0x21, 0xFC, 0x00, 0x00, 0x20, 0x00, 0x00, 0x2C, /* MOVE.L #$2000,$2C */
+        0xF2, 0x80, 0x00, 0x00,                         /* FNOP */
+        0x4E, 0x72, 0x27, 0x00,                         /* STOP #$2700 */
+    };
+    static const uint8_t handler[] = {
+        0x7C, 0x09,                 /* MOVEQ #9,D6 */
+        0x4E, 0x72, 0x27, 0x00,     /* STOP #$2700 */
+    };
+
+    SELFTEST_ASSERT(m68k_guest_init() == 0);
+    SELFTEST_ASSERT(m68k_vm_load(0x1000, program, sizeof(program)) == 0);
+    SELFTEST_ASSERT(m68k_vm_load(0x2000, handler, sizeof(handler)) == 0);
+    SELFTEST_ASSERT(m68k_vm_reset(0x1000, 0x8000) == 0);
+
+    m68k_vm_run(10000);
+
+    SELFTEST_ASSERT(m68k_vm_halted());
+    SELFTEST_ASSERT(m68k_vm_get_reg(M68K_VM_REG_D0 + 6) == 9);
+}
+
 void selftest_abort(void)
 {
     selftest_platform_exit(0);
@@ -162,6 +186,7 @@ void selftest_run(void)
     SELFTEST_RUN(test_hal_cpu_idle);
     SELFTEST_RUN(test_m68k_guest_program);
     SELFTEST_RUN(test_m68k_guest_divide_64);
+    SELFTEST_RUN(test_m68k_guest_fline_exception);
 
     selftest_arch_run();
     selftest_platform_run();

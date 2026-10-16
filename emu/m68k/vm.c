@@ -17,6 +17,12 @@
 /* A-line opcodes are $Axxx (M68000 Programmer's Reference Manual, 8.2). */
 #define OPCODE_LINE_MASK 0xF000
 #define OPCODE_LINE_A 0xA000
+#define OPCODE_LINE_F 0xF000
+
+/* Line 1111 emulator exception: vector 11 (M68000 PRM, Table 8-1). */
+#define VECTOR_LINE_F 11
+#define SR_SUPERVISOR 0x2000
+#define SR_TRACE 0x8000
 
 #define MAX_TRAP_CHAIN 65536
 
@@ -114,9 +120,34 @@ void m68k_write_memory_32(unsigned int address, unsigned int value)
 
 
 /*
+ * Raise the line 1111 exception by hand, as a 68030 without FPU does: push a
+ * format 0 frame (SR, PC of the F-line opcode, format/vector word; M68030 User's
+ * Manual, 8.4) on the supervisor stack and jump through the vector table.
+ * Musashi cannot be told to take this exception from outside, and it would
+ * otherwise enter its FPU code (see docs/m68k.md).
+ */
+static void raise_line_f(uint32_t pc)
+{
+    uint32_t sr = m68k_get_reg(NULL, M68K_REG_SR);
+    uint32_t sp;
+
+    /* Switching to supervisor mode also switches to the supervisor stack. */
+    m68k_set_reg(M68K_REG_SR, (sr | SR_SUPERVISOR) & ~SR_TRACE);
+    sp = m68k_get_reg(NULL, M68K_REG_SP) - 8;
+    m68k_vm_write16(sp, sr);
+    m68k_vm_write32(sp + 2, pc);
+    m68k_vm_write16(sp + 6, VECTOR_LINE_F * 4);
+    m68k_set_reg(M68K_REG_SP, sp);
+    m68k_set_reg(M68K_REG_PC,
+                 m68k_vm_read32(m68k_get_reg(NULL, M68K_REG_VBR) +
+                                VECTOR_LINE_F * 4));
+}
+
+
+/*
  * Called by Musashi before every instruction (see m68kconf.h).
  *
- * A-line opcodes are handled here, in a loop, because Musashi would execute
+ * A-line and F-line opcodes are handled here, in a loop, because Musashi would execute
  * whatever sits at the new PC (e.g. a STOP right after a trap) without
  * calling the hook again. The cap keeps a handler that keeps redirecting PC
  * back to a trap from hanging the host; after it, Musashi takes the normal
@@ -127,9 +158,17 @@ void m68k_vm_instr_hook(unsigned int pc)
     uint16_t opcode = (uint16_t)m68k_vm_read16(pc);
 
     for (uint32_t i = 0;
-         (opcode & OPCODE_LINE_MASK) == OPCODE_LINE_A && i < MAX_TRAP_CHAIN;
+         ((opcode & OPCODE_LINE_MASK) == OPCODE_LINE_A ||
+          (opcode & OPCODE_LINE_MASK) == OPCODE_LINE_F) && i < MAX_TRAP_CHAIN;
          i++)
     {
+        if ((opcode & OPCODE_LINE_MASK) == OPCODE_LINE_F)
+        {
+            raise_line_f(pc);
+            pc = m68k_get_reg(NULL, M68K_REG_PC);
+            opcode = (uint16_t)m68k_vm_read16(pc);
+            continue;
+        }
         /* Skip the opcode first so a handler can redirect PC. */
         m68k_set_reg(M68K_REG_PC, pc + 2);
         m68k_trap_dispatch(opcode, pc);

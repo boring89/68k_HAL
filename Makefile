@@ -4,7 +4,7 @@ ISO_ROOT=$(BUILD)/iso_root
 ASM=nasm
 CC=gcc
 
-CFLAGS=-m32 -ffreestanding -I. -Wall -Wextra -Werror -fno-pie -fno-asynchronous-unwind-tables -nostdlib -MMD -MP \
+CFLAGS=-m32 -ffreestanding -I. -Wall -Wextra -Werror -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -nostdlib -MMD -MP \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' $(EXTRA_CFLAGS)
 
 HOST_CC=gcc

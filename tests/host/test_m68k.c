@@ -144,6 +144,16 @@ static void test_divide_by_zero_exception(void)
     TEST_ASSERT_EQ_INT(7, d(1));
 }
 
+static void test_fline_exception(void)
+{
+    run_program("fline", M68K_VM_CPU_68030);
+
+    TEST_ASSERT_EQ_INT(0xF11E, d(7));
+    TEST_ASSERT_EQ_INT(7, d(0));
+    TEST_ASSERT_EQ_INT(d(4), d(6));
+    TEST_ASSERT_EQ_INT(0x2C, d(5));
+}
+
 static void test_aline_trap_logged(void)
 {
     m68k_trap_record_t rec;
@@ -235,6 +245,7 @@ int main(void)
     TEST_RUN(test_branch_loop);
     TEST_RUN(test_subroutine_stack);
     TEST_RUN(test_divide_by_zero_exception);
+    TEST_RUN(test_fline_exception);
     TEST_RUN(test_aline_trap_logged);
     TEST_RUN(test_aline_handler_called);
     TEST_RUN(test_trap_log_wraps);
