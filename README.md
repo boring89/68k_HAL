@@ -93,6 +93,9 @@ you can boot them on the host or inside the kernel:
 make build/host/mac_run_fast
 build/host/mac_run_fast -n 500000000 -d System7_5_3.img -p screen.ppm "Mac IIci.ROM"
 
+# inside the kernel under QEMU, in a window you can use; type `mac` + Enter
+make run-mac MAC_ROM="Mac IIci.ROM" MAC_DISK=System7_5_3.img
+
 # inside the kernel under QEMU (graphics mode); the paths are Makefile variables
 make mac-screenshot MAC_ROM="Mac IIci.ROM" MAC_DISK=System7_5_3.img
 make test-rom MAC_ROM=...        # boots the ROM on the host (skipped without a ROM)

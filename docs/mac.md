@@ -168,6 +168,7 @@ Mac 的 ROM 是一本很長的開機劇本，劇本裡不斷地「去敲某個�
 - 磁碟寫入只存在覆蓋層（記憶體），不會改到模組，關機就沒了。Finder 啟動時要建 Desktop 檔案，所以覆蓋層是必要的：唯讀時會跳出「the desktop folder on the startup disk could not be created. Try unlocking the disk.」。
 - 模組以「名稱的最後一個字」辨識（QEMU 傳 `"<檔案> <參數>"`）：`-initrd "rom.bin mac_rom,disk.img mac_disk"`。
 - **決定性**：同樣的 ROM、磁碟、幀數，host 與 kernel 畫出一模一樣的畫面，所以 `make test-rom-qemu` 比較兩邊的畫面 CRC-32（預設 600 幀；KVM 約幾秒，TCG 會慢很多）。
+- `make run-mac`：互動執行。建好 ISO（ROM 與磁碟是複本，在 `build/mac/play.iso`）後開啟 QEMU 視窗（有 KVM 就用）；在視窗中輸入 `mac` + Enter，shell 的輸出在終端機，`` ` `` 停止，`Ctrl+Alt+G` 放開滑鼠。
 - `make mac-screenshot`：用 `grub-mkrescue` 建只在本機使用的 ISO（模組是複本），QEMU 圖形模式執行後用 monitor 的 `screendump` 存 `build/mac/qemu_screen.ppm`。
 
 GRUB 手動使用：在 `grub.cfg` 加一個項目

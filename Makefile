@@ -11,7 +11,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub
+.PHONY: all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -271,6 +271,23 @@ mac-iso:
 	cp "$(MAC_ROM)" $(BUILD)/mac/iso/mac_rom; cp "$(MAC_DISK)" $(BUILD)/mac/iso/mac_disk; \
 	printf 'set default=0\nset timeout=0\nmenuentry "mac" {\n  multiboot /boot/kernel-gfx.elf\n  module /mac_rom mac_rom\n  module /mac_disk mac_disk\n  boot\n}\n' > $(BUILD)/mac/iso/boot/grub/grub.cfg; \
 	grub-mkrescue -o $(BUILD)/mac/mac.iso $(BUILD)/mac/iso > /dev/null 2>&1
+
+# Interactive: boot the normal graphics kernel with your ROM and disk as GRUB
+# modules, in a QEMU window. Type `mac` + Enter in the window (the shell's
+# output goes to this terminal), ` stops the Mac, Ctrl+Alt+G releases the
+# mouse. The ISO holds copies of MAC_ROM and MAC_DISK; it stays in build/,
+# which git ignores. Local only.
+run-mac: $(BUILD)/kernel-gfx.elf
+	@if [ ! -f "$(MAC_ROM)" ] || [ ! -f "$(MAC_DISK)" ]; then \
+		echo "run-mac: no ROM or disk; set MAC_ROM and MAC_DISK"; exit 1; fi; \
+	rm -rf $(BUILD)/mac/play; mkdir -p $(BUILD)/mac/play/boot/grub; \
+	cp $(BUILD)/kernel-gfx.elf $(BUILD)/mac/play/boot/; \
+	cp "$(MAC_ROM)" $(BUILD)/mac/play/mac_rom; cp "$(MAC_DISK)" $(BUILD)/mac/play/mac_disk; \
+	printf 'set default=0\nset timeout=0\nmenuentry "mac" {\n  multiboot /boot/kernel-gfx.elf\n  module /mac_rom mac_rom\n  module /mac_disk mac_disk\n  boot\n}\n' > $(BUILD)/mac/play/boot/grub/grub.cfg; \
+	grub-mkrescue -o $(BUILD)/mac/play.iso $(BUILD)/mac/play > /dev/null 2>&1 || exit 1; \
+	accel=""; [ -w /dev/kvm ] && accel="-enable-kvm"; \
+	echo "run-mac: type mac + Enter in the QEMU window; \` stops; Ctrl+Alt+G frees the mouse"; \
+	qemu-system-i386 $$accel -m 256 -cdrom $(BUILD)/mac/play.iso -serial stdio
 
 mac-screenshot: mac-iso
 	@[ -f $(BUILD)/mac/mac.iso ] || exit 0; \

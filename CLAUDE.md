@@ -20,6 +20,7 @@ make test-sst   # SingleStepTests 68000 測資（tests/data/sst/，需自行下�
 make test-rom   # 在 host 上開機使用者的 Mac IIci ROM（變數 MAC_ROM、MAC_DISK；沒有檔案時跳過；不在 make test 中；見 docs/mac.md）
 make test-rom-qemu  # 同一台 Mac 在 kernel（QEMU）裡跑，畫面 CRC 必須與 host 相同（本機專用）
 make mac-screenshot # 圖形模式 QEMU 的畫面存成 build/mac/qemu_screen.ppm（本機專用）
+make run-mac     # 在 QEMU 視窗中互動執行 Mac（輸入 mac + Enter；本機專用）
 make clean
 ```
 
