@@ -60,23 +60,65 @@ static void test_heap_alloc_free(void)
     kfree(c);
 }
 
+/* The heap is at its own virtual range, backed by PMM frames marked used. */
 static void test_heap_region_reserved_in_pmm(void)
 {
     uintptr_t start = heap_get_start();
 
-    /* The region comes from pmm_alloc_frames, so it is frame aligned. */
-    SELFTEST_ASSERT(start % PMM_FRAME_SIZE == 0);
+    SELFTEST_ASSERT(start == HEAP_VIRT_BASE);
 
     int unmarked = 0;
 
     for (uintptr_t offset = 0; offset < KERNEL_HEAP_SIZE;
          offset += PMM_FRAME_SIZE)
     {
-        if (!pmm_is_frame_used(start + offset))
+        uintptr_t phys = 0;
+
+        if (hal_mmu_get_phys(start + offset, &phys) != 0 ||
+            !pmm_is_frame_used(phys))
             unmarked++;
     }
 
     SELFTEST_ASSERT(unmarked == 0);
+}
+
+/* Allocating past the first 1 MiB maps more frames at the end of the heap. */
+static void test_heap_grows(void)
+{
+    size_t free_before = pmm_get_free_frames();
+    size_t big = 3u * 1024 * 1024;
+
+    uint8_t *block = kmalloc(big);
+
+    SELFTEST_ASSERT(block != 0);
+
+    if (block == 0)
+        return;
+
+    SELFTEST_ASSERT((uintptr_t)block >= HEAP_VIRT_BASE);
+    SELFTEST_ASSERT((uintptr_t)block + big <= HEAP_VIRT_LIMIT);
+    SELFTEST_ASSERT(free_before - pmm_get_free_frames() >=
+                    (big - KERNEL_HEAP_SIZE) / PMM_FRAME_SIZE);
+
+    /* The whole block is writable and keeps what was written. */
+    for (size_t i = 0; i < big; i += 4093)
+        block[i] = (uint8_t)(i / 4093);
+
+    int bad = 0;
+
+    for (size_t i = 0; i < big; i += 4093)
+        bad += block[i] != (uint8_t)(i / 4093);
+
+    SELFTEST_ASSERT(bad == 0);
+    SELFTEST_ASSERT(kfree(block) == 0);
+
+    /* The memory stays mapped and is reused without growing again. */
+    size_t free_after = pmm_get_free_frames();
+    void *again = kmalloc(big);
+
+    SELFTEST_ASSERT(again == block);
+    SELFTEST_ASSERT(pmm_get_free_frames() == free_after);
+    SELFTEST_ASSERT(kfree(again) == 0);
 }
 
 
@@ -277,6 +319,7 @@ void selftest_run(void)
 
     SELFTEST_RUN(test_heap_alloc_free);
     SELFTEST_RUN(test_heap_region_reserved_in_pmm);
+    SELFTEST_RUN(test_heap_grows);
     SELFTEST_RUN(test_hal_timer_ticks);
     SELFTEST_RUN(test_hal_cpu_idle);
     SELFTEST_RUN(test_boot_module);

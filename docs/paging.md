@@ -94,14 +94,14 @@ mov cr0, <CR0 | 0x80010000>       ; CR0.PG = 1（下一條指令開始翻譯）�
 取指令 → page fault → 跳 handler（也沒對應）→ double fault → 再失敗 → triple fault → CPU 重置
 ```
 
-沒有任何錯誤訊息。所以開啟前必須對應好：kernel 程式碼與資料（含 GDT、IDT、16 KiB 堆疊、128 KiB PMM bitmap，都在 `.bss`/`.data` 內）、heap、VGA。port I/O（serial、PIC、鍵盤）不經過記憶體位址，不受影響。
+沒有任何錯誤訊息。所以開啟前必須對應好：kernel 程式碼與資料（含 GDT、IDT、16 KiB 堆疊、128 KiB PMM bitmap，都在 `.bss`/`.data` 內）、VGA（heap 已不在這裡：它在分頁開啟後才以 `0x20000000` 起的虛擬位址建立）。port I/O（serial、PIC、鍵盤）不經過記憶體位址，不受影響。
 
 （出處：Intel SDM Vol. 3A §2.5、§4.1.2、§6.15；OSDev Wiki "Triple Fault"）
 
 `paging_init` 的流程：
 
 ```
-① KASSERT：kernel_end ≤ 4 MiB、heap 結尾 ≤ 4 MiB      開啟前先檢查，失敗時還能印訊息
+① KASSERT：kernel_end ≤ 4 MiB                        開啟前先檢查，失敗時還能印訊息
 ② pmm_alloc_frame × 2                                directory、page table 0
 ③ k_memset 清 0                                      PG = 0，可直接用實體位址
 ④ table[1..1023] = identity；table[0] 保持 0          第 0 頁不對應
@@ -265,7 +265,7 @@ cr2=0 (not present, write, kernel)
 2. **空的 page table 不釋放**：每張 4 KiB。
 3. ~~**WP = 0**：唯讀頁對 kernel 無效~~：已開啟 CR0.WP，kernel 寫入唯讀頁會 page fault（`test_paging_fault_read_only`）。`.text`/`.rodata` 也已以唯讀對應（見第 2 節），寫入會 page fault（`test_paging_kernel_read_only`）。
 4. **只有一個位址空間**：recursive mapping 只能修改目前 CR3 的表。
-5. **identity map 限制在 4 MiB**：kernel 或 heap 變大超過時 `paging_init` 會 `panic`（KASSERT），要擴大 identity 範圍或改用 higher half。
+5. **identity map 限制在 4 MiB**：kernel 變大超過時 `paging_init` 會 `panic`（KASSERT），要擴大 identity 範圍或改用 higher half。
 6. **不是中斷安全的**：不可在 IRQ handler 中呼叫 map/unmap（PMM 也不是）。
 7. **新 page table 的短暫空窗**：見第 4 節。
 8. **flags 只遮罩到 12 bits**：除了三個定義的旗標，其他位元（PCD、G 等）也會被寫入，呼叫端要自己負責。
@@ -274,7 +274,7 @@ cr2=0 (not present, write, kernel)
 
 | 函式 | 說明 |
 |---|---|
-| `paging_init()` | 建表、identity map、開啟分頁。在 `pmm_init`、`heap_init`、`idt_init` 之後由 `hal_init` 呼叫一次 |
+| `paging_init()` | 建表、identity map、開啟分頁。在 `pmm_init`、`idt_init` 之後由 `hal_init` 呼叫一次 |
 | `paging_get_phys(virt, &phys)` | 成功回傳 `0`（含 offset），未對應或 `phys == NULL` 回傳 `-1`，失敗時不修改 `*phys` |
 | `paging_map(virt, phys, flags)` | 自動加 PRESENT；需要時建立 page table。未對齊、已對應、最高 4 MiB、PMM 用完回傳 `-1`。不擁有 `phys` |
 | `paging_unmap(virt)` | 清除 PTE 並 `invlpg`。未對齊、最高 4 MiB、未對應回傳 `-1`。不歸還 frame |
@@ -316,7 +316,7 @@ page fault 測試用 `.byte` 寫死 2 bytes 的 `mov` 指令，hook 記錄 CR2 �
 
 ## 11. 之後的工作
 
-- **heap 自動擴充**：用 `pmm_alloc_frame` + `paging_map` 把散落的 frame 接在 heap 結尾之後，不再需要實體連續（`docs/pmm.md` 第 8 節）。
+- ~~heap 自動擴充~~：已完成（`docs/pmm.md` 第 8 節）。
 - **higher half kernel**：如果之後需要每個程式獨立的低位址空間。
 - **多個位址空間**：每個程式一個 directory，共用 kernel 的 PDE；需要修改非目前位址空間的機制（暫時對應視窗）。
 - ~~page fault handler 逐位解讀 error code；`exception.c` 改用 `cpu_read_cr2()`；`EXCEPTION_PAGE_FAULT` 移到 `exception.h`~~：已完成。

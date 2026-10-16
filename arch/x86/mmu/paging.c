@@ -5,7 +5,6 @@
 
 #include "paging.h"
 
-#include "kernel/memory/heap.h"
 #include "kernel/memory/memory.h"
 #include "kernel/memory/pmm.h"
 #include "kernel/lib/k_memory.h"
@@ -26,7 +25,6 @@ void paging_init(void)
      * CR0.PG is set, or the next instruction fetch triple faults.
      */
     KASSERT(memory_get_kernel_end() <= PAGING_IDENTITY_END);
-    KASSERT(heap_get_start() + KERNEL_HEAP_SIZE <= PAGING_IDENTITY_END);
 
     uintptr_t ro_start = (uintptr_t)_kernel_ro_start;
     uintptr_t ro_end = (uintptr_t)_kernel_ro_end;

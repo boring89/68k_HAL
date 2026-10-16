@@ -385,6 +385,114 @@ static void test_used_consistent(void)
     TEST_ASSERT_EQ_INT(0, heap_get_reserved());
 }
 
+/*
+ * Growth with a fake callback: "memory" is a big static array and the
+ * callback only has to say how far the usable part of it now reaches.
+ */
+#define BIG_SIZE (64 * 1024)
+static _Alignas(8) uint8_t big_region[BIG_SIZE];
+static int grow_calls;
+static size_t grow_step = 256;
+static int grow_fail;
+static uintptr_t grow_last_address;
+
+static size_t fake_grow(uintptr_t address, size_t min_bytes)
+{
+    grow_calls++;
+    grow_last_address = address;
+
+    if (grow_fail)
+        return 0;
+
+    size_t bytes = (min_bytes + grow_step - 1) / grow_step * grow_step;
+
+    TEST_ASSERT(address + bytes <= (uintptr_t)big_region + BIG_SIZE);
+    return bytes;
+}
+
+static void grow_reset(size_t initial)
+{
+    grow_calls = 0;
+    grow_fail = 0;
+    heap_init((uintptr_t)big_region, initial);
+    heap_set_grow(fake_grow, (uintptr_t)big_region + BIG_SIZE);
+}
+
+static void test_grow_on_demand(void)
+{
+    grow_reset(0);
+
+    void *a = kmalloc(100);
+
+    TEST_ASSERT(a != 0);
+    TEST_ASSERT_EQ_INT(1, grow_calls);
+    TEST_ASSERT_EQ_INT((uintptr_t)big_region, grow_last_address);
+
+    /* Fits in what was already granted: no second call. */
+    void *b = kmalloc(32);
+
+    TEST_ASSERT(b != 0);
+    TEST_ASSERT_EQ_INT(1, grow_calls);
+
+    /* The next call is asked to start where the heap now ends. */
+    void *c = kmalloc(1000);
+
+    TEST_ASSERT(c != 0);
+    TEST_ASSERT_EQ_INT(2, grow_calls);
+    TEST_ASSERT_EQ_INT((uintptr_t)big_region + 256, grow_last_address);
+
+    /* All three are distinct, usable and contiguous in the one range. */
+    memset(a, 1, 100);
+    memset(b, 2, 32);
+    memset(c, 3, 1000);
+    TEST_ASSERT_EQ_INT(1, ((uint8_t *)a)[99]);
+    TEST_ASSERT_EQ_INT(2, ((uint8_t *)b)[0]);
+    TEST_ASSERT(heap_get_reserved() >= 100 + 32 + 1000);
+}
+
+static void test_grow_failure_and_limit(void)
+{
+    grow_reset(0);
+    grow_fail = 1;
+    TEST_ASSERT(kmalloc(8) == 0);
+    TEST_ASSERT_EQ_INT(1, grow_calls);
+
+    /* A request over the limit is refused without asking the callback. */
+    grow_reset(0);
+    heap_set_grow(fake_grow, (uintptr_t)big_region + 512);
+    TEST_ASSERT(kmalloc(1024) == 0);
+    TEST_ASSERT_EQ_INT(0, grow_calls);
+    TEST_ASSERT(kmalloc(256) != 0);
+
+    /* A callback with byte granularity works too. */
+    grow_reset(0);
+    grow_step = 1;
+    TEST_ASSERT(kmalloc(8) != 0);
+    grow_step = 256;
+}
+
+static void test_grow_partly_used_region(void)
+{
+    /* Start with 64 bytes; a 200-byte request needs more than that. */
+    grow_reset(64);
+
+    void *a = kmalloc(8);
+
+    TEST_ASSERT(a != 0);
+    TEST_ASSERT_EQ_INT(0, grow_calls);
+
+    void *b = kmalloc(200);
+
+    TEST_ASSERT(b != 0);
+    TEST_ASSERT_EQ_INT(1, grow_calls);
+    TEST_ASSERT_EQ_INT((uintptr_t)big_region + 64, grow_last_address);
+
+    /* Without a callback the old behaviour is unchanged. */
+    heap_set_grow(0, 0);
+    reset();
+    TEST_ASSERT(kmalloc(REGION_SIZE) == 0);
+}
+
 int main(void)
 {
     TEST_RUN(test_init_aligns_start);
@@ -398,6 +506,9 @@ int main(void)
     TEST_RUN(test_limit);
     TEST_RUN(test_kfree_invalid);
     TEST_RUN(test_used_consistent);
+    TEST_RUN(test_grow_on_demand);
+    TEST_RUN(test_grow_failure_and_limit);
+    TEST_RUN(test_grow_partly_used_region);
 
     return TEST_REPORT("heap");
 }

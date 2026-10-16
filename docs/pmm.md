@@ -249,6 +249,5 @@ Base              Length            Type
 
 ## 8. 之後的工作
 
-- ~~heap 改向 PMM 要記憶體~~：已完成。`kernel_main` 在 `pmm_init` 之後用 `pmm_alloc_frames(KERNEL_HEAP_SIZE / PMM_FRAME_SIZE)` 取得 1 MiB 連續區域交給 `heap_init`，失敗時 `panic`；過渡期的 `pmm_reserve_range` 已移除。
-- heap 自動擴充：用完 1 MiB 時再向 PMM 要 frame。新的 frame 不一定接在舊區域後面；分頁已完成，可以用 `pmm_alloc_frame` + `paging_map` 把它們接在 heap 結尾的虛擬位址之後（`docs/paging.md` 第 11 節）。
-- ~~分頁（`arch/x86/mmu/paging`）~~：已完成，見 `docs/paging.md`。page table 的 frame 由 `pmm_alloc_frame` 提供，由分頁模組清 0；開機時的 directory 與第一張 page table 是 heap 之後的頭兩個 frame（QEMU 上為 `0x32A000`、`0x32B000`）。
+- ~~heap 改向 PMM 要記憶體~~、~~heap 自動擴充~~：已完成。分頁開啟後 `kernel_main` 呼叫 `heap_vm_init()`（`kernel/memory/heap_vm.c`）：heap 放在專用虛擬位址 `0x20000000`–`0x2FFFFFFF`，一開始映射 1 MiB；`kmalloc` 空間不足時，heap 核心（`heap.c`，不知道分頁）呼叫成長回呼，回呼用 `pmm_alloc_frame` + `hal_mmu_map` 在 heap 結尾後面接上至少 64 KiB。frame 不需要實體連續。heap 不會把 frame 還給 PMM。heap 因此不再佔用開機 identity map 的 4 MiB，也不再要求實體連續的 1 MiB。
+- ~~分頁（`arch/x86/mmu/paging`）~~：已完成，見 `docs/paging.md`。page table 的 frame 由 `pmm_alloc_frame` 提供，由分頁模組清 0；開機時的 directory 與第一張 page table 是 PMM 給的頭兩個 frame（heap 搬到虛擬位址之前，在 QEMU 上是 heap 之後的 `0x32A000`、`0x32B000`；現在是 kernel 之後的頭兩個空 frame）。

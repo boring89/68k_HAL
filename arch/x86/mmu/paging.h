@@ -23,8 +23,8 @@
 
 /*
  * Build the page directory and the first page table from PMM frames,
- * load CR3 and turn on paging. Must run after pmm_init, heap_init and
- * idt_init. Panics if the kernel or heap lies outside the first 4 MiB.
+ * load CR3 and turn on paging. Must run after pmm_init and
+ * idt_init. Panics if the kernel lies outside the first 4 MiB.
  */
 void paging_init(void);
 

@@ -33,6 +33,10 @@ static uintptr_t heap_start;
 
 static uintptr_t heap_end;
 
+static heap_grow_t heap_grow;
+
+static uintptr_t heap_limit;
+
 static heap_block_t *heap_block_at(uintptr_t address)
 {
     return (heap_block_t *)address;
@@ -55,6 +59,31 @@ void heap_init(uintptr_t start, size_t size)
     heap_current = heap_start;
 
     heap_used = 0;
+
+    heap_grow = 0;
+    heap_limit = heap_end;
+}
+
+void heap_set_grow(heap_grow_t grow, uintptr_t limit)
+{
+    heap_grow = grow;
+    heap_limit = (limit > heap_end) ? limit : heap_end;
+}
+
+/* Grow the heap by at least min_bytes. Returns 0, or -1 if it cannot. */
+static int heap_extend(size_t min_bytes)
+{
+    if (heap_grow == 0 || min_bytes > heap_limit - heap_end)
+        return -1;
+
+    size_t grown = heap_grow(heap_end, min_bytes);
+
+    if (grown < min_bytes || grown > heap_limit - heap_end)
+        return -1;
+
+    heap_end += grown;
+
+    return 0;
 }
 
 static void heap_split(
@@ -171,8 +200,11 @@ void *kmalloc(size_t size)
 
     uintptr_t available = heap_end - heap_current;
 
-    if (available < HEAP_HEADER_SIZE ||
-        size > available - HEAP_HEADER_SIZE)
+    if (size > SIZE_MAX - HEAP_HEADER_SIZE)
+        return 0;
+
+    if (available < HEAP_HEADER_SIZE + size &&
+        heap_extend(HEAP_HEADER_SIZE + size - available) != 0)
     {
         return 0;
     }

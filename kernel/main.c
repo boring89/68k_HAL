@@ -46,16 +46,6 @@ void kernel_main(void)
     memory_init();
     pmm_init(memory_get_kernel_start(), memory_get_kernel_end());
 
-    /* Physically contiguous: there is no paging yet. */
-    uintptr_t heap_region =
-        pmm_alloc_frames(KERNEL_HEAP_SIZE / PMM_FRAME_SIZE);
-
-    if (heap_region == 0)
-        panic("PMM: cannot allocate %u bytes for the heap",
-              (unsigned int)KERNEL_HEAP_SIZE);
-
-    heap_init(heap_region, KERNEL_HEAP_SIZE);
-
     kernel_printf(
         "PMM: %u / %u frames free\n",
         (unsigned int)pmm_get_free_frames(),
@@ -64,6 +54,9 @@ void kernel_main(void)
 
     kernel_log(LOG_INFO, "Kernel Booting...");
     hal_init();
+
+    /* Needs paging: the heap has its own virtual address range. */
+    heap_vm_init();
 
     /* Graphics mode has no text output yet: show a test pattern instead. */
     hal_framebuffer_t framebuffer;

@@ -76,14 +76,15 @@ kernel_main()（kernel/main.c）
  ① hal_init_console()   平台註冊 VGA 文字顯示與 serial sink；不可印 log
  ② console_init()       terminal 接上已註冊的顯示裝置
  ③ hal_init_early()     檢查 magic、解析 Multiboot、印出 Multiboot 資訊
- ④ memory_init、pmm_init（用 hal/boot.h）、heap_init
- ⑤ hal_init()           IDT → 分頁 → 對應開機資料 → PIC → PIT（100 Hz）→ PS/2 鍵盤
+ ④ memory_init、pmm_init（用 hal/boot.h）
+ ⑤ hal_init()           IDT → 分頁 → 對應開機資料 → PIC → PIT（100 Hz）→ PS/2 鍵盤、滑鼠
+    heap_vm_init()      heap 放在專用虛擬位址，需要分頁，之後 kmalloc 才能用
  ⑥ input、terminal input、shell 初始化
  ⑦ hal_cpu_enable_interrupts()
  ⑧ 主迴圈：處理 input event，hal_cpu_idle()
 ```
 
-初始化分成三段，是因為依賴關係本身就有三段：terminal 需要顯示裝置（①在②之前）；PMM 需要開機記憶體表（③在④之前）；分頁需要 PMM（④在⑤之前）。順序中隱藏的依賴：
+初始化分成三段，是因為依賴關係本身就有三段：terminal 需要顯示裝置（①在②之前）；PMM 需要開機記憶體表（③在④之前）；分頁需要 PMM（④在⑤之前），heap 需要分頁。順序中隱藏的依賴：
 
 | 順序 | 原因 |
 |---|---|
