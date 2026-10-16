@@ -115,6 +115,20 @@ kernel_main()（kernel/main.c）
 | `hal/framebuffer.h` | `hal_framebuffer_get(&fb)` | `platform/pc/video/hal_framebuffer.c` | 圖形模式的線性 framebuffer（位址、寬高、pitch、32 bpp 0x00RRGGBB）。文字模式回傳 -1。圖形模式要靠 Multiboot header 要求（flags bit 2，640x480x32）。GRUB 對 Multiboot 1 只看 header、不理會 `gfxpayload`（實測），所以同一份 kernel 連結兩次：`kernel.elf`（文字模式）與 `kernel-gfx.elf`（`nasm -d GRAPHICS`，header 要求圖形模式），GRUB 選單有兩個項目。圖形模式時 console 只輸出到 serial，畫面只畫測試圖樣（`kernel/display/fb_pattern.c`）。QEMU `-kernel kernel-gfx.elf` 不提供 framebuffer（會印 `multiboot knows VBE. we don't`，無害），請用 ISO。檢查：`tools/fb_check.py`（開 ISO 的 graphics 項目並比對 screendump） |
 | `hal/clock.h` | `hal_clock_now(&t)` | `platform/pc/rtc/hal_clock.c` | 目前的 UTC 日期時間。讀 CMOS RTC（index 0x70 / data 0x71，OSDev Wiki "CMOS"）：等 update-in-progress 清除、連讀兩次一致才採用；BCD / 二進位、12 / 24 小時、世紀暫存器（0x32，沒有時 70–99 視為 19xx）的轉換在 `rtc_decode.c`（host 可測）。假設 RTC 存的是 UTC（QEMU 預設）。shell 指令 `date` |
 
+以下是 P6 新增的介面（細節見各自的文件）：
+
+| Header | 函式 | 實作 | 說明 |
+|---|---|---|---|
+| `hal/cpu.h`（新增） | `hal_cpu_init`、`hal_cpu_info`、`hal_cpu_online_count` | `arch/x86/cpu/hal_cpu.c`、`platform/pc/smp/smp.c` | CPUID 資訊、開啟 FPU/SSE、啟動中的處理器數；見 `docs/cpu.md` |
+| `hal/timer.h`（新增） | `hal_timer_ns`、`hal_timer_ns_resolution` | `platform/pc/timer/hal_timer.c` | 奈秒時鐘（TSC，用 PIT 通道 2 校正）；沒有 TSC 時退回 tick |
+| `hal/acpi.h` | `hal_acpi_info` | `platform/pc/acpi/hal_acpi.c` | MADT：處理器、local APIC、I/O APIC |
+| `hal/mmu.h`（新增旗標） | `HAL_MMU_UNCACHED` | `arch/x86/mmu/paging_entry.c` | PCD+PWT：裝置暫存器用 |
+| `hal/usermode.h` | `hal_user_init`、`hal_user_run`、`hal_user_exit`、`hal_user_set_tls` | `arch/x86/user/hal_user.c` | ring 3、系統呼叫、使用者錯誤；見 `docs/userland.md` |
+| `hal/pci.h` | `hal_pci_device_count`、`hal_pci_device`、`hal_pci_find*`、`hal_pci_config_read/write`、`hal_pci_enable`、`hal_pci_map_bar`、`hal_pci_probe_drivers`、型別 `hal_pci_driver_t` | `platform/pc/pci/` | PCI 列舉、BAR、驅動比對；見 `docs/pci.md` |
+| `hal/dma.h` | `hal_dma_alloc`、`hal_dma_free` | `platform/pc/dma/hal_dma.c` | 實體連續、歸零、有實體位址的記憶體，給裝置 DMA |
+
+`platform/pc/vmap/` 是平台內部的「虛擬位址視窗」（`0xE0000000`–`0xF0000000`），用來映射 ACPI 表、APIC、PCI BAR、DMA 記憶體；不是 HAL 介面。
+
 ### kernel 的裝置介面（由驅動程式實作）
 
 執行時綁定（ops struct），因為同一類裝置可能有好幾個，或是根本沒有。

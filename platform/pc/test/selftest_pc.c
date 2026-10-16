@@ -10,8 +10,10 @@
 
 #include "hal/acpi.h"
 #include "hal/cpu.h"
+#include "hal/dma.h"
 #include "hal/irq.h"
 #include "hal/mmu.h"
+#include "hal/pci.h"
 #include "hal/timer.h"
 
 #include "platform/pc/boot/multiboot.h"
@@ -53,6 +55,65 @@ static void test_acpi_tables(void)
     SELFTEST_ASSERT(info->ioapic_count >= 1);
 }
 
+/* QEMU's default machine (i440FX): host bridge, PIIX3 (ISA, IDE, ACPI) and the standard VGA. */
+static void test_pci_devices(void)
+{
+    SELFTEST_ASSERT(hal_pci_device_count() >= 4);
+
+    int host = hal_pci_find(0x8086, 0x1237, 0);
+    int isa = hal_pci_find_class(0x06, 0x01, 0);
+    int ide = hal_pci_find(0x8086, 0x7010, 0);
+    int vga = hal_pci_find(0x1234, 0x1111, 0);
+
+    SELFTEST_ASSERT(host == 0);
+    SELFTEST_ASSERT(isa >= 0);
+    SELFTEST_ASSERT(ide >= 0);
+    SELFTEST_ASSERT(vga >= 0);
+    SELFTEST_ASSERT(hal_pci_find(0xDEAD, 0xBEEF, 0) == -1);
+
+    hal_pci_device_t dev;
+
+    if (vga < 0 || hal_pci_device((unsigned int)vga, &dev) != 0)
+        return;
+
+    SELFTEST_ASSERT(dev.class_code == 0x03 && dev.subclass == 0x00);
+
+    /* BAR 0 of the standard VGA is its 16 MiB frame buffer, BAR 2 the 4 KiB register block. */
+    SELFTEST_ASSERT(dev.bar[0].type == HAL_PCI_BAR_MEM);
+    SELFTEST_ASSERT(dev.bar[0].size == 16u * 1024 * 1024);
+    SELFTEST_ASSERT(dev.bar[0].prefetchable);
+    SELFTEST_ASSERT(dev.bar[2].type == HAL_PCI_BAR_MEM);
+    SELFTEST_ASSERT(dev.bar[2].size == 4096);
+
+    /* Configuration space reads agree with what was enumerated. */
+    SELFTEST_ASSERT(hal_pci_config_read(&dev, 0, 2) == 0x1234);
+    SELFTEST_ASSERT(hal_pci_config_read(&dev, 2, 2) == 0x1111);
+    SELFTEST_ASSERT(hal_pci_config_read(&dev, 0, 4) == 0x11111234u);
+    SELFTEST_ASSERT(hal_pci_config_read(&dev, 0x0B, 1) == 0x03);
+
+    /* A write to the command register sticks (bus mastering on) and the other bits stay. */
+    uint32_t before = hal_pci_config_read(&dev, 4, 2);
+
+    hal_pci_enable(&dev, HAL_PCI_COMMAND_BUS_MASTER);
+    SELFTEST_ASSERT((hal_pci_config_read(&dev, 4, 2) & 0x4) != 0);
+    SELFTEST_ASSERT((hal_pci_config_read(&dev, 4, 2) & before) == before);
+
+    /* The register block can be mapped and read: the VGA ID port reads back a BGA version. */
+    volatile uint16_t *registers = hal_pci_map_bar(&dev, 2);
+
+    SELFTEST_ASSERT(registers != NULL);
+
+    if (registers != NULL)
+    {
+        /* Bochs DISPI registers sit at offset 0x500 (index 0 = ID, 0xB0C0 .. 0xB0CF). */
+        uint16_t id = registers[0x500 / 2];
+
+        SELFTEST_ASSERT(id >= 0xB0C0 && id <= 0xB0CF);
+    }
+
+    SELFTEST_ASSERT(hal_pci_map_bar(&dev, 1) == NULL); /* not a memory BAR */
+}
+
 /* test-qemu starts QEMU with -smp 4: every processor must have reported. */
 static void test_smp_processors_online(void)
 {
@@ -60,6 +121,40 @@ static void test_smp_processors_online(void)
 
     SELFTEST_ASSERT(info != NULL && info->cpu_count == 4);
     SELFTEST_ASSERT(hal_cpu_online_count() == 4);
+}
+
+/* DMA memory: contiguous, zeroed, with the physical address a device would use. */
+static void test_dma_alloc(void)
+{
+    uint32_t phys = 0;
+    volatile uint32_t *memory = hal_dma_alloc(3 * 4096 + 1, &phys);
+
+    SELFTEST_ASSERT(memory != NULL);
+
+    if (memory == NULL)
+        return;
+
+    SELFTEST_ASSERT(phys != 0 && (phys & 0xFFF) == 0);
+
+    /* Four pages, zeroed, writable, and contiguous in physical memory. */
+    for (uint32_t i = 0; i < 4 * 1024; i++)
+        SELFTEST_ASSERT(memory[i] == 0);
+
+    memory[0] = 0x11223344;
+    memory[4 * 1024 - 1] = 0x55667788;
+
+    uintptr_t first;
+    uintptr_t last;
+
+    SELFTEST_ASSERT(hal_mmu_get_phys((uintptr_t)memory, &first) == 0);
+    SELFTEST_ASSERT(hal_mmu_get_phys((uintptr_t)memory + 3 * 4096, &last) == 0);
+    SELFTEST_ASSERT(first == phys);
+    SELFTEST_ASSERT(last == phys + 3 * 4096);
+
+    hal_dma_free((void *)memory, 3 * 4096 + 1);
+    SELFTEST_ASSERT(hal_mmu_get_phys((uintptr_t)memory, &first) == -1);
+
+    SELFTEST_ASSERT(hal_dma_alloc(0, &phys) == NULL);
 }
 
 /* The nanosecond clock must agree with the PIT ticks it was calibrated on. */
@@ -247,6 +342,8 @@ void selftest_platform_run(void)
     SELFTEST_RUN(test_hal_timer_frequency);
     SELFTEST_RUN(test_hal_timer_ns);
     SELFTEST_RUN(test_acpi_tables);
+    SELFTEST_RUN(test_pci_devices);
+    SELFTEST_RUN(test_dma_alloc);
     SELFTEST_RUN(test_smp_processors_online);
     SELFTEST_RUN(test_hal_irq_register_rejects);
     SELFTEST_RUN(test_pic_boot_mask);

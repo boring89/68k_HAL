@@ -16,6 +16,15 @@
 /* Attach to the registered display and clear it. */
 void terminal_init(void);
 
+/*
+ * Mirror: a function that gets every character the terminal shows, as
+ * the text appears (a newline for a line break, '\b' for a backspace;
+ * not for soft wrapping at the right edge). The console uses it to copy
+ * the screen to the serial port. NULL (the default) = no mirror. The
+ * mirror also receives text when there is no display (graphics mode).
+ */
+void terminal_set_mirror(void (*mirror)(char c));
+
 void terminal_newline(void);
 
 void terminal_backspace(void);

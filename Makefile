@@ -155,6 +155,7 @@ HOST_LIB_SOURCES := \
 	kernel/lib/k_time.c \
 	kernel/lib/ring_buffer.c \
 	kernel/memory/heap.c \
+	kernel/pci/pci_names.c \
 	kernel/memory/pmm.c \
 	kernel/shell/parser.c \
 	kernel/user/elf.c \
@@ -167,6 +168,7 @@ HOST_LIB_SOURCES := \
 	platform/pc/boot/hal_boot.c \
 	platform/pc/boot/multiboot.c \
 	platform/pc/acpi/acpi_parse.c \
+	platform/pc/pci/pci_bar.c \
 	platform/pc/rtc/rtc_decode.c \
 	platform/pc/timer/tsc_math.c \
 	$(wildcard emu/m68k/*.c) \
@@ -420,6 +422,9 @@ test-qemu: $(BUILD)/test/module_test.txt $(BUILD)/images/disk.img $(BUILD)/test/
 # check what the programs print on the serial port (tools/shell_test.py).
 test-shell: iso
 	python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
+		"lspci=Host bridge" \
+		"cpuinfo=Features" \
+		"acpi=Processors" \
 		"run /bin/hello=Hello from user mode!" \
 		"run /bin/args a b=argv[2]: b" \
 		"run /bin/crash=before" \

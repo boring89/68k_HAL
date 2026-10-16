@@ -14,6 +14,7 @@
 #include "platform/pc/acpi/acpi.h"
 #include "platform/pc/boot/multiboot.h"
 #include "platform/pc/interrupt/pic.h"
+#include "platform/pc/pci/pci.h"
 #include "platform/pc/smp/smp.h"
 #include "platform/pc/video/framebuffer.h"
 #include "platform/pc/timer/pit.h"
@@ -149,6 +150,8 @@ void hal_init(void)
         kernel_log(LOG_INFO, "ACPI tables found");
     else
         kernel_log(LOG_WARN, "No ACPI tables");
+
+    kernel_printf("PCI devices: %u\n", pci_init());
 
     pic_init();
     kernel_log(LOG_INFO, "PIC initialized");

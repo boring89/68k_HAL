@@ -24,6 +24,8 @@
 #include "hal/clock.h"
 #include "hal/acpi.h"
 #include "hal/cpu.h"
+#include "hal/pci.h"
+#include "kernel/pci/pci_names.h"
 
 static void cmd_help(
     int argc,
@@ -83,6 +85,9 @@ static void cmd_acpi(
     int argc,
     char **argv);
 static void cmd_run(
+    int argc,
+    char **argv);
+static void cmd_lspci(
     int argc,
     char **argv);
 static void cmd_mac(
@@ -170,7 +175,11 @@ static shell_command_entry_t commands[] =
         {COMMAND_RUN,
          "run",
          "Run a program of the file tree (run <path> [arguments...])",
-         cmd_run}};
+         cmd_run},
+        {COMMAND_LSPCI,
+         "lspci",
+         "List PCI devices (lspci -v also shows the base address registers)",
+         cmd_lspci}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -1061,5 +1070,81 @@ static void cmd_run(
         k_utoa((unsigned int)status, number);
         terminal_write(number);
         terminal_write_line("]");
+    }
+}
+
+static void write_hex_padded(uint32_t value, int digits)
+{
+    char buffer[16];
+
+    k_utoa_hex(value, buffer);
+
+    for (int i = (int)k_strlen(buffer); i < digits; i++)
+        terminal_put_char('0');
+
+    terminal_write(buffer);
+}
+
+static void cmd_lspci(
+    int argc,
+    char **argv)
+{
+    int verbose = argc > 1 && k_strcmp(argv[1], "-v") == 0;
+
+    if (hal_pci_device_count() == 0)
+    {
+        terminal_write_line("No PCI devices");
+        return;
+    }
+
+    for (unsigned int i = 0; i < hal_pci_device_count(); i++)
+    {
+        hal_pci_device_t dev;
+
+        hal_pci_device(i, &dev);
+
+        /* bus:device.function  class  [vendor:device] */
+        write_hex_padded(dev.bus, 2);
+        terminal_put_char(':');
+        write_hex_padded(dev.device, 2);
+        terminal_put_char('.');
+        write_hex_padded(dev.function, 1);
+        terminal_write(" ");
+        terminal_write(pci_class_name(dev.class_code, dev.subclass));
+        terminal_write(": ");
+        terminal_write(pci_vendor_name(dev.vendor_id));
+        terminal_write(" [");
+        write_hex_padded(dev.vendor_id, 4);
+        terminal_put_char(':');
+        write_hex_padded(dev.device_id, 4);
+        terminal_write_line("]");
+
+        if (!verbose)
+            continue;
+
+        if (dev.irq_pin != 0)
+        {
+            terminal_write("        IRQ ");
+
+            char number[16];
+
+            k_utoa(dev.irq_line, number);
+            terminal_write_line(number);
+        }
+
+        for (int b = 0; b < 6; b++)
+        {
+            if (dev.bar[b].type == HAL_PCI_BAR_NONE)
+                continue;
+
+            char number[16];
+
+            terminal_write(dev.bar[b].type == HAL_PCI_BAR_IO ? "        I/O ports at " : "        Memory at ");
+            write_hex_padded((uint32_t)dev.bar[b].base, 8);
+            terminal_write(" (");
+            k_utoa((uint32_t)dev.bar[b].size, number);
+            terminal_write(number);
+            terminal_write_line(" bytes)");
+        }
     }
 }

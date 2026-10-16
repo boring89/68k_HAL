@@ -11,6 +11,12 @@
 
 /* NULL on a machine without a display: then every call does nothing. */
 static const text_display_t *display;
+static void (*mirror)(char c);
+
+void terminal_set_mirror(void (*function)(char c))
+{
+    mirror = function;
+}
 
 static int cursor_x = 0;
 static int cursor_y = 0;
@@ -42,6 +48,9 @@ void terminal_init(void)
 
 void terminal_backspace(void)
 {
+    if (mirror != NULL)
+        mirror('\b');
+
     if (display == NULL || cursor_x == 0)
     {
         return;
@@ -112,7 +121,7 @@ static void terminal_scroll(void)
     terminal_update_cursor();
 }
 
-void terminal_newline(void)
+static void newline_no_mirror(void)
 {
     if (display == NULL)
         return;
@@ -130,6 +139,14 @@ void terminal_newline(void)
     terminal_update_cursor();
 }
 
+void terminal_newline(void)
+{
+    if (mirror != NULL)
+        mirror('\n');
+
+    newline_no_mirror();
+}
+
 void terminal_set_color(color_t foreground, color_t background)
 {
     terminal_fg = foreground;
@@ -138,8 +155,14 @@ void terminal_set_color(color_t foreground, color_t background)
 
 void terminal_put_char(char c)
 {
+    /* Without a display only the mirror sees the text. */
     if (display == NULL)
+    {
+        if (mirror != NULL && c != '\t')
+            mirror(c);
+
         return;
+    }
 
     switch (c)
     {
@@ -159,6 +182,9 @@ void terminal_put_char(char c)
         break;
     }
 
+    if (mirror != NULL)
+        mirror(c);
+
     display->put_cell(
         cursor_x,
         cursor_y,
@@ -170,7 +196,7 @@ void terminal_put_char(char c)
 
     if (cursor_x >= display->width)
     {
-        terminal_newline();
+        newline_no_mirror();
         return;
     }
 

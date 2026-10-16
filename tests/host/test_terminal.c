@@ -211,6 +211,45 @@ static void test_no_display(void)
     TEST_ASSERT(text_display_get() == NULL);
 }
 
+static char mirrored[64];
+static unsigned int mirrored_length;
+
+static void record_mirror(char c)
+{
+    if (mirrored_length < sizeof(mirrored) - 1)
+        mirrored[mirrored_length++] = c;
+
+    mirrored[mirrored_length] = '\0';
+}
+
+/* The mirror sees the text as typed: line breaks and backspaces, but not soft wrapping. */
+static void test_mirror(void)
+{
+    start();
+    mirrored_length = 0;
+    mirrored[0] = '\0';
+    terminal_set_mirror(record_mirror);
+
+    terminal_write("abcdef"); /* wraps at the 4 column display */
+    terminal_write_line("x");
+    terminal_put_char('\b');
+    terminal_newline();
+
+    TEST_ASSERT_EQ_STR("abcdefx\n\b\n", mirrored);
+
+    /* Without a display the mirror still gets the text. */
+    text_display_reset();
+    terminal_init();
+    mirrored_length = 0;
+    mirrored[0] = '\0';
+    terminal_write("hi\n");
+    TEST_ASSERT_EQ_STR("hi\n", mirrored);
+
+    terminal_set_mirror(NULL);
+    terminal_write("not mirrored");
+    TEST_ASSERT_EQ_STR("hi\n", mirrored);
+}
+
 int main(void)
 {
     TEST_RUN(test_register_rejects);
@@ -223,6 +262,7 @@ int main(void)
     TEST_RUN(test_clear);
     TEST_RUN(test_null_string);
     TEST_RUN(test_no_display);
+    TEST_RUN(test_mirror);
 
     return TEST_REPORT("terminal");
 }
