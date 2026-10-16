@@ -11,7 +11,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: all clean iso run test test-boundary test-host test-qemu test-sst test-rom
+.PHONY: all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-mac-stub
 
 .DEFAULT_GOAL := all
 
@@ -201,7 +201,7 @@ $(BUILD)/host/mac_run: tools/mac_run.c $(HOST_LIB_OBJECTS) $(BUILD)/host/obj/$(M
 # faster; for long runs of the real ROM.
 MAC_FAST_SOURCES := tools/mac_run.c $(wildcard emu/mac/*.c) emu/m68k/vm.c \
 	emu/m68k/trap.c kernel/lib/k_memory.c
-$(BUILD)/host/mac_run_fast: $(MAC_FAST_SOURCES) $(MUSASHI_GEN)/m68kops.c \
+$(BUILD)/host/mac_run_fast: $(MAC_FAST_SOURCES) $(wildcard emu/mac/*.h) $(wildcard emu/m68k/*.h) $(MUSASHI_GEN)/m68kops.c \
 		$(MUSASHI)/m68kcpu.c $(MUSASHI)/m68kdasm.c $(MUSASHI)/softfloat/softfloat.c
 	mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -w -I. -I$(MUSASHI) -I$(MUSASHI_GEN) \
@@ -236,7 +236,11 @@ $(BUILD)/images/hfs.img: tools/make_hfs_image.sh
 $(BUILD)/images/disk.img: $(BUILD)/images/hfs.img tools/make_disk_image.py
 	python3 -I tools/make_disk_image.py $< $@
 
-test-host: $(HOST_TESTS) $(M68K_TEST_BINS) $(BUILD)/images/apm.img $(BUILD)/images/hfs.img $(BUILD)/images/disk.img
+# The bytes of emu/mac/stub.s kept in stub_code.h must match the assembler.
+test-mac-stub:
+	python3 -I tools/gen_mac_stub.py --check
+
+test-host: test-mac-stub $(HOST_TESTS) $(M68K_TEST_BINS) $(BUILD)/images/apm.img $(BUILD)/images/hfs.img $(BUILD)/images/disk.img
 	@for t in $(HOST_TESTS); do ./$$t || exit 1; done
 
 # SingleStepTests 68000 data (https://github.com/SingleStepTests/680x0, put

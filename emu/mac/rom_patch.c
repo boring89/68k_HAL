@@ -83,6 +83,29 @@
  * manager is replaced by a native one that reports "no target answered". */
 #define PATCH_SCSI_DISPATCH 0x7460
 
+/* InitDrivers (ROM offset 0x1100) opens .Sony and .Sound, then starts to load
+ * the serial drivers with "subq.w #4,sp; move.l #'SERD',-(sp)". Those 8 bytes
+ * become "jsr install; nop": the stub code adds the .Disk driver and performs
+ * the two displaced instructions. */
+#define PATCH_INSTALL_DRIVERS 0x1166
+#define OP_JSR_ABS_L 0x4EB9
+
+/* After InitMMU the ROM takes MemTop and BufPtr from the frame at A4
+ * ("movea.l (-20,A4),A6" at 0x10E and the next two instructions). Its own
+ * values come from memory probing that does not apply to our flat RAM, so the
+ * emulated opcode puts the right ones in the frame and then does the
+ * displaced "movea.l (-20,A4),A6" itself. */
+#define PATCH_BOOT_GLOBS 0x10E
+
+/* UniversalInfo entries of the IIci (two, see mac.c): the hardware flags at
+ * +16 say that an FPU may be present (bit 28). Without it the System would
+ * try an FNOP and the guest raises "no coprocessor" exceptions it does not
+ * expect. */
+#define IICI_ENTRY_1 0x36C0
+#define IICI_ENTRY_2 0x3700
+#define ENTRY_HWCFG 16
+#define HWCFG_FPU_PRESENT 0x10000000u
+
 
 static void put16(uint8_t *rom, uint32_t off, uint16_t v)
 {
@@ -131,6 +154,22 @@ int mac_rom_patch(uint8_t *rom, uint32_t size)
     {
         put16(rom, PATCH_ADB_WAIT + 2 * i, OP_NOP);
     }
+
+    for (uint32_t i = 0; i < 2; i++)
+    {
+        uint32_t at = (i == 0 ? IICI_ENTRY_1 : IICI_ENTRY_2) + ENTRY_HWCFG;
+        uint32_t flags = (uint32_t)rom[at] << 24 | rom[at + 1] << 16 |
+                         rom[at + 2] << 8 | rom[at + 3];
+
+        put32(rom, at, flags & ~HWCFG_FPU_PRESENT);
+    }
+
+    put16(rom, PATCH_BOOT_GLOBS, MAC_EMUL_OP_PATCH_BOOT_GLOBS);
+    put16(rom, PATCH_BOOT_GLOBS + 2, OP_NOP);
+
+    put16(rom, PATCH_INSTALL_DRIVERS, OP_JSR_ABS_L);
+    put32(rom, PATCH_INSTALL_DRIVERS + 2, MAC_STUB_BASE);
+    put16(rom, PATCH_INSTALL_DRIVERS + 6, OP_NOP);
 
     put16(rom, PATCH_SCSI_DISPATCH, MAC_EMUL_OP_SCSI_DISPATCH);
 

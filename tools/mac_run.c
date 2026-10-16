@@ -9,6 +9,8 @@
  * Usage: mac_run [-n instructions] [-t N] <rom-file>
  *
  *   -n   run at most this many instructions (default 1000000)
+ *   -d   attach this disk image (read into memory; never written back)
+ *   -x   save guest memory to a file: -x <addr hex> <length hex> <file>
  *   -p   write the screen as a PPM image at the end
  *   -m   print 16 bytes of guest memory at this address (hex) at the end
  *   -s   after a -b break, run this many more instructions
@@ -27,6 +29,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "emu/m68k/vm.h"
 #include "emu/mac/mac.h"
@@ -79,6 +82,34 @@ static uint8_t *read_file(const char *path, uint32_t *size)
     fclose(f);
     *size = (uint32_t)n;
     return buf;
+}
+
+
+static uint8_t *disk_image;
+static uint32_t disk_size;
+
+
+static int disk_read(void *ctx, uint32_t offset, void *buf, uint32_t len)
+{
+    (void)ctx;
+    if ((uint64_t)offset + len > disk_size)
+    {
+        return -1;
+    }
+    memcpy(buf, disk_image + offset, len);
+    return 0;
+}
+
+
+static int disk_write(void *ctx, uint32_t offset, const void *buf, uint32_t len)
+{
+    (void)ctx;
+    if ((uint64_t)offset + len > disk_size)
+    {
+        return -1;
+    }
+    memcpy(disk_image + offset, buf, len);
+    return 0;
 }
 
 
@@ -137,6 +168,10 @@ int main(int argc, char **argv)
     uint32_t head = 0;
     uint32_t break_pc = 0;
     const char *ppm_path = NULL;
+    const char *save_path = NULL;
+    uint32_t save_addr = 0;
+    uint32_t save_len = 0;
+    const char *disk_path = NULL;
     uint32_t dump[8];
     int ndump = 0;
     uint32_t extra = 0;
@@ -160,6 +195,16 @@ int main(int argc, char **argv)
         else if (argv[i][0] == '-' && argv[i][1] == 'm' && i + 1 < argc && ndump < 8)
         {
             dump[ndump++] = strtoul(argv[++i], NULL, 16);
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'd' && i + 1 < argc)
+        {
+            disk_path = argv[++i];
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'x' && i + 3 < argc)
+        {
+            save_addr = strtoul(argv[++i], NULL, 16);
+            save_len = strtoul(argv[++i], NULL, 16);
+            save_path = argv[++i];
         }
         else if (argv[i][0] == '-' && argv[i][1] == 'p' && i + 1 < argc)
         {
@@ -229,30 +274,49 @@ int main(int argc, char **argv)
     mac.vram = calloc(1, VRAM_SIZE);
     mac.vram_size = VRAM_SIZE;
     mac.vram_base = VRAM_BASE;
+    if (disk_path != NULL)
+    {
+        FILE *df = fopen(disk_path, "rb");
+        long dn;
+
+        if (df == NULL)
+        {
+            fprintf(stderr, "cannot read %s\n", disk_path);
+            return 1;
+        }
+        fseek(df, 0, SEEK_END);
+        dn = ftell(df);
+        fseek(df, 0, SEEK_SET);
+        disk_image = malloc(dn);
+        if (disk_image == NULL || fread(disk_image, 1, dn, df) != (size_t)dn)
+        {
+            fprintf(stderr, "cannot read %s\n", disk_path);
+            return 1;
+        }
+        fclose(df);
+        disk_size = (uint32_t)dn;
+        /* The image is only ever changed in memory, never written back. */
+        mac.disk.read = disk_read;
+        mac.disk.write = disk_write;
+        mac.disk.blocks = disk_size / 512;
+    }
     mac.trace_enabled = true;
     mac.rtc_seconds = 0xD0000000u;     /* a fixed date in 2013 */
     mac_reset(&mac);
 
-    while (mac.insn_count < max_insns && !m68k_vm_halted())
+    mac.break_lo = break_pc;
+    mac.break_hi = break_hi;
+    while (mac.insn_count < max_insns && !m68k_vm_halted() && !mac.break_hit)
     {
-        if (break_hi != 0)
+        mac_run(&mac, 1000);
+    }
+    if (mac.break_hit)
+    {
+        printf("break at %08X\n", m68k_vm_get_reg(M68K_VM_REG_PC));
+        mac.break_hi = 0;
+        for (uint32_t k = 0; k < extra; k++)
         {
             mac_run(&mac, 1);
-            uint32_t pc = m68k_vm_get_reg(M68K_VM_REG_PC);
-
-            if (pc >= break_pc && pc <= break_hi)
-            {
-                printf("break at %08X\n", break_pc);
-                for (uint32_t k = 0; k < extra; k++)
-                {
-                    mac_run(&mac, 1);
-                }
-                break;
-            }
-        }
-        else
-        {
-            mac_run(&mac, 1000);
         }
     }
 
@@ -312,6 +376,19 @@ int main(int argc, char **argv)
         printf("   ... %u repeated\n", skipped);
     }
 
+    if (save_path != NULL)
+    {
+        FILE *sf = fopen(save_path, "wb");
+
+        for (uint32_t i = 0; sf != NULL && i < save_len; i++)
+        {
+            fputc(m68k_vm_read8(save_addr + i), sf);
+        }
+        if (sf != NULL)
+        {
+            fclose(sf);
+        }
+    }
     if (ppm_path != NULL)
     {
         static uint32_t pixels[MAC_SCREEN_W * MAC_SCREEN_H];

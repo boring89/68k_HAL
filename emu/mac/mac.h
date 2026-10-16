@@ -33,6 +33,26 @@
 #define MAC_SLOT_E_BASE 0xFE000000u
 #define MAC_SLOT_E_END 0xFF000000u
 
+/*
+ * Native-call stubs (emu/mac/stub.s): a small read-write window in the ROM
+ * address range that holds the code and data of the .Disk driver.
+ */
+#define MAC_STUB_BASE 0x4F000000u
+#define MAC_STUB_SIZE 0x2000u
+#define MAC_STUB_DRIVER 0x100u      /* offset of the driver header */
+#define MAC_STUB_DRIVE_RECORD 0x900u
+
+/* A disk the Mac sees, backed by the host or the kernel. Offsets and lengths
+ * are in bytes; both callbacks return 0 on success and -1 on failure. */
+typedef struct
+{
+    int (*read)(void *ctx, uint32_t offset, void *buf, uint32_t len);
+    int (*write)(void *ctx, uint32_t offset, const void *buf, uint32_t len);
+    void *ctx;
+    uint32_t blocks;            /* size in 512-byte blocks; 0 = no disk */
+    bool read_only;
+} mac_disk_t;
+
 #define MAC_UNIMPL_LOG_SIZE 256
 #define MAC_TRACE_SIZE 4096
 #define MAC_FLOW_SIZE 1024       /* ROM blocks remembered in first-seen order */
@@ -106,6 +126,8 @@ typedef struct
 
     /* Diagnostics. */
     bool trace_enabled;
+    uint32_t break_lo, break_hi;    /* stop before running an instruction here */
+    bool break_hit;
     uint32_t insn_count;
     mac_trace_t trace[MAC_TRACE_SIZE];
     uint32_t trace_next;        /* total entries written, ring index = % size */
@@ -122,6 +144,8 @@ typedef struct
     uint8_t xpram[256];         /* parameter RAM kept by the clock chip */
     uint32_t rtc_seconds;       /* seconds since 1 Jan 1904, set by the host */
 
+    uint8_t stub[MAC_STUB_SIZE];
+    mac_disk_t disk;            /* set by the host after mac_init() */
     mac_iwm_t iwm;
     mac_scsi_t scsi;
     mac_rbv_t rbv;
@@ -157,7 +181,21 @@ int mac_rom_patch(uint8_t *rom, uint32_t size);
 #define MAC_EMUL_OP_RESET 0x7103
 #define MAC_EMUL_OP_CLKNOMEM 0x7104
 #define MAC_EMUL_OP_HWINFO 0x7105
+#define MAC_EMUL_OP_PATCH_BOOT_GLOBS 0x7107
+#define MAC_EMUL_OP_INSTALL_DRIVERS 0x710A
+#define MAC_EMUL_OP_DISK_OPEN 0x7110
+#define MAC_EMUL_OP_DISK_PRIME 0x7111
+#define MAC_EMUL_OP_DISK_CONTROL 0x7112
+#define MAC_EMUL_OP_DISK_STATUS 0x7113
 #define MAC_EMUL_OP_SCSI_DISPATCH 0x7128
+
+/* Native handlers of the .Disk driver (emu/mac/disk.c). They work on the
+ * guest state of the emulated opcode that called them. */
+void mac_disk_install(mac_t *mac);
+void mac_disk_open(mac_t *mac);
+void mac_disk_prime(mac_t *mac);
+void mac_disk_control(mac_t *mac);
+void mac_disk_status(mac_t *mac);
 
 /* VIA registers: 'reg' is 0-15. */
 uint32_t mac_via_read(mac_via_t *via, uint32_t reg);

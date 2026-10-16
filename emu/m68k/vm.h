@@ -92,6 +92,9 @@ int m68k_vm_reset(uint32_t entry, uint32_t sp);
  */
 int m68k_vm_run(int cycles);
 
+/* Ask the running m68k_vm_run() to return after the current instruction. */
+void m68k_vm_stop(void);
+
 /* True once the program has executed a STOP instruction since the reset. */
 bool m68k_vm_halted(void);
 

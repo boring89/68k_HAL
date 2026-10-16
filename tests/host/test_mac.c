@@ -241,6 +241,125 @@ static void test_scsi_bus_is_empty(void)
     TEST_ASSERT(!(mac_scsi_access(&scsi, 0x40, false, 0) & 0x40));
 }
 
+/* The disk driver needs a disk, a drive record and the guest's registers; the
+ * handlers are called as the emulated opcodes would call them. */
+static uint8_t disk_image[4 * 512];
+
+static int test_disk_read(void *ctx, uint32_t offset, void *buf, uint32_t len)
+{
+    (void)ctx;
+    if (offset + len > sizeof disk_image)
+    {
+        return -1;
+    }
+    memcpy(buf, disk_image + offset, len);
+    return 0;
+}
+
+static int test_disk_write(void *ctx, uint32_t offset, const void *buf,
+                           uint32_t len)
+{
+    (void)ctx;
+    if (offset + len > sizeof disk_image)
+    {
+        return -1;
+    }
+    memcpy(disk_image + offset, buf, len);
+    return 0;
+}
+
+static void test_disk_driver(void)
+{
+    const uint32_t pb = 0x1000;     /* parameter block in guest RAM */
+    const uint32_t dce = 0x2000;
+    const uint32_t buf = 0x3000;
+
+    for (unsigned i = 0; i < sizeof disk_image; i++)
+    {
+        disk_image[i] = (uint8_t)(i * 7);
+    }
+    memset(ram, 0, sizeof ram);
+    TEST_ASSERT_EQ_INT(0, mac_init(&mac, ram, RAM_SIZE, rom, ROM_SIZE));
+    mac.disk.read = test_disk_read;
+    mac.disk.write = test_disk_write;
+    mac.disk.blocks = 4;
+    mac_reset(&mac);
+    mac.overlay = false;            /* as the ROM does once it runs */
+
+    /* Install + Open: the drive record describes the disk. */
+    m68k_vm_set_reg(M68K_VM_REG_A0 + 1, dce);
+    mac_disk_install(&mac);
+    TEST_ASSERT_EQ_INT(MAC_STUB_BASE + MAC_STUB_DRIVER,
+                       mac_bus_read(&mac, dce, 4));
+    mac_disk_open(&mac);
+    TEST_ASSERT_EQ_INT(8 << 16 | 0xFFCE, m68k_vm_get_reg(M68K_VM_REG_D0));
+    TEST_ASSERT_EQ_INT(MAC_STUB_BASE + MAC_STUB_DRIVE_RECORD + 6,
+                       m68k_vm_get_reg(M68K_VM_REG_A0));
+    TEST_ASSERT_EQ_INT(4, mac_bus_read(&mac, MAC_STUB_BASE +
+                                       MAC_STUB_DRIVE_RECORD + 18, 2));
+
+    /* Prime: read blocks 1-2 into guest memory (A002 = _Read). */
+    m68k_vm_set_reg(M68K_VM_REG_A0, pb);
+    m68k_vm_set_reg(M68K_VM_REG_A0 + 1, dce);
+    mac_bus_write(&mac, pb + 6, 2, 0xA002);
+    mac_bus_write(&mac, pb + 22, 2, 8);
+    mac_bus_write(&mac, pb + 32, 4, buf);
+    mac_bus_write(&mac, pb + 36, 4, 1024);
+    mac_bus_write(&mac, dce + 16, 4, 512);
+    mac_disk_prime(&mac);
+    TEST_ASSERT_EQ_INT(0, m68k_vm_get_reg(M68K_VM_REG_D0));
+    TEST_ASSERT_EQ_INT(1024, mac_bus_read(&mac, pb + 40, 4));
+    TEST_ASSERT_EQ_INT(1536, mac_bus_read(&mac, dce + 16, 4));
+    TEST_ASSERT_EQ_INT(disk_image[512], ram[buf]);
+    TEST_ASSERT_EQ_INT(disk_image[1535], ram[buf + 1023]);
+
+    /* Reading past the end, odd lengths and other drives fail. */
+    mac_bus_write(&mac, dce + 16, 4, 3 * 512);
+    mac_disk_prime(&mac);
+    TEST_ASSERT_EQ_INT(-19, (int16_t)m68k_vm_get_reg(M68K_VM_REG_D0));
+    mac_bus_write(&mac, pb + 36, 4, 100);
+    mac_disk_prime(&mac);
+    TEST_ASSERT_EQ_INT(-50, (int16_t)m68k_vm_get_reg(M68K_VM_REG_D0));
+    mac_bus_write(&mac, pb + 22, 2, 3);
+    mac_disk_prime(&mac);
+    TEST_ASSERT_EQ_INT(-56, (int16_t)m68k_vm_get_reg(M68K_VM_REG_D0));
+
+    /* Write block 0 (A003 = _Write). */
+    mac_bus_write(&mac, pb + 6, 2, 0xA003);
+    mac_bus_write(&mac, pb + 22, 2, 8);
+    mac_bus_write(&mac, pb + 36, 4, 512);
+    mac_bus_write(&mac, dce + 16, 4, 0);
+    mac_bus_write(&mac, buf, 1, 0xEE);
+    mac_disk_prime(&mac);
+    TEST_ASSERT_EQ_INT(0, m68k_vm_get_reg(M68K_VM_REG_D0));
+    TEST_ASSERT_EQ_INT(0xEE, disk_image[0]);
+
+    /* Control and Status. */
+    mac_bus_write(&mac, pb + 26, 2, 24);        /* partition size */
+    mac_disk_control(&mac);
+    TEST_ASSERT_EQ_INT(0, m68k_vm_get_reg(M68K_VM_REG_D0));
+    TEST_ASSERT_EQ_INT(4, mac_bus_read(&mac, pb + 28, 4));
+    mac_bus_write(&mac, pb + 26, 2, 99);
+    mac_disk_control(&mac);
+    TEST_ASSERT_EQ_INT(-17, (int16_t)m68k_vm_get_reg(M68K_VM_REG_D0));
+    mac_bus_write(&mac, pb + 26, 2, 8);         /* drive status */
+    mac_disk_status(&mac);
+    TEST_ASSERT_EQ_INT(0, m68k_vm_get_reg(M68K_VM_REG_D0));
+    TEST_ASSERT_EQ_INT(8, mac_bus_read(&mac, pb + 28 + 3, 1));  /* in place */
+    TEST_ASSERT_EQ_INT(8, mac_bus_read(&mac, pb + 28 + 12, 2)); /* drive # */
+}
+
+static void test_stub_window(void)
+{
+    TEST_ASSERT_EQ_INT(0, mac_init(&mac, ram, RAM_SIZE, rom, ROM_SIZE));
+    /* The install routine starts with movem.l and is readable... */
+    TEST_ASSERT_EQ_INT(0x48E7, mac_bus_read(&mac, MAC_STUB_BASE, 2));
+    /* ...and the data part is writable. */
+    mac_bus_write(&mac, MAC_STUB_BASE + MAC_STUB_DRIVE_RECORD, 4, 0x12345678);
+    TEST_ASSERT_EQ_INT(0x12345678,
+                       mac_bus_read(&mac, MAC_STUB_BASE + MAC_STUB_DRIVE_RECORD, 4));
+}
+
 int main(void)
 {
     TEST_RUN(test_init_rejects);
@@ -254,6 +373,8 @@ int main(void)
     TEST_RUN(test_rbv_registers);
     TEST_RUN(test_dac_and_render);
     TEST_RUN(test_scsi_bus_is_empty);
+    TEST_RUN(test_disk_driver);
+    TEST_RUN(test_stub_window);
 
     return TEST_REPORT("mac");
 }

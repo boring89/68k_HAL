@@ -40,6 +40,7 @@ static bool vm_core_initialized;
 static m68k_vm_write_watch_t vm_write_watch;
 static m68k_vm_bus_t vm_bus;
 static bool vm_has_bus;
+static bool vm_stop_requested;
 static bool vm_aline_intercept = true;
 static m68k_vm_insn_hook_t vm_insn_hook;
 static void *vm_insn_hook_ctx;
@@ -347,11 +348,19 @@ int m68k_vm_run(int cycles)
 {
     int used = 0;
 
-    while (!vm_halted && used < cycles)
+    vm_stop_requested = false;
+    while (!vm_halted && !vm_stop_requested && used < cycles)
     {
         used += m68k_execute(cycles - used);
     }
     return used;
+}
+
+
+void m68k_vm_stop(void)
+{
+    vm_stop_requested = true;
+    m68k_end_timeslice();
 }
 
 

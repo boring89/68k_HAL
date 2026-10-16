@@ -8,6 +8,7 @@
 #include <stddef.h>
 
 #include "emu/m68k/vm.h"
+#include "emu/mac/stub_code.h"
 #include "kernel/lib/k_memory.h"
 
 #define SCSI_BASE 0x50F10000u
@@ -170,6 +171,11 @@ static uint32_t io_access(mac_t *mac, uint32_t addr, bool write, uint32_t value)
 
 uint32_t mac_bus_read(mac_t *mac, uint32_t addr, int size)
 {
+    if (addr >= MAC_STUB_BASE && addr - MAC_STUB_BASE + size <= MAC_STUB_SIZE)
+    {
+        return bswap_read(mac->stub + (addr - MAC_STUB_BASE), size);
+    }
+
     if (addr >= MAC_ROM_BASE && addr < MAC_ROM_END)
     {
         uint32_t off = (addr - MAC_ROM_BASE) & (mac->rom_size - 1);
@@ -244,6 +250,12 @@ void mac_bus_write(mac_t *mac, uint32_t addr, int size, uint32_t value)
         return;
     }
 
+    if (addr >= MAC_STUB_BASE && addr - MAC_STUB_BASE + size <= MAC_STUB_SIZE)
+    {
+        bswap_write(mac->stub + (addr - MAC_STUB_BASE), size, value);
+        return;
+    }
+
     if (addr >= MAC_ROM_BASE && addr < MAC_ROM_END)
     {
         return;
@@ -298,7 +310,7 @@ static void bus_write(void *ctx, uint32_t addr, int size, uint32_t value)
 #define UINFO_MAPFLAGS 24
 #define UINFO_ROMFLAGS 28
 #define PRODUCT_KIND_IICI 0x0505   /* ID byte 5 (IIci), hardware set 5 */
-#define HWCFG_FPU_PRESENT 0x00000010u   /* only used if an FPU is emulated */
+#define HWCFG_FPU_PRESENT 0x10000000u   /* bit 28 (bit 4 of the byte at $B22) */
 
 #define BOOT_STACK 0x10000u
 #define BOOT_GLOBS_SIZE 0x1C
@@ -484,6 +496,28 @@ static void emul_scsi_dispatch(mac_t *mac)
 }
 
 
+/*
+ * PATCH_BOOT_GLOBS: the frame at A4 holds MemTop at -20 and the distance
+ * from A4 to BufPtr at -12. MemTop is the top of our RAM; BufPtr keeps the
+ * ROM's own distance but is rounded down to 4 bytes (the ROM derives heap
+ * and stack boundaries from it, and an odd value ends up as an odd boot-block
+ * address). Then the displaced "movea.l (-20,A4),A6".
+ */
+#define BOOT_FRAME_MEMTOP (-20)
+#define BOOT_FRAME_BUFDIST (-12)
+
+static void emul_patch_boot_globs(mac_t *mac)
+{
+    uint32_t a4 = m68k_vm_get_reg(M68K_VM_REG_A0 + 4);
+    uint32_t dist = mac_bus_read(mac, a4 + BOOT_FRAME_BUFDIST, 4);
+    uint32_t bufptr = (a4 + dist) & ~3u;
+
+    mac_bus_write(mac, a4 + BOOT_FRAME_MEMTOP, 4, mac->ram_size);
+    mac_bus_write(mac, a4 + BOOT_FRAME_BUFDIST, 4, bufptr - a4);
+    m68k_vm_set_reg(M68K_VM_REG_A0 + 6, mac->ram_size);
+}
+
+
 static void emul_op(mac_t *mac, uint32_t pc, uint16_t op)
 {
     switch (op)
@@ -500,6 +534,24 @@ static void emul_op(mac_t *mac, uint32_t pc, uint16_t op)
     case MAC_EMUL_OP_CLKNOMEM:
         emul_clknomem(mac);
         break;
+    case MAC_EMUL_OP_PATCH_BOOT_GLOBS:
+        emul_patch_boot_globs(mac);
+        break;
+    case MAC_EMUL_OP_INSTALL_DRIVERS:
+        mac_disk_install(mac);
+        break;
+    case MAC_EMUL_OP_DISK_OPEN:
+        mac_disk_open(mac);
+        break;
+    case MAC_EMUL_OP_DISK_PRIME:
+        mac_disk_prime(mac);
+        break;
+    case MAC_EMUL_OP_DISK_CONTROL:
+        mac_disk_control(mac);
+        break;
+    case MAC_EMUL_OP_DISK_STATUS:
+        mac_disk_status(mac);
+        break;
     case MAC_EMUL_OP_SCSI_DISPATCH:
         emul_scsi_dispatch(mac);
         break;
@@ -515,6 +567,12 @@ static void insn_hook(void *ctx, uint32_t pc)
     mac_t *mac = ctx;
 
     mac->insn_count++;
+    if (mac->break_hi != 0 && pc >= mac->break_lo && pc <= mac->break_hi &&
+        !mac->break_hit)
+    {
+        mac->break_hit = true;
+        m68k_vm_stop();
+    }
     if (mac->trace_enabled)
     {
         /* Remember which ROM blocks run, in the order they are first used. */
@@ -581,6 +639,7 @@ int mac_init(mac_t *mac, uint8_t *ram, uint32_t ram_size,
     mac->ram_size = ram_size;
     mac->rom = rom;
     mac->rom_size = rom_size;
+    k_memcpy(mac->stub, mac_stub_code, sizeof mac_stub_code);
 
     if (m68k_vm_init(ram, ram_size, M68K_VM_CPU_68030) != 0)
     {
@@ -645,7 +704,7 @@ int mac_run(mac_t *mac, int cycles)
 {
     int used = 0;
 
-    while (used < cycles && !m68k_vm_halted())
+    while (used < cycles && !m68k_vm_halted() && !mac->break_hit)
     {
         int slice = cycles - used < TIME_SLICE ? cycles - used : TIME_SLICE;
         int ran = m68k_vm_run(slice);
