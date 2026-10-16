@@ -370,6 +370,40 @@ static void test_stub_window(void)
                        mac_bus_read(&mac, MAC_STUB_BASE + MAC_STUB_DRIVE_RECORD, 4));
 }
 
+static void test_input_packets(void)
+{
+    TEST_ASSERT_EQ_INT(0, mac_init(&mac, ram, RAM_SIZE, rom, ROM_SIZE));
+    mac_reset(&mac);
+
+    /* A mouse move is split into packets of at most 63 pixels; the button is
+     * bit 7 of the first byte and is 1 when released. */
+    mac_mouse_move(&mac, 100, -5, false);
+    TEST_ASSERT_EQ_INT(2, mac.input_count);
+    TEST_ASSERT_EQ_INT(3, mac.input[0][0]);
+    TEST_ASSERT_EQ_INT(0x80 | (-5 & 0x7F), mac.input[0][1]);
+    TEST_ASSERT_EQ_INT(0x80 | 63, mac.input[0][2]);
+    TEST_ASSERT_EQ_INT(0x80 | 37, mac.input[1][2]);
+    TEST_ASSERT_EQ_INT(0x80, mac.input[1][1]);
+
+    mac_mouse_move(&mac, 0, 0, true);
+    TEST_ASSERT_EQ_INT(0x00, mac.input[2][1]);
+
+    /* A key packet: bit 7 of the code = released, second key = none. */
+    mac_key(&mac, 0x11, true);
+    mac_key(&mac, 0x11, false);
+    TEST_ASSERT_EQ_INT(2, mac.input[3][0]);
+    TEST_ASSERT_EQ_INT(0x11, mac.input[3][1]);
+    TEST_ASSERT_EQ_INT(0xFF, mac.input[3][2]);
+    TEST_ASSERT_EQ_INT(0x91, mac.input[4][1]);
+
+    /* The queue is bounded. */
+    for (int i = 0; i < 200; i++)
+    {
+        mac_key(&mac, 1, true);
+    }
+    TEST_ASSERT_EQ_INT(64, mac.input_count);
+}
+
 int main(void)
 {
     TEST_RUN(test_init_rejects);
@@ -385,6 +419,7 @@ int main(void)
     TEST_RUN(test_scsi_bus_is_empty);
     TEST_RUN(test_disk_driver);
     TEST_RUN(test_stub_window);
+    TEST_RUN(test_input_packets);
 
     return TEST_REPORT("mac");
 }

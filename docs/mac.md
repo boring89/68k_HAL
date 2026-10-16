@@ -20,7 +20,7 @@
 | `s4_welcome_to_macintosh.png` | System 7.5.3 從映像開機，"Welcome to Macintosh." |
 | `s6_finder_desktop.png` | Finder 桌面 |
 
-還沒有的東西（見第 10 節）：鍵盤與滑鼠、聲音、序列埠/網路、彩色與其他解析度。
+還沒有的東西（見第 10 節）：聲音、序列埠/網路、彩色與其他解析度。鍵盤與滑鼠可以用（第 5 節的「輸入」）。
 
 ## 2. 比喻：我們替 ROM 蓋了一棟「假的機房」
 
@@ -108,6 +108,8 @@ Mac 的 ROM 是一本很長的開機劇本，劇本裡不斷地「去敲某個�
 
 **時鐘晶片與參數 RAM**（`CLKNOMEM`）：命令在 D1（bit 7 = 讀，bit 6–2 = 暫存器；`0x38` 開頭是 extended 命令，位址 = `((cmd&7)<<5)|((cmd>>10)&0x1F)`），資料在 D2。暫存器 0–7 回傳秒數計數器；其他存取 256 位元組的 XPRAM。XPRAM `0x8A` 永遠回報 32 位元定址（同 Basilisk II）。全新的 XPRAM 會被 ROM 填預設值。
 
+**輸入（鍵盤與滑鼠）**：沒有 ADB 硬體，所以不走硬體。`mac_mouse_move()`、`mac_key()` 把 ADB 裝置「會送出的封包」放進佇列（滑鼠：byte 1 = 放開位元(bit 7)＋dy，byte 2 = dx；每包最多 ±63；鍵盤：碼與按下/放開），在 CPU 可以接受 level 1 中斷（supervisor 模式、遮罩 0）的下一條指令，模型推一個 format 0 例外框，跳到 stub 裡的 `inject`；它用 ROM 的 ADB 裝置表（`ADBBase` = `$CF8`，每筆 12 位元組，+2 位址、+4 處理常式、+8 資料區）找到系統註冊的處理常式，用 A0 = 封包、A1 = 處理常式、A2 = 資料區、D0 = Talk R0 命令呼叫它，最後 `rte`。這就是 ADB 中斷會做的事，所以游標加速、按鍵轉譯（KeyTrans）、mouseDown/keyDown 事件都由 ROM 與 System 自己處理。驗證：host 的 `-M dx,dy,按鈕,幀` 與 `-K 碼,按下,幀`（選單 Label 在按下滑鼠時拉出；按 T 選取垃圾桶）。kernel 端：PS/2 事件經 `kernel/mac/adbkeys.c` 轉成 ADB 鍵碼；按 ` 鍵停止。
+
 ## 6. `.Disk` 驅動（`stub.s`、`disk.c`）
 
 為什麼不用 SCSI：ROM 內建的 SCSI 磁碟驅動會去磁碟上找 `'ER'` 分割表和 Apple 的 SCSI 驅動程式（在磁碟上，不在 ROM），我們的映像沒有分割表（開頭是 `LK` boot block，HFS 在 1024）。所以照 Basilisk II 的作法：寫一個原生驅動，再放進 Device Manager。
@@ -162,7 +164,7 @@ Mac 的 ROM 是一本很長的開機劇本，劇本裡不斷地「去敲某個�
                       └─ 每幀 416000 個 CPU 週期（約 1/60 s Mac 時間）；每 6 幀把畫面畫到 framebuffer
 ```
 
-- 需要圖形模式（640x480x32 framebuffer）才看得到畫面；沒有 framebuffer 時照樣執行，只是沒畫面。按 Escape 停止。
+- 需要圖形模式（640x480x32 framebuffer）才看得到畫面；沒有 framebuffer 時照樣執行，只是沒畫面。按 ` 鍵停止。
 - 磁碟寫入只存在覆蓋層（記憶體），不會改到模組，關機就沒了。Finder 啟動時要建 Desktop 檔案，所以覆蓋層是必要的：唯讀時會跳出「the desktop folder on the startup disk could not be created. Try unlocking the disk.」。
 - 模組以「名稱的最後一個字」辨識（QEMU 傳 `"<檔案> <參數>"`）：`-initrd "rom.bin mac_rom,disk.img mac_disk"`。
 - **決定性**：同樣的 ROM、磁碟、幀數，host 與 kernel 畫出一模一樣的畫面，所以 `make test-rom-qemu` 比較兩邊的畫面 CRC-32（預設 600 幀；KVM 約幾秒，TCG 會慢很多）。
@@ -187,7 +189,7 @@ menuentry "mac" {
 
 ## 10. 已知問題與限制
 
-- **沒有輸入**：ADB 整個被替身取代（命令都回「沒有資料」），鍵盤與滑鼠不能用。PS/2 的資料已經進 `input_event` ring buffer，之後可以接到 ADB 替身。
+- **輸入**：ADB 命令（Talk/Listen/Flush）全部回「沒有資料」，所以不能改鍵盤 LED、不能 Listen 設定；按鍵與滑鼠只靠上面的封包注入。沒有 Command/Option/Control 鍵（PS/2 只有 Shift 有對應）、沒有滑鼠右鍵。
 - **沒有聲音**：ASC 的寫入被丟棄；System 的 Sound Manager 沒有硬體可等時不會卡住（目前的開機流程沒遇到）。
 - **沒有序列埠與網路**：序列驅動（SERD）不載入；LocalTalk 靠一個閒置的 SCC 蒙混過去。AppleTalk 不能用。
 - **只有 13" RGB 感測（640x480）**，ROM 預設 1 bpp 時桌面是黑白；其他深度與顯示器沒測。

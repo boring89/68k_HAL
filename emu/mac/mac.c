@@ -11,6 +11,12 @@
 #include "emu/mac/stub_code.h"
 #include "kernel/lib/k_memory.h"
 
+#define SR_INT_MASK 0x0700
+#define SR_SUPERVISOR 0x2000
+
+static void emul_input_pop(mac_t *mac);
+static void start_injection(mac_t *mac, uint32_t pc);
+
 #define SCSI_BASE 0x50F10000u
 #define SCSI_SPAN 0x2000u
 
@@ -567,6 +573,9 @@ static void emul_op(mac_t *mac, uint32_t pc, uint16_t op)
     case MAC_EMUL_OP_PATCH_BOOT_GLOBS:
         emul_patch_boot_globs(mac);
         break;
+    case MAC_EMUL_OP_INPUT_POP:
+        emul_input_pop(mac);
+        break;
     case MAC_EMUL_OP_INSTALL_DRIVERS:
         mac_disk_install(mac);
         break;
@@ -641,6 +650,20 @@ static void insn_hook(void *ctx, uint32_t pc)
         mac->pmmu_total++;
     }
 
+    if (mac->input_count > 0 && !mac->injecting)
+    {
+        uint32_t sr = m68k_vm_get_reg(M68K_VM_REG_SR);
+
+        /* Only where a level 1 interrupt could happen, in supervisor mode,
+         * and not inside the stub (it ends with RTE). */
+        if ((sr & SR_SUPERVISOR) && (sr & SR_INT_MASK) == 0 &&
+            (pc < MAC_STUB_BASE || pc >= MAC_STUB_BASE + MAC_STUB_SIZE))
+        {
+            start_injection(mac, pc);
+            return;
+        }
+    }
+
     if (opcode >= MAC_EMUL_OP_BASE && opcode <= MAC_EMUL_OP_LAST)
     {
         emul_op(mac, pc, opcode);
@@ -701,6 +724,8 @@ int mac_reset(mac_t *mac)
     mac->trace_next = 0;
     mac->unimpl_total = 0;
     mac->unimpl_used = 0;
+    mac->input_count = 0;
+    mac->injecting = false;
     m68k_vm_reset_cpu();
     mac->insn_count = 0;    /* the reset itself runs one instruction */
     return 0;
@@ -753,4 +778,122 @@ int mac_run(mac_t *mac, int cycles)
 uint32_t mac_unimpl_total(const mac_t *mac)
 {
     return mac->unimpl_total;
+}
+
+
+/*
+ * Input. The two ADB devices are at address 2 (keyboard) and 3 (mouse); the
+ * handlers registered for them are called with A0 -> { count, byte 1, byte 2 }. A mouse packet is: byte 1 =
+ * button (bit 7, set = up) and dy (7 bits, signed), byte 2 = dx.
+ */
+#define ADB_KEYBOARD 2
+#define ADB_MOUSE 3
+#define INPUT_QUEUE 64
+#define VECTOR_LEVEL_1 0x64     /* autovector of interrupt level 1 */
+
+static void queue_input(mac_t *mac, uint8_t device, uint8_t b1, uint8_t b2)
+{
+    if (mac->input_count >= INPUT_QUEUE)
+    {
+        return;
+    }
+    uint8_t *slot = mac->input[(mac->input_head + mac->input_count) % INPUT_QUEUE];
+
+    slot[0] = device;
+    slot[1] = b1;
+    slot[2] = b2;
+    mac->input_count++;
+}
+
+
+void mac_mouse_move(mac_t *mac, int dx, int dy, bool button)
+{
+    bool first = true;
+
+    /* A packet carries at most 63 pixels each way. */
+    while (first || dx != 0 || dy != 0)
+    {
+        int sx = dx > 63 ? 63 : dx < -63 ? -63 : dx;
+        int sy = dy > 63 ? 63 : dy < -63 ? -63 : dy;
+
+        queue_input(mac, ADB_MOUSE, (uint8_t)((button ? 0 : 0x80) | (sy & 0x7F)),
+                    (uint8_t)(0x80 | (sx & 0x7F)));
+        dx -= sx;
+        dy -= sy;
+        first = false;
+    }
+}
+
+
+void mac_key(mac_t *mac, uint8_t adb_code, bool down)
+{
+    /* Second byte 0xFF = no second key. */
+    queue_input(mac, ADB_KEYBOARD, (uint8_t)((down ? 0 : 0x80) | (adb_code & 0x7F)),
+                0xFF);
+}
+
+
+/*
+ * The ADB Manager keeps one 12-byte entry per device from the address in
+ * low memory ADBBase ($CF8); +2 is the device's address, +4 its handler, +8
+ * its data area (the table the ROM's own lookup routine at 0xA3BA walks).
+ */
+#define LM_ADBBASE 0xCF8
+#define ADB_ENTRY_SIZE 12
+#define ADB_ENTRIES 17
+
+/* Next queued packet for the inject stub (see stub.s). */
+static void emul_input_pop(mac_t *mac)
+{
+    uint32_t packet = MAC_STUB_BASE + MAC_STUB_PACKET;
+    uint32_t entry = mac_bus_read(mac, LM_ADBBASE, 4);
+    uint8_t *slot = mac->input[mac->input_head];
+    uint8_t device;
+
+    m68k_vm_set_reg(M68K_VM_REG_D0 + 1, 0);
+    if (mac->input_count == 0)
+    {
+        mac->injecting = false;
+        return;
+    }
+    device = slot[0];
+    for (int i = 0; i < ADB_ENTRIES; i++, entry += ADB_ENTRY_SIZE)
+    {
+        if (mac_bus_read(mac, entry + 2, 1) == device)
+        {
+            mac_bus_write(mac, packet, 1, 2);
+            mac_bus_write(mac, packet + 1, 1, slot[1]);
+            mac_bus_write(mac, packet + 2, 1, slot[2]);
+            m68k_vm_set_reg(M68K_VM_REG_A0, packet);
+            m68k_vm_set_reg(M68K_VM_REG_A0 + 1, mac_bus_read(mac, entry + 4, 4));
+            m68k_vm_set_reg(M68K_VM_REG_A0 + 2, mac_bus_read(mac, entry + 8, 4));
+            m68k_vm_set_reg(M68K_VM_REG_D0, ((uint32_t)device << 4) | 0xC);
+            m68k_vm_set_reg(M68K_VM_REG_D0 + 1, 1);
+            break;
+        }
+    }
+    mac->input_head = (mac->input_head + 1) % INPUT_QUEUE;
+    mac->input_count--;
+}
+
+
+/*
+ * Take an "interrupt" at the instruction at 'pc': push a format 0 exception
+ * frame (status register, PC, format/vector word) on the supervisor stack and
+ * continue in the inject stub with interrupt level 1, as the ADB interrupt
+ * would have. Only done when the guest would accept a level 1 interrupt.
+ */
+static void start_injection(mac_t *mac, uint32_t pc)
+{
+    uint32_t sr = m68k_vm_get_reg(M68K_VM_REG_SR);
+    uint32_t sp = m68k_vm_get_reg(M68K_VM_REG_A0 + 7) - 8;
+
+    mac_bus_write(mac, sp, 2, sr);
+    mac_bus_write(mac, sp + 2, 4, pc);
+    mac_bus_write(mac, sp + 6, 2, VECTOR_LEVEL_1);
+    m68k_vm_set_reg(M68K_VM_REG_A0 + 7, sp);
+    m68k_vm_set_reg(M68K_VM_REG_SR,
+                    (sr & ~SR_INT_MASK) | 0x0100 | SR_SUPERVISOR);
+    m68k_vm_set_reg(M68K_VM_REG_PC, MAC_STUB_BASE + MAC_STUB_INJECT);
+    mac->injecting = true;
 }

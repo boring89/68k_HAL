@@ -11,6 +11,7 @@
 |
 | 0x000  install      called by the patched ROM instead of its code at 0x1166
 | 0x060  adbop        replaces the ADBOp trap ($A07C)
+| 0x0A0  inject       runs the ROM's mouse and keyboard handlers for queued input
 | 0x100  .Disk driver header (a DRVR as the Device Manager expects it)
 | 0x1F0  name of the driver as a Pascal string
 |
@@ -70,6 +71,27 @@ adbop_done:
     rts
 adbop_empty:
     .word   0
+
+| ---------------------------------------------------------------------------
+| inject: entered like a level 1 interrupt (the model pushes a format 0 frame,
+| see mac.c) when keyboard or mouse input is waiting. The emulated opcode
+| takes the next queued packet and sets up what the ADB Manager passes to a
+| device handler: D1 = 1 (0 = nothing left), A1 = the handler, A2 = its data
+| area, D0 = the Talk register 0 command, A0 = a block { length, byte 1,
+| byte 2 } like the ones the ADB hardware would deliver.
+| ---------------------------------------------------------------------------
+    .org    0xA0
+inject:
+    movem.l %d0-%d7/%a0-%a6,-(%sp)
+inject_next:
+    .word   0x7114
+    tst.l   %d1
+    beq.s   inject_done
+    jsr     (%a1)
+    bra.s   inject_next
+inject_done:
+    movem.l (%sp)+,%d0-%d7/%a0-%a6
+    rte
 
 | ---------------------------------------------------------------------------
 | The .Disk driver (Inside Macintosh: Devices, "Device Manager", driver header)

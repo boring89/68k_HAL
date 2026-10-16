@@ -39,7 +39,9 @@
  */
 #define MAC_STUB_BASE 0x4F000000u
 #define MAC_STUB_SIZE 0x2000u
-#define MAC_STUB_ADBOP 0x60u        /* offset of the ADBOp replacement */
+#define MAC_STUB_ADBOP 0x60u
+#define MAC_STUB_INJECT 0xA0u       /* offset of the input injection routine */
+#define MAC_STUB_PACKET 0x700u      /* the packet handed to the ROM's handler */        /* offset of the ADBOp replacement */
 #define MAC_STUB_DRIVER 0x100u      /* offset of the driver header */
 #define MAC_STUB_DRIVE_RECORD 0x900u
 
@@ -151,6 +153,12 @@ typedef struct
 
     uint8_t stub[MAC_STUB_SIZE];
     mac_disk_t disk;            /* set by the host after mac_init() */
+
+    /* Queued keyboard and mouse packets (see mac_mouse_move, mac_key). */
+    uint8_t input[64][4];       /* device (2 = keyboard, 3 = mouse), 2 data bytes */
+    uint32_t input_head, input_count;
+    bool injecting;
+    int mouse_x, mouse_y;       /* where the model thinks the pointer is */
     mac_iwm_t iwm;
     mac_scsi_t scsi;
     mac_rbv_t rbv;
@@ -188,6 +196,7 @@ int mac_rom_patch(uint8_t *rom, uint32_t size);
 #define MAC_EMUL_OP_HWINFO 0x7105
 #define MAC_EMUL_OP_PATCH_BOOT_GLOBS 0x7107
 #define MAC_EMUL_OP_INSTALL_DRIVERS 0x710A
+#define MAC_EMUL_OP_INPUT_POP 0x7114
 #define MAC_EMUL_OP_DISK_OPEN 0x7110
 #define MAC_EMUL_OP_DISK_PRIME 0x7111
 #define MAC_EMUL_OP_DISK_CONTROL 0x7112
@@ -255,6 +264,18 @@ int mac_run(mac_t *mac, int cycles);
 /* The bus as the CPU sees it (also used by tests). */
 uint32_t mac_bus_read(mac_t *mac, uint32_t addr, int size);
 void mac_bus_write(mac_t *mac, uint32_t addr, int size, uint32_t value);
+
+/*
+ * Mouse and keyboard. There is no ADB hardware; instead the packets the ADB
+ * devices would send are queued, and the model calls the ROM's own mouse and
+ * keyboard handlers with them like an interrupt does (see stub.s, inject).
+ *
+ * mac_mouse_move: relative motion in pixels and the button state (changes in
+ * the button are sent even without motion). mac_key: an ADB key code (0-0x7F,
+ * "Inside Macintosh: Devices", ADB keyboard) and whether it goes down.
+ */
+void mac_mouse_move(mac_t *mac, int dx, int dy, bool button);
+void mac_key(mac_t *mac, uint8_t adb_code, bool down);
 
 /* Number of unimplemented I/O accesses seen (may exceed the log size). */
 uint32_t mac_unimpl_total(const mac_t *mac);

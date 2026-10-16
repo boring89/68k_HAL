@@ -28,8 +28,8 @@
 #define MAC_FRAME_CYCLES 416000u
 
 /*
- * Run the Mac for 'frames' frames, or until Escape is pressed if 'frames' is
- * 0. Returns 0, or -1 if it cannot start (the reason is written to the
+ * Run the Mac for 'frames' frames, or until the grave accent key (`) is
+ * pressed if 'frames' is 0. Keyboard and mouse events go to the Mac. Returns 0, or -1 if it cannot start (the reason is written to the
  * terminal). The screen is drawn every few frames.
  */
 int mac_machine_run(uint32_t frames);

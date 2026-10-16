@@ -12,6 +12,8 @@
  *   -d   attach this disk image (read into memory; never written back)
  *   -x   save guest memory to a file: -x <addr hex> <length hex> <file>
  *   -F   run this many whole frames (416000 cycles each) and print the screen's CRC-32
+ *   -M   dx,dy,button,frame: with -F, move the mouse by (dx,dy) at that frame (repeatable)
+ *   -K   code,down,frame: with -F, a key (ADB code) goes down/up at that frame (repeatable)
  *   -R   present the disk as write-protected
  *   -p   write the screen as a PPM image at the end
  *   -m   print 16 bytes of guest memory at this address (hex) at the end
@@ -191,6 +193,10 @@ int main(int argc, char **argv)
     uint32_t head = 0;
     uint32_t break_pc = 0;
     uint32_t frames = 0;
+    struct { int x, y, b; uint32_t frame; } mouse[32];
+    int nmouse = 0;
+    struct { int code, down; uint32_t frame; } keys[32];
+    int nkeys = 0;
     const char *ppm_path = NULL;
     const char *save_path = NULL;
     uint32_t save_addr = 0;
@@ -235,6 +241,27 @@ int main(int argc, char **argv)
         else if (argv[i][0] == '-' && argv[i][1] == 'F' && i + 1 < argc)
         {
             frames = strtoul(argv[++i], NULL, 0);
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'M' && i + 1 < argc)
+        {
+            /* -M x,y,button,frame: move the mouse at that frame (with -F) */
+            if (nmouse < 32)
+            {
+                sscanf(argv[++i], "%d,%d,%d,%u", &mouse[nmouse].x,
+                       &mouse[nmouse].y, &mouse[nmouse].b,
+                       &mouse[nmouse].frame);
+                nmouse++;
+            }
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'K' && i + 1 < argc)
+        {
+            /* -K adbcode,down,frame: a key goes down (1) or up (0) at that frame */
+            if (nkeys < 32)
+            {
+                sscanf(argv[++i], "%i,%d,%u", &keys[nkeys].code,
+                       &keys[nkeys].down, &keys[nkeys].frame);
+                nkeys++;
+            }
         }
         else if (argv[i][0] == '-' && argv[i][1] == 'R')
         {
@@ -350,7 +377,37 @@ int main(int argc, char **argv)
 
         for (uint32_t f = 0; f < frames; f++)
         {
+            for (int k = 0; k < nkeys; k++)
+            {
+                if (keys[k].frame == f)
+                {
+                    mac_key(&mac, (uint8_t)keys[k].code, keys[k].down != 0);
+                }
+            }
+            for (int m = 0; m < nmouse; m++)
+            {
+                if (mouse[m].frame == f)
+                {
+                    mac_mouse_move(&mac, mouse[m].x, mouse[m].y, mouse[m].b != 0);
+                }
+            }
             mac_run(&mac, 416000);
+        }
+        if (ppm_path != NULL && mac_render(&mac, shot) == 0)
+        {
+            FILE *pf = fopen(ppm_path, "wb");
+
+            if (pf != NULL)
+            {
+                fprintf(pf, "P6\n%d %d\n255\n", MAC_SCREEN_W, MAC_SCREEN_H);
+                for (uint32_t i = 0; i < MAC_SCREEN_W * MAC_SCREEN_H; i++)
+                {
+                    fputc(shot[i] >> 16, pf);
+                    fputc(shot[i] >> 8, pf);
+                    fputc(shot[i], pf);
+                }
+                fclose(pf);
+            }
         }
         if (mac_render(&mac, shot) == 0)
         {

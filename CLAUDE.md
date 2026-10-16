@@ -137,7 +137,7 @@ Claude 依照上方工作規則直接實作。
 ## 已知問題（尚未修正）
 
 - 鍵盤：US 配置，無 Ctrl/Alt/方向鍵等字元對應。
-- `emu/mac`：沒有鍵盤與滑鼠（ADB 整個被替身取代）、沒有聲音、沒有序列埠與網路；只支援 ROM `368CADFE`（Mac IIci）；其餘見 `docs/mac.md` 第 10 節。
+- `emu/mac`：鍵盤與滑鼠以封包注入（沒有 Command/Option/Control）、沒有聲音、沒有序列埠與網路；只支援 ROM `368CADFE`（Mac IIci）；其餘見 `docs/mac.md` 第 10 節。
 - 滑鼠事件（`INPUT_EVENT_MOUSE`）進入 input buffer 但主迴圈忽略。
 - HFS 名稱比較只對 ASCII 不分大小寫，查詢是線性掃描（見 `docs/hfs.md`）。
 - ATA 驅動只支援 primary master、LBA28、唯讀、輪詢。

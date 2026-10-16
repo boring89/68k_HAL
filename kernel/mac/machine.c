@@ -5,6 +5,7 @@
 
 #include "machine.h"
 
+#include "adbkeys.h"
 #include "emu/mac/mac.h"
 #include "emu/m68k/vm.h"
 #include "hal/boot.h"
@@ -182,16 +183,35 @@ static void show(const hal_framebuffer_t *fb, const uint32_t *pixels)
 }
 
 
-static bool escape_pressed(void)
+/*
+ * Pass keyboard and mouse events on to the Mac. The grave accent key (`) stops
+ * the Mac: it is the one key the Mac side does not need. Returns true to stop.
+ */
+static bool handle_input(mac_t *mac)
 {
     input_event_t event;
 
     while (input_event_pop(&event) == 0)
     {
-        if (event.type == INPUT_EVENT_KEYBOARD && event.data.keyboard.pressed &&
-            event.data.keyboard.key == KEY_ESC)
+        if (event.type == INPUT_EVENT_KEYBOARD)
         {
-            return true;
+            int code;
+
+            if (event.data.keyboard.pressed &&
+                event.data.keyboard.key == KEY_GRAVE)
+            {
+                return true;
+            }
+            code = mac_adb_key_code(event.data.keyboard.key);
+            if (code >= 0)
+            {
+                mac_key(mac, (uint8_t)code, event.data.keyboard.pressed);
+            }
+        }
+        else if (event.type == INPUT_EVENT_MOUSE)
+        {
+            mac_mouse_move(mac, event.data.mouse.dx, event.data.mouse.dy,
+                           (event.data.mouse.buttons & 1) != 0);
         }
     }
     return false;
@@ -270,7 +290,7 @@ int mac_machine_run(uint32_t frames)
     mac->disk.blocks = ov->blocks;
     mac_reset(mac);
 
-    kernel_printf("%s\n", have_screen ? "mac: running (Escape stops)"
+    kernel_printf("%s\n", have_screen ? "mac: running (` stops)"
                                       : "mac: running without a screen");
     for (uint32_t frame = 1; frames == 0 || frame <= frames; frame++)
     {
@@ -280,7 +300,7 @@ int mac_machine_run(uint32_t frames)
         {
             show(&fb, pixels);
         }
-        if (frames == 0 && escape_pressed())
+        if (handle_input(mac) && frames == 0)
         {
             break;
         }

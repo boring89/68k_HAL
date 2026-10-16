@@ -145,7 +145,7 @@ static shell_command_entry_t commands[] =
          cmd_cat},
         {COMMAND_MAC,
          "mac",
-         "Run the Macintosh IIci on boot modules mac_rom and mac_disk (Escape stops)",
+         "Run the Macintosh IIci on boot modules mac_rom and mac_disk (` stops)",
          cmd_mac}};
 
 #define COMMAND_TABLE_SIZE \
