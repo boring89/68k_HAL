@@ -478,70 +478,110 @@ static uint32_t stream(uint32_t offset)
     return REG_STREAM + hda.stream_offset + offset;
 }
 
-static int hda_play(const int16_t *samples, uint32_t frames)
+/*
+ * Streaming. The ring holds RING_BYTES of audio. The controller plays it in
+ * a loop and LPIB says where it is; the driver writes ahead of that point.
+ * Absolute byte counts (not wrapped) keep the bookkeeping simple:
+ *
+ *   played  bytes the controller has taken so far (from LPIB changes)
+ *   written bytes the driver has put in the ring, silence included
+ *
+ * so written - played is what is queued, and RING_BYTES - that is free. The
+ * region just played is cleared at once, so that if the driver is late the
+ * controller plays silence instead of the old samples again.
+ */
+#define START_LEAD 4096 /* bytes of silence ahead of the first sample: 21 ms */
+
+static uint32_t played_bytes;
+static uint32_t written_bytes;
+static uint32_t last_position;
+static int streaming;
+
+/* Account for what the controller has played since the last call. */
+static void stream_update(void)
 {
-    if (!hda.ready || frames == 0)
-        return -1;
+    uint32_t position = reg32(stream(SD_LPIB)) % RING_BYTES;
+    uint32_t advance = (position + RING_BYTES - last_position) % RING_BYTES;
 
-    const uint8_t *data = (const uint8_t *)samples;
-    uint32_t total = frames * 4;
-    uint32_t written = 0;
+    for (uint32_t i = 0; i < advance; i++)
+        hda.ring[(played_bytes + i) % RING_BYTES] = 0;
 
-    /* Fill the whole ring, padding with silence after the last sample. */
-    uint32_t first = total < RING_BYTES ? total : RING_BYTES;
+    played_bytes += advance;
+    last_position = position;
 
-    k_memcpy(hda.ring, data, first);
-    k_memset(hda.ring + first, 0, RING_BYTES - first);
-    written = first;
+    /* Late: the controller passed what was written. Skip ahead instead of replaying. */
+    if ((int32_t)(written_bytes - played_bytes) < 0)
+        written_bytes = played_bytes + START_LEAD;
+}
 
-    set32(stream(SD_LPIB), 0);
+static void stream_start(void)
+{
+    k_memset(hda.ring, 0, RING_BYTES);
     set32(stream(SD_CTL), (reg32(stream(SD_CTL)) & 0xFFFFFFu) | SD_CTL_RUN);
 
-    /* Follow the play position; refill the part the controller has finished with. */
-    uint64_t guard = hal_timer_ns() + (uint64_t)(total / 4 + SOUND_RATE) * 1000000000ull / SOUND_RATE + 500000000ull;
-    uint32_t last_position = 0;
-    uint32_t played = 0; /* total bytes the controller has consumed */
-    uint32_t filled_to = RING_BYTES < total ? RING_BYTES : total; /* data bytes the ring holds ahead */
+    last_position = reg32(stream(SD_LPIB)) % RING_BYTES;
+    played_bytes = last_position;
+    written_bytes = played_bytes + START_LEAD;
+    streaming = 1;
+}
 
-    (void)filled_to;
+static uint32_t hda_write(const int16_t *samples, uint32_t frames)
+{
+    if (!hda.ready || frames == 0)
+        return 0;
 
-    while (played < total)
+    if (!streaming)
+        stream_start();
+    else
+        stream_update();
+
+    uint32_t free_bytes = RING_BYTES - (written_bytes - played_bytes);
+    uint32_t bytes = frames * 4;
+
+    if (bytes > free_bytes)
+        bytes = free_bytes & ~3u;
+
+    const uint8_t *data = (const uint8_t *)samples;
+
+    for (uint32_t i = 0; i < bytes; i++)
+        hda.ring[(written_bytes + i) % RING_BYTES] = data[i];
+
+    written_bytes += bytes;
+
+    return bytes / 4;
+}
+
+static int hda_play(const int16_t *samples, uint32_t frames)
+{
+    uint32_t done = 0;
+    uint64_t guard = hal_timer_ns() + (uint64_t)(frames + SOUND_RATE) * 1000000000ull / SOUND_RATE;
+
+    while (done < frames)
     {
-        uint32_t position = reg32(stream(SD_LPIB));
-
-        if (position != last_position)
-        {
-            uint32_t advance = position >= last_position ? position - last_position
-                                                         : RING_BYTES - last_position + position;
-
-            played += advance;
-
-            /* The `advance` bytes just behind the play position are free: refill them. */
-            uint32_t area = (position + RING_BYTES - advance) % RING_BYTES;
-
-            for (uint32_t i = 0; i < advance; i++)
-            {
-                uint8_t value = written < total ? data[written] : 0;
-
-                hda.ring[(area + i) % RING_BYTES] = value;
-                written++;
-            }
-
-            last_position = position;
-        }
+        done += hda_write(samples + 2 * done, frames - done);
 
         if (hal_timer_ns() > guard)
-            break;
+            return -1;
     }
 
-    set32(stream(SD_CTL), reg32(stream(SD_CTL)) & ~SD_CTL_RUN & 0xFFFFFFu);
+    /* Wait until the controller has taken the last frame (the ring may skip ahead if late). */
+    uint32_t end_mark = written_bytes;
 
-    return played >= total ? 0 : -1;
+    while ((int32_t)(played_bytes - end_mark) < 0)
+    {
+        stream_update();
+
+        if (hal_timer_ns() > guard)
+            return -1;
+    }
+
+    return 0;
 }
 
 static const sound_device_t hda_sound = {
     .name = "hda",
     .play = hda_play,
+    .write = hda_write,
 };
 
 static int setup_stream(void)

@@ -8,6 +8,10 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+
+/* CPU clock of the Mac IIci (25 MHz); the sound chip and the VIAs count from it. */
+#define MAC_CPU_HZ 25000000u
 
 /*
  * Machine model of a Macintosh IIci (68030, no FPU, 32-bit addressing).
@@ -93,11 +97,24 @@ typedef struct
 typedef struct
 {
     bool vblank_latched;        /* the internal video interrupt is pending */
+    bool sound_irq;             /* the sound chip asks for data */
     uint8_t sier;               /* slot interrupt enable (register 0x12) */
     uint8_t rier;               /* interrupt enable (register 0x13) */
     uint8_t depth;              /* bits 0-2 of register 0x10: 0=1 bpp .. 3=8 bpp */
     uint8_t other[0x20];        /* registers without special behavior */
 } mac_rbv_t;
+
+/* Apple Sound Chip, FIFO mode only (see asc.c). */
+typedef struct
+{
+    uint8_t mode, control, fifo_mode, status, wave_control, volume, clock;
+    uint8_t other[0x80];
+    uint8_t wave[0x800];        /* wave table RAM */
+    uint8_t fifo[2][0x400];
+    uint16_t fifo_head[2];
+    uint16_t fifo_count[2];
+    uint32_t phase;             /* fraction of a sample period passed (units of 1/CPU_HZ) */
+} mac_asc_t;
 
 /* Bt-style color lookup table of the built-in video (the DAC). */
 typedef struct
@@ -151,6 +168,11 @@ typedef struct
     uint32_t clk_log_len;
     uint32_t rtc_seconds;       /* seconds since 1 Jan 1904, set by the host */
 
+    /* mac_sysbeep: the CPU state to restore when the injected call returns. */
+    bool call_active, call_returned;
+    uint32_t call_return_pc;
+    uint32_t call_regs[20];
+
     uint8_t stub[MAC_STUB_SIZE];
     mac_disk_t disk;            /* set by the host after mac_init() */
 
@@ -163,6 +185,14 @@ typedef struct
     mac_scsi_t scsi;
     mac_rbv_t rbv;
     mac_dac_t dac;
+    mac_asc_t asc;
+    /*
+     * Sound output: called with the unsigned 8-bit mono samples the sound chip
+     * played since the last call (a few hundred at a time) and their rate in
+     * Hz. NULL = discard.
+     */
+    void (*audio)(void *ctx, const uint8_t *samples, uint32_t count, uint32_t rate);
+    void *audio_ctx;
     uint8_t *vram;              /* video RAM, set by the host */
     uint32_t vram_size;
     uint32_t vram_base;         /* guest address of the first byte */
@@ -231,6 +261,8 @@ bool mac_via_irq(const mac_via_t *via);
 uint32_t mac_rbv_read(mac_rbv_t *rbv, uint32_t reg, bool vblank);
 void mac_rbv_write(mac_rbv_t *rbv, uint32_t reg, uint32_t value);
 bool mac_rbv_irq(const mac_rbv_t *rbv);
+/* The sound chip's interrupt line (RBV interrupt flag bit 4). */
+void mac_rbv_set_sound_irq(mac_rbv_t *rbv, bool asserted);
 /* A video frame starts: the internal video interrupt becomes pending (if
  * enabled). */
 void mac_rbv_vblank(mac_rbv_t *rbv);
@@ -247,6 +279,15 @@ uint32_t mac_dac_access(mac_dac_t *dac, uint32_t offset, bool write,
 #define MAC_SCREEN_H 480
 int mac_render(const mac_t *mac, uint32_t *out);
 
+/* ASC registers: one byte access at 'offset' from 0x50F14000. */
+uint32_t mac_asc_access(mac_asc_t *asc, uint32_t offset, bool write, uint32_t value);
+bool mac_asc_irq(const mac_asc_t *asc);
+uint32_t mac_asc_rate(const mac_asc_t *asc);
+/* Let the chip play for 'cycles' CPU cycles; calls 'audio' with what it played. */
+void mac_asc_advance(mac_asc_t *asc, uint32_t cycles,
+                     void (*audio)(void *ctx, const uint8_t *samples, uint32_t count, uint32_t rate),
+                     void *ctx);
+
 /* SCSI registers: one byte access at 'offset' from 0x50F10000. */
 uint32_t mac_scsi_access(mac_scsi_t *scsi, uint32_t offset, bool write,
                          uint32_t value);
@@ -254,6 +295,16 @@ uint32_t mac_scsi_access(mac_scsi_t *scsi, uint32_t offset, bool write,
 /* IWM registers: one byte access at 'offset' from 0x50F16000. */
 uint32_t mac_iwm_access(mac_iwm_t *iwm, uint32_t offset, bool write,
                         uint32_t value);
+
+/*
+ * Make the running system call SysBeep, as an application would: the CPU
+ * state is saved, "move.w #3,-(sp); _SysBeep" runs from the stub window, and
+ * the state comes back when it returns (at the start of a later mac_run).
+ * For tests of the sound chip; the system may be in the middle of anything,
+ * so this is only meant for an idle desktop. Returns 0, or -1 if a call is
+ * already under way.
+ */
+int mac_sysbeep(mac_t *mac);
 
 /* Power-on reset: overlay on, CPU reads SSP/PC from the ROM. */
 int mac_reset(mac_t *mac);

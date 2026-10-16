@@ -26,6 +26,14 @@ const sound_device_t *sound_get(void)
     return device;
 }
 
+uint32_t sound_write(const int16_t *samples, uint32_t frames)
+{
+    if (device == NULL || device->write == NULL)
+        return 0;
+
+    return device->write(samples, frames);
+}
+
 void sound_make_tone(int16_t *samples, uint32_t frames, uint32_t frequency, uint32_t volume)
 {
     if (volume > 100)
@@ -91,38 +99,54 @@ int sound_beep(uint32_t frequency, uint32_t milliseconds, uint32_t volume)
     return status;
 }
 
-uint32_t sound_resampled_frames(uint32_t input_count, uint32_t source_rate)
+void sound_resampler_reset(sound_resampler_t *resampler)
 {
-    if (source_rate == 0)
-        return 0;
-
-    return (uint32_t)((uint64_t)input_count * SOUND_RATE / source_rate);
+    resampler->rate = 0;
+    resampler->in_total = 0;
+    resampler->out_total = 0;
 }
 
-uint32_t sound_resample_u8_mono(const uint8_t *input, uint32_t input_count, uint32_t source_rate,
-                                int16_t *output, uint32_t out_frames, uint32_t volume)
+uint32_t sound_resample_u8(sound_resampler_t *resampler, const uint8_t *input, uint32_t count,
+                           uint32_t source_rate, int16_t *out, uint32_t max_frames, uint32_t volume)
 {
-    uint32_t frames = sound_resampled_frames(input_count, source_rate);
+    if (source_rate == 0 || count == 0)
+        return 0;
 
-    if (frames > out_frames)
-        frames = out_frames;
+    if (resampler->rate != source_rate)
+    {
+        resampler->rate = source_rate;
+        resampler->in_total = 0;
+        resampler->out_total = 0;
+    }
 
     if (volume > 100)
         volume = 100;
 
+    /* After this chunk the stream has consumed in_end samples and should have produced out_end frames. */
+    uint64_t in_end = resampler->in_total + count;
+    uint64_t out_end = in_end * SOUND_RATE / source_rate;
+    uint32_t frames = (uint32_t)(out_end - resampler->out_total);
+
+    if (frames > max_frames)
+        frames = max_frames;
+
     for (uint32_t i = 0; i < frames; i++)
     {
-        uint32_t source = (uint32_t)((uint64_t)i * source_rate / SOUND_RATE);
+        uint64_t global = (resampler->out_total + i) * source_rate / SOUND_RATE;
+        uint32_t local = global < resampler->in_total ? 0 : (uint32_t)(global - resampler->in_total);
 
-        if (source >= input_count)
-            source = input_count - 1;
+        if (local >= count)
+            local = count - 1;
 
         /* Unsigned 8-bit: 0x80 is silence. Scale to 16 bits and apply the volume. */
-        int32_t value = ((int32_t)input[source] - 128) * 256 * (int32_t)volume / 100;
+        int32_t value = ((int32_t)input[local] - 128) * 256 * (int32_t)volume / 100;
 
-        output[2 * i] = (int16_t)value;
-        output[2 * i + 1] = (int16_t)value;
+        out[2 * i] = (int16_t)value;
+        out[2 * i + 1] = (int16_t)value;
     }
+
+    resampler->in_total = in_end;
+    resampler->out_total += frames;
 
     return frames;
 }

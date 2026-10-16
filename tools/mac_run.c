@@ -153,6 +153,48 @@ static void print_regs(void)
 static mac_t mac;
 static uint32_t g_tail = 32;
 
+/* Sound: -W records what the sound chip plays (8-bit mono) and writes a WAV file at the end. */
+static uint8_t *audio_data;
+static size_t audio_length, audio_capacity;
+static uint32_t audio_rate;
+
+static void audio_sink(void *ctx, const uint8_t *samples, uint32_t count, uint32_t rate)
+{
+    (void)ctx;
+    if (audio_length + count > audio_capacity)
+    {
+        audio_capacity = (audio_length + count) * 2;
+        audio_data = realloc(audio_data, audio_capacity);
+    }
+    memcpy(audio_data + audio_length, samples, count);
+    audio_length += count;
+    audio_rate = rate;
+}
+
+static void write_wav(const char *path)
+{
+    FILE *f = fopen(path, "wb");
+    uint32_t rate = audio_rate ? audio_rate : 22254;
+    uint8_t header[44] = "RIFF\0\0\0\0WAVEfmt \x10\0\0\0\1\0\1\0";
+
+    if (f == NULL)
+    {
+        return;
+    }
+    uint32_t riff = (uint32_t)(36 + audio_length), bytes_per_second = rate, data = (uint32_t)audio_length;
+
+    memcpy(header + 4, &riff, 4);
+    memcpy(header + 24, &rate, 4);
+    memcpy(header + 28, &bytes_per_second, 4);
+    header[32] = 1;     /* block align */
+    header[34] = 8;     /* bits per sample */
+    memcpy(header + 36, "data", 4);
+    memcpy(header + 40, &data, 4);
+    fwrite(header, 1, sizeof header, f);
+    fwrite(audio_data, 1, audio_length, f);
+    fclose(f);
+}
+
 /* Musashi calls exit() on errors it cannot handle: show where we were. */
 static void on_exit_dump(void)
 {
@@ -198,6 +240,8 @@ int main(int argc, char **argv)
     struct { int code, down; uint32_t frame; } keys[32];
     int nkeys = 0;
     const char *ppm_path = NULL;
+    const char *wav_path = NULL;
+    int64_t beep_frame = -1;
     const char *save_path = NULL;
     uint32_t save_addr = 0;
     uint32_t save_len = 0;
@@ -266,6 +310,14 @@ int main(int argc, char **argv)
         else if (argv[i][0] == '-' && argv[i][1] == 'R')
         {
             disk_read_only = true;
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'W' && i + 1 < argc)
+        {
+            wav_path = argv[++i];
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'B' && i + 1 < argc)
+        {
+            beep_frame = strtol(argv[++i], NULL, 0);
         }
         else if (argv[i][0] == '-' && argv[i][1] == 'p' && i + 1 < argc)
         {
@@ -366,6 +418,7 @@ int main(int argc, char **argv)
         mac.disk.blocks = disk_size / 512;
         mac.disk.read_only = disk_read_only;
     }
+    mac.audio = audio_sink;
     mac.trace_enabled = true;
     mac.rtc_seconds = 0xD0000000u;     /* a fixed date in 2013 */
     mac_reset(&mac);
@@ -391,7 +444,16 @@ int main(int argc, char **argv)
                     mac_mouse_move(&mac, mouse[m].x, mouse[m].y, mouse[m].b != 0);
                 }
             }
+            if (beep_frame >= 0 && f == (uint32_t)beep_frame)
+            {
+                mac_sysbeep(&mac);
+            }
             mac_run(&mac, 416000);
+        }
+        if (wav_path != NULL)
+        {
+            write_wav(wav_path);
+            printf("mac: %zu audio samples\n", audio_length);
         }
         if (ppm_path != NULL && mac_render(&mac, shot) == 0)
         {

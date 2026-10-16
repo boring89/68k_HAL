@@ -10,6 +10,7 @@
 #include "emu/m68k/vm.h"
 #include "hal/boot.h"
 #include "hal/framebuffer.h"
+#include "kernel/sound/sound.h"
 #include "kernel/input/event_buffer.h"
 #include "kernel/keyboard/keycode.h"
 #include "kernel/lib/k_memory.h"
@@ -218,6 +219,44 @@ static bool handle_input(mac_t *mac)
 }
 
 
+/*
+ * Sound. The model plays unsigned 8-bit mono samples (a few at a time, as the
+ * emulated time passes); they are collected for one frame, converted to the
+ * 48 kHz stereo the sound card takes and queued. If the card cannot take them
+ * (its queue is full) they are dropped: the emulation is not slowed for sound.
+ */
+#define AUDIO_MAX 2048          /* source samples collected per frame (370 are normal) */
+#define AUDIO_FRAMES 4800       /* output frames per frame: room for 11 kHz sources too */
+
+static uint8_t audio_samples[AUDIO_MAX];
+static uint32_t audio_count;
+static uint32_t audio_rate;
+static sound_resampler_t audio_resampler;
+
+static void audio_collect(void *ctx, const uint8_t *samples, uint32_t count, uint32_t rate)
+{
+    (void)ctx;
+
+    if (count > AUDIO_MAX - audio_count)
+        count = AUDIO_MAX - audio_count;
+
+    k_memcpy(audio_samples + audio_count, samples, count);
+    audio_count += count;
+    audio_rate = rate;
+}
+
+static void audio_flush(int16_t *out)
+{
+    if (audio_count == 0)
+        return;
+
+    uint32_t frames = sound_resample_u8(&audio_resampler, audio_samples, audio_count, audio_rate,
+                                        out, AUDIO_FRAMES, 100);
+
+    audio_count = 0;
+    sound_write(out, frames);
+}
+
 int mac_machine_run(uint32_t frames)
 {
     hal_boot_module_t rom_module;
@@ -229,6 +268,7 @@ int mac_machine_run(uint32_t frames)
     uint8_t *vram = kmalloc(VRAM_SIZE);
     uint32_t *pixels = kmalloc(MAC_SCREEN_W * MAC_SCREEN_H * 4);
     overlay_t *ov = kmalloc(sizeof *ov);
+    int16_t *audio_out = sound_get() != NULL ? kmalloc(AUDIO_FRAMES * 4) : NULL;
     int status = -1;
 
     if (mac == NULL || rom == NULL || vram == NULL || pixels == NULL ||
@@ -288,13 +328,28 @@ int mac_machine_run(uint32_t frames)
     mac->disk.write = overlay_write;
     mac->disk.ctx = ov;
     mac->disk.blocks = ov->blocks;
+    if (audio_out != NULL)
+    {
+        sound_resampler_reset(&audio_resampler);
+        audio_count = 0;
+        mac->audio = audio_collect;
+    }
     mac_reset(mac);
 
     kernel_printf("%s\n", have_screen ? "mac: running (` stops)"
                                       : "mac: running without a screen");
     for (uint32_t frame = 1; frames == 0 || frame <= frames; frame++)
     {
+#ifdef KERNEL_MAC_TEST_BEEP
+        /* make test-mac-sound: let the system beep once. */
+        if (frame == KERNEL_MAC_TEST_BEEP)
+            mac_sysbeep(mac);
+#endif
         mac_run(mac, (int)MAC_FRAME_CYCLES);
+
+        if (audio_out != NULL)
+            audio_flush(audio_out);
+
         if (have_screen && frame % SHOW_EVERY == 0 &&
             mac_render(mac, pixels) == 0)
         {
@@ -316,6 +371,8 @@ int mac_machine_run(uint32_t frames)
     status = 0;
 
 out:
+    kfree(audio_out);
+
     if (ov != NULL)
     {
         for (uint32_t i = 0; i < MAX_CHUNKS; i++)

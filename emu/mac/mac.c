@@ -29,6 +29,9 @@ static void start_injection(mac_t *mac, uint32_t pc);
 #define SCC_SPAN 0x2000u
 #define SCC_RR0_IDLE 0x54       /* Tx buffer empty, hunting for a flag, Tx underrun */
 
+#define ASC_BASE 0x50F14000u
+#define ASC_SPAN 0x2000u
+
 #define IWM_BASE 0x50F16000u
 #define IWM_SPAN 0x2000u
 
@@ -43,7 +46,7 @@ static void start_injection(mac_t *mac, uint32_t pc);
  * counts "Ticks" with a 60 Hz interrupt on VIA1 CA1 (Guide to the Macintosh
  * Family Hardware, ch. 3). */
 #define CPU_PER_VIA 32u
-#define CPU_HZ 25000000u
+#define CPU_HZ MAC_CPU_HZ
 #define TICK_HZ 60u
 #define IRQ_LEVEL_VIA1 1
 #define IRQ_LEVEL_RBV 2
@@ -175,6 +178,11 @@ static uint32_t io_access(mac_t *mac, uint32_t addr, bool write, uint32_t value)
     if (addr >= SCSI_BASE && addr < SCSI_BASE + SCSI_SPAN)
     {
         return mac_scsi_access(&mac->scsi, addr - SCSI_BASE, write, value);
+    }
+
+    if (addr >= ASC_BASE && addr < ASC_BASE + ASC_SPAN)
+    {
+        return mac_asc_access(&mac->asc, addr - ASC_BASE, write, value);
     }
 
     if (addr >= IWM_BASE && addr < IWM_BASE + IWM_SPAN)
@@ -606,6 +614,11 @@ static void insn_hook(void *ctx, uint32_t pc)
     mac_t *mac = ctx;
 
     mac->insn_count++;
+    if (mac->call_active && pc == mac->call_return_pc)
+    {
+        mac->call_returned = true;
+        m68k_vm_stop();
+    }
     if (mac->break_hi != 0 && pc >= mac->break_lo && pc <= mac->break_hi &&
         !mac->break_hit)
     {
@@ -718,6 +731,7 @@ int mac_reset(mac_t *mac)
     k_memset(&mac->scsi, 0, sizeof mac->scsi);
     k_memset(&mac->rbv, 0, sizeof mac->rbv);
     k_memset(&mac->dac, 0, sizeof mac->dac);
+    k_memset(&mac->asc, 0, sizeof mac->asc);
     mac->overlay = true;
     mac->insn_count = 0;
     mac->flow_count = 0;
@@ -744,6 +758,9 @@ static void advance_devices(mac_t *mac, int used)
     }
     mac->via_rem = total % CPU_PER_VIA;
 
+    mac_asc_advance(&mac->asc, (uint32_t)used, mac->audio, mac->audio_ctx);
+    mac_rbv_set_sound_irq(&mac->rbv, mac_asc_irq(&mac->asc));
+
     mac->frame_cycles += (uint32_t)used;
     while (mac->frame_cycles >= CPU_HZ / TICK_HZ)
     {
@@ -756,11 +773,60 @@ static void advance_devices(mac_t *mac, int used)
 }
 
 
+/* Offsets in the stub window of the injected SysBeep call: its code, and the NOP it returns to. */
+#define SYSBEEP_CODE 0x1F00u
+#define SYSBEEP_RETURN (SYSBEEP_CODE + 6)
+
+int mac_sysbeep(mac_t *mac)
+{
+    static const uint8_t code[] = {
+        0x3F, 0x3C, 0x00, 0x03,     /* move.w #3,-(sp) */
+        0xA9, 0xC8,                 /* _SysBeep */
+        0x4E, 0x71,                 /* nop: the call has returned */
+    };
+
+    if (mac->call_active)
+    {
+        return -1;
+    }
+    for (int i = 0; i < 20; i++)
+    {
+        mac->call_regs[i] = m68k_vm_get_reg((m68k_vm_reg_t)i);
+    }
+    k_memcpy(mac->stub + SYSBEEP_CODE, code, sizeof code);
+    mac->call_return_pc = MAC_STUB_BASE + SYSBEEP_RETURN;
+    mac->call_active = true;
+    mac->call_returned = false;
+    m68k_vm_set_reg(M68K_VM_REG_PC, MAC_STUB_BASE + SYSBEEP_CODE);
+    return 0;
+}
+
+
+static void finish_call(mac_t *mac)
+{
+    m68k_vm_set_reg(M68K_VM_REG_SR, mac->call_regs[M68K_VM_REG_SR]);
+    m68k_vm_set_reg(M68K_VM_REG_USP, mac->call_regs[M68K_VM_REG_USP]);
+    m68k_vm_set_reg(M68K_VM_REG_ISP, mac->call_regs[M68K_VM_REG_ISP]);
+    for (int i = 0; i < 16; i++)
+    {
+        m68k_vm_set_reg((m68k_vm_reg_t)i, mac->call_regs[i]);
+    }
+    m68k_vm_set_reg(M68K_VM_REG_PC, mac->call_regs[M68K_VM_REG_PC]);
+    mac->call_active = false;
+    mac->call_returned = false;
+}
+
+
 int mac_run(mac_t *mac, int cycles)
 {
     int used = 0;
 
-    while (used < cycles && !m68k_vm_halted() && !mac->break_hit)
+    if (mac->call_returned)
+    {
+        finish_call(mac);
+    }
+    while (used < cycles && !m68k_vm_halted() && !mac->break_hit &&
+           !mac->call_returned)
     {
         int slice = cycles - used < TIME_SLICE ? cycles - used : TIME_SLICE;
         int ran = m68k_vm_run(slice);

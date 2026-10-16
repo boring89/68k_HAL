@@ -48,6 +48,7 @@
 #define RBV_SENSE_SHIFT 3
 #define SIFR_VIDEO 0x40
 #define IFR_SLOT 0x02
+#define IFR_SOUND 0x10
 #define IFR_ANY 0x80
 #define SET_BIT 0x80
 #define REG_MASK 0x7F
@@ -62,6 +63,10 @@ static uint8_t rbv_ifr(const mac_rbv_t *rbv)
     {
         ifr |= IFR_SLOT;
     }
+    if (rbv->sound_irq)
+    {
+        ifr |= IFR_SOUND;
+    }
     if (ifr & rbv->rier & REG_MASK)
     {
         ifr |= IFR_ANY;
@@ -73,6 +78,12 @@ static uint8_t rbv_ifr(const mac_rbv_t *rbv)
 bool mac_rbv_irq(const mac_rbv_t *rbv)
 {
     return (rbv_ifr(rbv) & rbv->rier & REG_MASK) != 0;
+}
+
+
+void mac_rbv_set_sound_irq(mac_rbv_t *rbv, bool asserted)
+{
+    rbv->sound_irq = asserted;
 }
 
 

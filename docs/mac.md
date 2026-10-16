@@ -43,7 +43,7 @@ Mac 的 ROM 是一本很長的開機劇本，劇本裡不斷地「去敲某個�
             │ VIA1       0x50F00000  │    時鐘晶片、ADB 線、ROM overlay、60 Hz
             │ SCC        0x50F04000  │    序列埠（只有閒置的狀態位元）
             │ SCSI       0x50F10000  │    NCR 5380（匯流排上沒有裝置）
-            │ ASC        0x50F14000  │    聲音（未實作，寫入被丟棄）
+            │ ASC        0x50F14000  │    聲音（FIFO 模式；見第 11 節）
             │ IWM        0x50F16000  │    軟碟控制器（最小替身）
             │ DAC        0x50F24000  │    調色盤
             │ RBV        0x50F26000  │    VIA2 的替代品，含視訊暫存器
@@ -191,7 +191,7 @@ menuentry "mac" {
 ## 10. 已知問題與限制
 
 - **輸入**：ADB 命令（Talk/Listen/Flush）全部回「沒有資料」，所以不能改鍵盤 LED、不能 Listen 設定；按鍵與滑鼠只靠上面的封包注入。沒有 Command/Option/Control 鍵（PS/2 只有 Shift 有對應）、沒有滑鼠右鍵。
-- **沒有聲音**：ASC 的寫入被丟棄；System 的 Sound Manager 沒有硬體可等時不會卡住（目前的開機流程沒遇到）。
+- **聲音只有 ASC 的 FIFO 模式**（System beep 與一般取樣聲音夠用）；沒有 wave table 模式、沒有立體聲分離、音量暫存器被忽略；取樣率暫存器 1–3 的數值是推測。見第 11 節。
 - **沒有序列埠與網路**：序列驅動（SERD）不載入；LocalTalk 靠一個閒置的 SCC 蒙混過去。AppleTalk 不能用。
 - **只有 13" RGB 感測（640x480）**，ROM 預設 1 bpp 時桌面是黑白；其他深度與顯示器沒測。
 - **只支援 ROM `368CADFE`**（Mac IIci）；其他機型的偏移量不同。
@@ -207,3 +207,31 @@ menuentry "mac" {
 - Basilisk II 的 `rom_patches.cpp`、`emul_op.cpp`、`disk.cpp`、`slot_rom.cpp`（GPL；只參考作法，程式碼自己寫，相關註解註明出處）
 - Linux `arch/m68k/include/asm/mac_via.h`（RBV 暫存器名稱）
 - MOS 6522 data sheet；NCR 5380 data sheet；Zilog 8530 data sheet
+
+
+## 11. 聲音（ASC，Apple Sound Chip）
+
+`emu/mac/asc.c`、`kernel/mac/machine.c`（接到 `kernel/sound`）
+
+比喻：ASC 是一個「水龍頭＋兩個小水桶」：System 把 8 位元取樣一個個倒進兩個 FIFO（先進先出的桶，各 1024 位元組，A 左 B 右），晶片以固定速率（約 22254 Hz）從桶底取走並播放；桶快空時（剩不到一半）打鈴（中斷）叫 System 再倒 512 個。
+
+暫存器（偏移 0x000–0x80F）：
+
+| 偏移 | 內容 |
+|---|---|
+| 0x000–0x3FF／0x400–0x7FF | FIFO A／FIFO B（FIFO 模式下寫入即推入） |
+| 0x800 | 版本；原版 ASC 讀 0（ROM 開機與 Sound Manager 都讀這個） |
+| 0x801 | 模式：0 關、1 FIFO、2 wave table |
+| 0x802 | 控制（bit 1 立體聲） |
+| 0x803 | FIFO 模式：bit 7 清空兩個 FIFO |
+| 0x804 | FIFO 狀態（讀取即清除）：bit 0 A 半空、bit 1 A 滿、bit 2 B 半空、bit 3 B 滿 |
+| 0x806／0x807 | 音量／取樣率 |
+
+**怎麼找出它要什麼**：Sound Manager 的 FIFO 填充迴圈（在 System 7.5.3 的 RAM 碼，用 `-x` 傾印後反組譯）是「寫 B、寫 A、讀 0x804、`and #8`、狀態 bit 3 還沒出現就繼續」——所以「滿」旗標在 FIFO 填滿時要出現。中斷只由「半空」位元產生（RBV 的中斷旗標 bit 4，要在 IER 啟用）。這些是由反組譯與 MAME 的 `apple/asc.cpp` 排版推得，**沒有硬體文件確認**。
+
+**輸出**：`mac_t.audio` 回呼收到「晶片這段時間播了哪些 8 位元無號取樣＋取樣率」（FIFO 空時是 0x80 靜音）。kernel 把一個 frame 的取樣收集起來，用 `sound_resample_u8`（帶狀態，frame 與 frame 之間不會有咔聲）轉成 48 kHz 16 位元立體聲，丟進 `sound_write`（HDA 串流）。聲音佇列滿了就丟掉：模擬不會為了聲音變慢。
+
+**測試**：
+- host：`tests/host/test_mac_asc.c`（FIFO 播放、旗標、中斷、RBV 的聲音中斷）。
+- `mac_run -B <frame> -W out.wav`：在執行中的系統裡呼叫 `SysBeep`（`mac_sysbeep()`：存下 CPU 狀態，在 stub 視窗跑 `move.w #3,-(sp); _SysBeep`，回來再還原），並把晶片播出的聲音存成 WAV。結果：0.32 秒、約 439 Hz 的嗶聲（振幅 ±28 / 128，音量偏小，System 自己決定）。
+- `make test-mac-sound`（本機專用，需要 ROM 與磁碟）：在 QEMU 的 kernel 裡跑 Mac，第 1200 個 frame 呼叫 `mac_sysbeep`，QEMU 把 HDA 輸出錄成 WAV，`tools/check_wav.py` 確認有約 440 Hz 的聲音。

@@ -64,25 +64,64 @@ static void test_silence_and_volume(void)
 
 static void test_resample(void)
 {
-    /* 22254 Hz Mac samples to 48000 Hz: 2.157 times as many frames. */
-    TEST_ASSERT_EQ_INT(48000, sound_resampled_frames(22254, 22254));
-    TEST_ASSERT_EQ_INT(0, sound_resampled_frames(100, 0));
-
+    sound_resampler_t r;
+    int16_t out[2 * 64];
     const uint8_t input[] = {128, 255, 0, 128};
-    int16_t output[2 * 16];
-    uint32_t frames = sound_resample_u8_mono(input, 4, 12000, output, 16, 100);
+
+    sound_resampler_reset(&r);
 
     /* 12000 Hz -> 48000 Hz: each input sample is repeated 4 times. */
+    uint32_t frames = sound_resample_u8(&r, input, 4, 12000, out, 64, 100);
+
     TEST_ASSERT_EQ_INT(16, frames);
-    TEST_ASSERT_EQ_INT(0, output[0]);
-    TEST_ASSERT_EQ_INT(127 * 256, output[2 * 4]);
-    TEST_ASSERT_EQ_INT(-128 * 256, output[2 * 8]);
-    TEST_ASSERT_EQ_INT(output[2 * 8], output[2 * 8 + 1]);
+    TEST_ASSERT_EQ_INT(0, out[0]);
+    TEST_ASSERT_EQ_INT(127 * 256, out[2 * 4]);
+    TEST_ASSERT_EQ_INT(-128 * 256, out[2 * 8]);
+    TEST_ASSERT_EQ_INT(out[2 * 8], out[2 * 8 + 1]);
 
     /* Half volume halves the samples; the output size is limited. */
-    frames = sound_resample_u8_mono(input, 4, 12000, output, 6, 50);
+    sound_resampler_reset(&r);
+    frames = sound_resample_u8(&r, input, 4, 12000, out, 6, 50);
     TEST_ASSERT_EQ_INT(6, frames);
-    TEST_ASSERT_EQ_INT(127 * 128, output[2 * 4]);
+    TEST_ASSERT_EQ_INT(127 * 128, out[2 * 4]);
+
+    TEST_ASSERT_EQ_INT(0, sound_resample_u8(&r, input, 0, 12000, out, 6, 50));
+    TEST_ASSERT_EQ_INT(0, sound_resample_u8(&r, input, 4, 0, out, 6, 50));
+}
+
+/* Chunks of any size give the same stream as one big chunk: no clicks at the joins. */
+static void test_resample_chunks_join(void)
+{
+    enum { TOTAL = 3000 };
+    uint8_t input[TOTAL];
+    static int16_t whole[2 * 20000];
+    static int16_t parts[2 * 20000];
+    sound_resampler_t a;
+    sound_resampler_t b;
+
+    for (int i = 0; i < TOTAL; i++)
+        input[i] = (uint8_t)(128 + 100 * ((i / 17) % 2 ? 1 : -1));
+
+    sound_resampler_reset(&a);
+    sound_resampler_reset(&b);
+
+    uint32_t whole_frames = sound_resample_u8(&a, input, TOTAL, 22254, whole, 20000, 100);
+    uint32_t done = 0;
+    uint32_t offset = 0;
+    uint32_t sizes[] = {371, 370, 371, 1, 7, 500, 2, 1000, 378};
+
+    for (unsigned int k = 0; k < sizeof(sizes) / sizeof(sizes[0]); k++)
+    {
+        done += sound_resample_u8(&b, input + offset, sizes[k], 22254, parts + 2 * done, 20000 - done, 100);
+        offset += sizes[k];
+    }
+
+    TEST_ASSERT_EQ_INT(TOTAL, offset);
+    TEST_ASSERT_EQ_INT(whole_frames, done);
+    TEST_ASSERT(whole_frames > 6400 && whole_frames < 6500); /* 3000 * 48000 / 22254 */
+
+    for (uint32_t i = 0; i < done; i++)
+        TEST_ASSERT_EQ_INT(whole[2 * i], parts[2 * i]);
 }
 
 int main(void)
@@ -90,6 +129,7 @@ int main(void)
     TEST_RUN(test_tone_frequency);
     TEST_RUN(test_silence_and_volume);
     TEST_RUN(test_resample);
+    TEST_RUN(test_resample_chunks_join);
 
     return TEST_REPORT("sound");
 }

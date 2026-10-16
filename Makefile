@@ -11,7 +11,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: test-mac-sound sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -265,6 +265,32 @@ test-rom-qemu: $(BUILD)/host/mac_run_fast
 	got=$$(sed -n 's/.*mac: screen crc \([0-9A-Fa-f]*\) .*/\1/p' $$out | head -1 | tr 'A-F' 'a-f'); \
 	echo "test-rom-qemu: host crc $$want, kernel crc $$got"; \
 	[ -n "$$want" ] && [ "$$want" = "$$got" ]
+
+# The Mac's sound: the system beeps (mac_sysbeep, injected at frame 1200) in the
+# kernel under QEMU with an HDA sound card whose output is recorded; the
+# recording must contain the 440 Hz beep. Local only: needs MAC_ROM and
+# MAC_DISK.
+test-mac-sound:
+	@if [ ! -f "$(MAC_ROM)" ] || [ ! -f "$(MAC_DISK)" ]; then \
+		echo "test-mac-sound: SKIP (no ROM or disk; set MAC_ROM and MAC_DISK)"; exit 0; fi; \
+	mkdir -p $(BUILD)/mac; \
+	$(MAKE) --no-print-directory BUILD=$(BUILD)/mac/kernel-beep \
+		EXTRA_CFLAGS="-DKERNEL_MAC_TEST -DKERNEL_MAC_TEST_FRAMES=1500 -DKERNEL_MAC_TEST_BEEP=1200" \
+		$(BUILD)/mac/kernel-beep/kernel.elf || exit 1; \
+	cp "$(MAC_ROM)" $(BUILD)/mac/rom.bin; \
+	cp "$(MAC_DISK)" $(BUILD)/mac/disk.img; \
+	accel=""; [ -w /dev/kvm ] && accel="-enable-kvm"; \
+	out=$(BUILD)/mac/qemu_sound.out; \
+	rm -f $(BUILD)/mac/beep.wav; \
+	qemu-system-i386 $$accel -m 128 -display none -serial stdio \
+		-audiodev wav,id=snd0,path=$(BUILD)/mac/beep.wav \
+		-device intel-hda -device hda-output,audiodev=snd0 \
+		-kernel $(BUILD)/mac/kernel-beep/kernel.elf \
+		-initrd "$(BUILD)/mac/rom.bin mac_rom,$(BUILD)/mac/disk.img mac_disk" > $$out 2>&1 & \
+	pid=$$!; n=0; \
+	until grep -q "mac: screen crc\|mac: could not run" $$out || [ $$n -ge 900 ]; do sleep 1; n=$$((n + 1)); done; \
+	kill -INT $$pid 2>/dev/null; sleep 1; kill $$pid 2>/dev/null; wait $$pid 2>/dev/null; \
+	python3 -I tools/check_wav.py $(BUILD)/mac/beep.wav 440
 
 # A screenshot of the Mac running in the kernel under QEMU (GRUB graphics
 # mode, 640x480): build/mac/qemu_screen.ppm. MAC_SHOT_FRAMES frames (about
