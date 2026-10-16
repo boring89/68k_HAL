@@ -83,3 +83,16 @@ s64 __moddi3(s64 n, s64 d)
 
     return n < 0 ? -(s64)r : (s64)r;
 }
+
+s64 __divmoddi4(s64 n, s64 d, s64 *rem)
+{
+    int n_negative = n < 0;
+    int d_negative = d < 0;
+    u64 r;
+    u64 q = udivmod(n_negative ? -(u64)n : (u64)n, d_negative ? -(u64)d : (u64)d, &r);
+
+    if (rem)
+        *rem = n_negative ? -(s64)r : (s64)r;
+
+    return n_negative != d_negative ? -(s64)q : (s64)q;
+}

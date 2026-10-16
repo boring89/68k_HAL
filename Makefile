@@ -350,7 +350,7 @@ test-sst: $(BUILD)/host/sst_run
 
 SDK_LIBC := build/sdk/sysroot/lib/librt68k.a
 USERLAND_SOURCES := $(wildcard userland/*.c)
-USERLAND_BINS := $(patsubst userland/%.c,build/initrd/bin/%,$(USERLAND_SOURCES))
+USERLAND_BINS := $(patsubst userland/%.c,build/initrd/bin/%,$(USERLAND_SOURCES)) build/initrd/bin/lua
 INITRD := build/initrd.tar
 
 # musl and the runtime helpers (downloads musl on the first run).
@@ -362,6 +362,11 @@ $(SDK_LIBC): tools/build_sdk.sh sdk/rt/divdi3.c
 build/initrd/bin/%: userland/%.c $(SDK_LIBC) tools/68khal-cc
 	mkdir -p $(dir $@)
 	tools/68khal-cc -O2 -Wall -Wextra $< -o $@ -lm
+
+# Lua, a real program ported with the SDK (downloads its source on the first run).
+build/initrd/bin/lua: tools/build_lua.sh $(SDK_LIBC) tools/68khal-cc
+	mkdir -p $(dir $@)
+	tools/build_lua.sh $@
 
 # The program disk: bin/ (programs), data/ (files they read) and expected/
 # (what the self test compares their output with), packed as a ustar archive.
@@ -414,6 +419,7 @@ test-shell: iso
 		"run /bin/hello=Hello from user mode!" \
 		"run /bin/args a b=argv[2]: b" \
 		"run /bin/crash=before" \
+		"run /bin/lua -e print(6*7)=42" \
 		"run /bin/readline=Type something" \
 		"hello world=you typed: hello world (11 characters)"
 

@@ -412,17 +412,20 @@ static void test_boot_module(void)
 static const struct
 {
     const char *name;
-    int status; /* expected exit status */
+    int status;            /* expected exit status */
+    const char *argument1; /* arguments after the program's name, NULL = none */
+    const char *argument2;
 } user_tests[] = {
-    {"hello", 0},
-    {"printf", 0},
-    {"malloc", 0},
-    {"files", 0},
-    {"sort", 0},
-    {"args", 3},
-    {"time", 0},
-    {"hfs", 0},
-    {"crash", 139}, /* 128 + SIGSEGV */
+    {"hello", 0, NULL, NULL},
+    {"printf", 0, NULL, NULL},
+    {"malloc", 0, NULL, NULL},
+    {"files", 0, NULL, NULL},
+    {"sort", 0, NULL, NULL},
+    {"args", 3, "one", "two"},
+    {"time", 0, NULL, NULL},
+    {"hfs", 0, NULL, NULL},
+    {"lua", 0, "/data/test.lua", NULL}, /* the Lua interpreter, a ported program */
+    {"crash", 139, NULL, NULL},         /* 128 + SIGSEGV */
 };
 
 static void test_user_programs(void)
@@ -446,13 +449,12 @@ static void test_user_programs(void)
         k_strcpy(path, "/bin/");
         k_strcpy(path + 5, name);
 
-        const char *args[] = {path, "one", "two", NULL};
-        const char *no_args[] = {path, NULL};
+        const char *args[] = {path, user_tests[i].argument1, user_tests[i].argument2, NULL};
         static const char *const environment[] = {"PATH=/bin", NULL};
 
         user_console_capture_start(output, sizeof(output));
 
-        int32_t status = user_run(path, k_strcmp(name, "args") == 0 ? args : no_args, environment);
+        int32_t status = user_run(path, args, environment);
 
         user_console_capture_stop();
 
