@@ -130,7 +130,7 @@ Claude 依照上方工作規則直接實作。
 
 ## 已知問題（尚未修正）
 
-- 鍵盤只有字母、數字、空白、Enter、Backspace、Tab、Shift 與 `;`（`:`）；其他標點鍵沒有對應，shell 打不出 `.`、`-`、`/` 等。
+- 鍵盤：US 配置，無 Ctrl/Alt/方向鍵等字元對應。
 - 滑鼠事件（`INPUT_EVENT_MOUSE`）進入 input buffer 但主迴圈忽略。
 - HFS 名稱比較只對 ASCII 不分大小寫，查詢是線性掃描（見 `docs/hfs.md`）。
 - ATA 驅動只支援 primary master、LBA28、唯讀、輪詢。

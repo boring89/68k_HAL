@@ -133,6 +133,37 @@ keycode_t keyboard_scancode_to_keycode(
     case 0x27:
         return KEY_SEMICOLON;
 
+        /* Punctuation: set 1 make codes (OSDev Wiki "PS/2 Keyboard"). */
+    case 0x29:
+        return KEY_GRAVE;
+
+    case 0x0C:
+        return KEY_MINUS;
+
+    case 0x0D:
+        return KEY_EQUAL;
+
+    case 0x1A:
+        return KEY_LEFT_BRACKET;
+
+    case 0x1B:
+        return KEY_RIGHT_BRACKET;
+
+    case 0x2B:
+        return KEY_BACKSLASH;
+
+    case 0x28:
+        return KEY_APOSTROPHE;
+
+    case 0x33:
+        return KEY_COMMA;
+
+    case 0x34:
+        return KEY_PERIOD;
+
+    case 0x35:
+        return KEY_SLASH;
+
     case 0x0E:
         return KEY_BACKSPACE;
 

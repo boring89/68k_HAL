@@ -60,6 +60,17 @@ typedef enum
     /* ';' and, with shift, ':' (the HFS path separator). */
     KEY_SEMICOLON,
 
+    KEY_GRAVE,
+    KEY_MINUS,
+    KEY_EQUAL,
+    KEY_LEFT_BRACKET,
+    KEY_RIGHT_BRACKET,
+    KEY_BACKSLASH,
+    KEY_APOSTROPHE,
+    KEY_COMMA,
+    KEY_PERIOD,
+    KEY_SLASH,
+
 
     KEY_LEFT_SHIFT,
     KEY_RIGHT_SHIFT,

@@ -31,6 +31,12 @@ char keyboard_keycode_to_ascii(
     if(key >= KEY_0 &&
        key <= KEY_9)
     {
+        /* US layout: shift + digit row. */
+        static const char shifted[] = ")!@#$%^&*(";
+
+        if(shift)
+            return shifted[key - KEY_0];
+
         return '0' + (key - KEY_0);
     }
 
@@ -42,6 +48,36 @@ char keyboard_keycode_to_ascii(
 
         case KEY_SEMICOLON:
             return shift ? ':' : ';';
+
+        case KEY_GRAVE:
+            return shift ? '~' : '`';
+
+        case KEY_MINUS:
+            return shift ? '_' : '-';
+
+        case KEY_EQUAL:
+            return shift ? '+' : '=';
+
+        case KEY_LEFT_BRACKET:
+            return shift ? '{' : '[';
+
+        case KEY_RIGHT_BRACKET:
+            return shift ? '}' : ']';
+
+        case KEY_BACKSLASH:
+            return shift ? '|' : '\\';
+
+        case KEY_APOSTROPHE:
+            return shift ? '"' : '\'';
+
+        case KEY_COMMA:
+            return shift ? '<' : ',';
+
+        case KEY_PERIOD:
+            return shift ? '>' : '.';
+
+        case KEY_SLASH:
+            return shift ? '?' : '/';
 
         case KEY_ENTER:
             return '\n';

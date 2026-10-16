@@ -138,6 +138,7 @@ HOST_LIB_SOURCES := \
 	drivers/ps2_keyboard/scancode.c \
 	drivers/ps2_mouse/mouse_packet.c \
 	kernel/input/event.c \
+	kernel/keyboard/keychar.c \
 	kernel/block/block.c \
 	kernel/block/ramdisk.c \
 	kernel/console/sink.c \
