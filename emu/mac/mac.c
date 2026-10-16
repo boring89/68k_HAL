@@ -657,7 +657,8 @@ static void insn_hook(void *ctx, uint32_t pc)
         /* Only where a level 1 interrupt could happen, in supervisor mode,
          * and not inside the stub (it ends with RTE). */
         if ((sr & SR_SUPERVISOR) && (sr & SR_INT_MASK) == 0 &&
-            (pc < MAC_STUB_BASE || pc >= MAC_STUB_BASE + MAC_STUB_SIZE))
+            (pc < MAC_STUB_BASE || pc >= MAC_STUB_BASE + MAC_STUB_SIZE) &&
+            mac_adb_ready(mac, mac->input[mac->input_head][0]))
         {
             start_injection(mac, pc);
             return;
@@ -841,6 +842,33 @@ void mac_key(mac_t *mac, uint8_t adb_code, bool down)
 #define LM_ADBBASE 0xCF8
 #define ADB_ENTRY_SIZE 12
 #define ADB_ENTRIES 17
+
+/*
+ * True once the ADB Manager has a handler for 'device'. Input that arrives
+ * while the ROM is still starting up (for example the release of the Enter
+ * key that started the Mac) must wait: injecting it then jumps through an
+ * uninitialised table, and the inject stub never returns to clear
+ * 'injecting', so every later key and mouse packet would stay queued.
+ */
+bool mac_adb_ready(mac_t *mac, uint8_t device)
+{
+    uint32_t entry = mac_bus_read(mac, LM_ADBBASE, 4);
+
+    if (entry == 0 || entry >= mac->ram_size ||
+        mac->ram_size - entry < ADB_ENTRY_SIZE * ADB_ENTRIES)
+    {
+        return false;
+    }
+    for (int i = 0; i < ADB_ENTRIES; i++, entry += ADB_ENTRY_SIZE)
+    {
+        if (mac_bus_read(mac, entry + 2, 1) == device)
+        {
+            return mac_bus_read(mac, entry + 4, 4) != 0;
+        }
+    }
+    return false;
+}
+
 
 /* Next queued packet for the inject stub (see stub.s). */
 static void emul_input_pop(mac_t *mac)

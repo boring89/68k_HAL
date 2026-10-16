@@ -396,6 +396,25 @@ static void test_input_packets(void)
     TEST_ASSERT_EQ_INT(0xFF, mac.input[3][2]);
     TEST_ASSERT_EQ_INT(0x91, mac.input[4][1]);
 
+    /* Nothing is injected before the ADB Manager has set up its table. */
+    TEST_ASSERT(!mac_adb_ready(&mac, 3));
+
+    /* ADBBase ($CF8) -> table at 0x2000: device 2 without a handler,
+     * device 3 with one. Low RAM is only writable once the ROM overlay
+     * at address 0 is off. */
+    mac.overlay = false;
+    mac_bus_write(&mac, 0xCF8, 4, 0x2000);
+    mac_bus_write(&mac, 0x2000 + 2, 1, 2);
+    mac_bus_write(&mac, 0x2000 + 4, 4, 0);
+    mac_bus_write(&mac, 0x2000 + 12 + 2, 1, 3);
+    mac_bus_write(&mac, 0x2000 + 12 + 4, 4, 0x4000);
+    TEST_ASSERT(!mac_adb_ready(&mac, 2));
+    TEST_ASSERT(mac_adb_ready(&mac, 3));
+
+    /* A table pointer outside RAM is not trusted. */
+    mac_bus_write(&mac, 0xCF8, 4, 0xFFFFFFF0);
+    TEST_ASSERT(!mac_adb_ready(&mac, 3));
+
     /* The queue is bounded. */
     for (int i = 0; i < 200; i++)
     {

@@ -277,6 +277,10 @@ void mac_bus_write(mac_t *mac, uint32_t addr, int size, uint32_t value);
 void mac_mouse_move(mac_t *mac, int dx, int dy, bool button);
 void mac_key(mac_t *mac, uint8_t adb_code, bool down);
 
+/* True once the ROM's ADB Manager has a handler for 'device'; queued input
+ * is only injected after that. */
+bool mac_adb_ready(mac_t *mac, uint8_t device);
+
 /* Number of unimplemented I/O accesses seen (may exceed the log size). */
 uint32_t mac_unimpl_total(const mac_t *mac);
 

@@ -13,6 +13,10 @@
 
 #define MOUSE_MAX_MOVEMENT 255
 
+/* Command replies that can reach the stream late (OSDev Wiki "PS/2 Mouse"). */
+#define MOUSE_REPLY_ACK    0xFA
+#define MOUSE_REPLY_RESEND 0xFE
+
 /* 9-bit two's complement: the sign bit is in the flag byte. */
 static int movement(uint8_t low, bool negative, bool overflow)
 {
@@ -30,8 +34,16 @@ void mouse_decoder_init(mouse_decoder_t *decoder)
 bool mouse_decoder_feed(mouse_decoder_t *decoder, uint8_t byte,
                         mouse_packet_t *packet)
 {
-    /* Not the start of a packet: drop the byte and wait for one. */
-    if (decoder->count == 0 && !(byte & PACKET_ALWAYS_ONE))
+    /*
+     * Not the start of a packet: drop the byte and wait for one. A late
+     * command reply has bit 3 set, so it would pass as a flags byte and
+     * shift every following packet by one; drop those too. As flags they
+     * would need both overflow bits set at once, which is rare enough to
+     * give up.
+     */
+    if (decoder->count == 0 &&
+        (!(byte & PACKET_ALWAYS_ONE) ||
+         byte == MOUSE_REPLY_ACK || byte == MOUSE_REPLY_RESEND))
         return false;
 
     decoder->bytes[decoder->count++] = byte;

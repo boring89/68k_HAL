@@ -125,6 +125,10 @@ int ps2_mouse_init(void)
         !mouse_command(MOUSE_CMD_ENABLE_REPORTING))
         return -1;
 
+    /* Throw away anything still queued (e.g. a late ACK) before IRQ 12 runs. */
+    for (int i = 0; i < 16 && (inb(PS2_STATUS_PORT) & PS2_STATUS_OUTPUT_FULL); i++)
+        (void)inb(PS2_DATA_PORT);
+
     if (hal_irq_register(PS2_MOUSE_IRQ, ps2_mouse_handler) != 0)
         return -1;
 

@@ -90,6 +90,24 @@ static void test_resync(void)
     TEST_ASSERT_EQ_INT(-2, p.dy);
 }
 
+/* Seen in QEMU: the ACK of "enable reporting" arrived as the first IRQ 12 byte. */
+static void test_late_ack_dropped(void)
+{
+    mouse_decoder_t d;
+    mouse_packet_t p;
+
+    mouse_decoder_init(&d);
+
+    TEST_ASSERT(!mouse_decoder_feed(&d, 0xFA, &p));
+    TEST_ASSERT(!mouse_decoder_feed(&d, 0xFE, &p));
+
+    /* mouse_move 5 5 in QEMU: right 5, down 5 (PS/2 Y is up-positive). */
+    TEST_ASSERT(feed3(&d, 0x28, 0x05, 0xFB, &p));
+    TEST_ASSERT_EQ_INT(5, p.dx);
+    TEST_ASSERT_EQ_INT(5, p.dy);
+    TEST_ASSERT_EQ_INT(0, p.buttons);
+}
+
 static void test_event_constructor(void)
 {
     input_event_t e = input_event_mouse(-300, 7, MOUSE_BUTTON_RIGHT);
@@ -106,6 +124,7 @@ int main(void)
     TEST_RUN(test_negative_movement);
     TEST_RUN(test_overflow_saturates);
     TEST_RUN(test_resync);
+    TEST_RUN(test_late_ack_dropped);
     TEST_RUN(test_event_constructor);
 
     return TEST_REPORT("ps2_mouse");
