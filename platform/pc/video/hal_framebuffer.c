@@ -9,6 +9,10 @@
 
 #include "hal/mmu.h"
 
+#include "drivers/bga/bga.h"
+
+#include "platform/pc/vmap/vmap.h"
+
 #include "platform/pc/boot/multiboot.h"
 
 #include <stddef.h>
@@ -65,6 +69,29 @@ int hal_framebuffer_get(hal_framebuffer_t *fb)
         return -1;
 
     *fb = framebuffer;
+
+    return 0;
+}
+
+int hal_framebuffer_set_mode(uint32_t width, uint32_t height)
+{
+    uint32_t physical;
+
+    if (bga_set_mode(width, height, &physical) != 0)
+        return -1;
+
+    size_t bytes = (size_t)width * height * 4;
+    void *mapped = vmap(physical, bytes, HAL_MMU_WRITABLE);
+
+    if (mapped == NULL)
+        return -1;
+
+    framebuffer.base = mapped;
+    framebuffer.width = width;
+    framebuffer.height = height;
+    framebuffer.pitch = width * 4;
+    framebuffer.bpp = 32;
+    framebuffer_mapped = true;
 
     return 0;
 }

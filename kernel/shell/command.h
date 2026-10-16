@@ -35,7 +35,8 @@ typedef enum
     COMMAND_DHCP,
     COMMAND_PING,
     COMMAND_DNS,
-    COMMAND_BEEP
+    COMMAND_BEEP,
+    COMMAND_VIDEO
 
 } shell_command_id_t;
 

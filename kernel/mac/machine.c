@@ -10,6 +10,7 @@
 #include "emu/m68k/vm.h"
 #include "hal/boot.h"
 #include "hal/framebuffer.h"
+#include "kernel/display/fb_scale.h"
 #include "kernel/sound/sound.h"
 #include "kernel/input/event_buffer.h"
 #include "kernel/keyboard/keycode.h"
@@ -168,19 +169,36 @@ static uint32_t crc32(const uint32_t *pixels, uint32_t count)
 }
 
 
-/* Copy the rendered screen into the framebuffer, centered. */
-static void show(const hal_framebuffer_t *fb, const uint32_t *pixels)
-{
-    uint32_t x0 = fb->width > MAC_SCREEN_W ? (fb->width - MAC_SCREEN_W) / 2 : 0;
-    uint32_t y0 = fb->height > MAC_SCREEN_H ? (fb->height - MAC_SCREEN_H) / 2 : 0;
-    uint32_t w = fb->width < MAC_SCREEN_W ? fb->width : MAC_SCREEN_W;
-    uint32_t h = fb->height < MAC_SCREEN_H ? fb->height : MAC_SCREEN_H;
+static uint32_t screen_scale = 1;
 
-    for (uint32_t y = 0; y < h; y++)
+void mac_machine_set_scale(uint32_t scale)
+{
+    screen_scale = scale;
+}
+
+/* Copy the rendered screen into the framebuffer, enlarged by scale and centered. */
+static void show(const hal_framebuffer_t *fb, const uint32_t *pixels, uint32_t scale)
+{
+    uint32_t shown_w = MAC_SCREEN_W * scale;
+    uint32_t shown_h = MAC_SCREEN_H * scale;
+
+    if (fb->width < shown_w || fb->height < shown_h)
     {
-        k_memcpy(fb->base + (y0 + y) * fb->pitch + x0 * 4,
-                 pixels + y * MAC_SCREEN_W, w * 4);
+        /* A smaller screen than the picture: show the top left part, unscaled. */
+        uint32_t w = fb->width < MAC_SCREEN_W ? fb->width : MAC_SCREEN_W;
+        uint32_t h = fb->height < MAC_SCREEN_H ? fb->height : MAC_SCREEN_H;
+
+        for (uint32_t y = 0; y < h; y++)
+            k_memcpy(fb->base + y * fb->pitch, pixels + y * MAC_SCREEN_W, w * 4);
+
+        return;
     }
+
+    uint32_t x0 = (fb->width - shown_w) / 2;
+    uint32_t y0 = (fb->height - shown_h) / 2;
+
+    fb_blit_scaled(fb->base + y0 * fb->pitch + x0 * 4, fb->pitch, pixels,
+                   MAC_SCREEN_W, MAC_SCREEN_H, scale);
 }
 
 
@@ -262,12 +280,25 @@ int mac_machine_run(uint32_t frames)
     hal_boot_module_t rom_module;
     hal_boot_module_t disk_module;
     hal_framebuffer_t fb;
-    bool have_screen = hal_framebuffer_get(&fb) == 0;
+    bool have_screen;
+    uint32_t scale = screen_scale;
     mac_t *mac = kmalloc(sizeof *mac);
     uint8_t *rom = kmalloc(ROM_SIZE);
     uint8_t *vram = kmalloc(VRAM_SIZE);
     uint32_t *pixels = kmalloc(MAC_SCREEN_W * MAC_SCREEN_H * 4);
     overlay_t *ov = kmalloc(sizeof *ov);
+    have_screen = hal_framebuffer_get(&fb) == 0;
+
+    /* Enlarged: ask the display adapter for a mode that fits the picture exactly. */
+    if (scale > 1 && hal_framebuffer_set_mode(MAC_SCREEN_W * scale, MAC_SCREEN_H * scale) == 0)
+        have_screen = hal_framebuffer_get(&fb) == 0;
+
+    if (have_screen && (scale == 0 || MAC_SCREEN_W * scale > fb.width || MAC_SCREEN_H * scale > fb.height))
+        scale = fb_best_scale(MAC_SCREEN_W, MAC_SCREEN_H, fb.width, fb.height);
+
+    if (scale == 0)
+        scale = 1;
+
     int16_t *audio_out = sound_get() != NULL ? kmalloc(AUDIO_FRAMES * 4) : NULL;
     int status = -1;
 
@@ -353,7 +384,7 @@ int mac_machine_run(uint32_t frames)
         if (have_screen && frame % SHOW_EVERY == 0 &&
             mac_render(mac, pixels) == 0)
         {
-            show(&fb, pixels);
+            show(&fb, pixels, scale);
         }
         if (handle_input(mac) && frames == 0)
         {
@@ -365,7 +396,7 @@ int mac_machine_run(uint32_t frames)
         last_crc = crc32(pixels, MAC_SCREEN_W * MAC_SCREEN_H);
         if (have_screen)
         {
-            show(&fb, pixels);
+            show(&fb, pixels, scale);
         }
     }
     status = 0;

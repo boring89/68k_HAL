@@ -34,6 +34,16 @@
  */
 int mac_machine_run(uint32_t frames);
 
+/*
+ * Enlargement of the Mac's screen: each Mac pixel becomes scale x scale
+ * screen pixels (2 = "HiDPI": 640x480 shown as 1280x960). 1 is the default
+ * and never changes the video mode. For 2 or more, mac_machine_run switches
+ * the display to 640*scale x 480*scale if the adapter allows (see
+ * hal_framebuffer_set_mode), otherwise it uses the largest scale that fits
+ * the current mode. 0 means "as large as fits the current mode".
+ */
+void mac_machine_set_scale(uint32_t scale);
+
 /* CRC-32 of the last rendered screen (see tools/mac_run.c, which prints the
  * same number for the same number of frames). */
 uint32_t mac_machine_screen_crc(void);

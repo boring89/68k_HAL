@@ -5,6 +5,7 @@
 
 #include "hal/pci.h"
 
+#include "drivers/bga/bga.h"
 #include "drivers/e1000/e1000.h"
 #include "drivers/hda/hda.h"
 
@@ -17,6 +18,7 @@
  * listing it here (docs/pci.md).
  */
 static const hal_pci_driver_t *const drivers[] = {
+    &bga_pci_driver,
     &e1000_pci_driver,
     &hda_pci_driver,
 };

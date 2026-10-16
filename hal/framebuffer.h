@@ -31,4 +31,15 @@ typedef struct
  */
 int hal_framebuffer_get(hal_framebuffer_t *fb);
 
+/*
+ * Change the screen mode to width x height pixels at 32 bpp, for display
+ * adapters whose mode can be set directly (on the PC: the Bochs/QEMU VGA).
+ * Works whether or not the boot loader set up a graphics mode. On success
+ * returns 0 and hal_framebuffer_get describes the new mode (the pixels are
+ * not cleared, and pointers from before are no longer valid). Returns -1 if
+ * the adapter cannot do it. Every mode change adds to the address space the
+ * kernel uses for the frame buffer, so do not switch modes in a loop.
+ */
+int hal_framebuffer_set_mode(uint32_t width, uint32_t height);
+
 #endif

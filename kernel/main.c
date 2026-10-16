@@ -95,6 +95,9 @@ void kernel_main(void)
 
 #ifdef KERNEL_MAC_TEST
     /* make test-rom-qemu: run the Mac for a fixed time and report the screen. */
+#ifdef KERNEL_MAC_TEST_SCALE
+    mac_machine_set_scale(KERNEL_MAC_TEST_SCALE);
+#endif
     if (mac_machine_run(KERNEL_MAC_TEST_FRAMES) == 0)
         kernel_printf("mac: screen crc %x after %u frames\n",
                       mac_machine_screen_crc(),

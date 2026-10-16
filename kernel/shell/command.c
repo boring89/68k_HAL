@@ -25,6 +25,8 @@
 #include "hal/acpi.h"
 #include "hal/cpu.h"
 #include "hal/pci.h"
+#include "hal/framebuffer.h"
+#include "kernel/display/fb_pattern.h"
 #include "kernel/net/net.h"
 #include "kernel/sound/sound.h"
 #include "kernel/pci/pci_names.h"
@@ -107,6 +109,9 @@ static void cmd_dns(
 static void cmd_beep(
     int argc,
     char **argv);
+static void cmd_video(
+    int argc,
+    char **argv);
 static void cmd_mac(
     int argc,
     char **argv);
@@ -179,7 +184,7 @@ static shell_command_entry_t commands[] =
          cmd_cat},
         {COMMAND_MAC,
          "mac",
-         "Run the Macintosh IIci on boot modules mac_rom and mac_disk (` stops)",
+         "Run the Macintosh IIci on boot modules mac_rom and mac_disk (` stops); mac 2 enlarges it twofold",
          cmd_mac},
         {COMMAND_CPUINFO,
          "cpuinfo",
@@ -216,7 +221,11 @@ static shell_command_entry_t commands[] =
         {COMMAND_BEEP,
          "beep",
          "Play a tone (beep [Hz [milliseconds]])",
-         cmd_beep}};
+         cmd_beep},
+        {COMMAND_VIDEO,
+         "video",
+         "Show the screen mode, or set one and draw a test pattern (video <width> <height>)",
+         cmd_video}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -949,9 +958,18 @@ static void cmd_mac(
     int argc,
     char **argv)
 {
-    (void)argc;
-    (void)argv;
+    int scale = 1;
 
+    if (argc > 1)
+        k_atoi(argv[1], &scale);
+
+    if (scale < 0 || scale > 4)
+    {
+        terminal_write_line("usage: mac [scale 0..4] (0 = as large as the screen allows)");
+        return;
+    }
+
+    mac_machine_set_scale((uint32_t)scale);
     mac_machine_run(0);
 }
 
@@ -1363,4 +1381,44 @@ static void cmd_beep(
 
     if (sound_beep((uint32_t)frequency, (uint32_t)milliseconds, 50) != 0)
         terminal_write_line("No sound card");
+}
+
+static void cmd_video(
+    int argc,
+    char **argv)
+{
+    hal_framebuffer_t fb;
+    char number[16];
+
+    if (argc >= 3)
+    {
+        int width = 0;
+        int height = 0;
+
+        k_atoi(argv[1], &width);
+        k_atoi(argv[2], &height);
+
+        if (width < 1 || height < 1 || hal_framebuffer_set_mode((uint32_t)width, (uint32_t)height) != 0)
+        {
+            terminal_write_line("video: that mode is not available");
+            return;
+        }
+
+        if (hal_framebuffer_get(&fb) == 0)
+            fb_draw_test_pattern(&fb);
+    }
+
+    if (hal_framebuffer_get(&fb) != 0)
+    {
+        terminal_write_line("video: text mode (no framebuffer)");
+        return;
+    }
+
+    terminal_write("video: ");
+    k_utoa(fb.width, number);
+    terminal_write(number);
+    terminal_write("x");
+    k_utoa(fb.height, number);
+    terminal_write(number);
+    terminal_write_line(" 32 bpp");
 }

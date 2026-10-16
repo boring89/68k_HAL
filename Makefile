@@ -11,7 +11,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: test-mac-sound sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: test-video test-mac-sound sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -146,6 +146,7 @@ HOST_LIB_SOURCES := \
 	kernel/console/sink.c \
 	kernel/display/text_display.c \
 	kernel/display/fb_pattern.c \
+	kernel/display/fb_scale.c \
 	kernel/fs/apm.c \
 	kernel/fs/hfs/hfs.c \
 	kernel/fs/volume.c \
@@ -296,6 +297,9 @@ test-mac-sound:
 # mode, 640x480): build/mac/qemu_screen.ppm. MAC_SHOT_FRAMES frames (about
 # 2.4 ms each with KVM) are run before the picture is taken. Local only.
 MAC_SHOT_FRAMES ?= 4200
+# Enlargement of the picture (make mac-screenshot MAC_SHOT_SCALE=2 gives a
+# 1280x960 screenshot).
+MAC_SHOT_SCALE ?= 1
 
 # The ISO for those: the kernel in graphics mode with the ROM and the disk
 # image (copies in build/mac/iso, never in the repository).
@@ -303,11 +307,11 @@ mac-iso:
 	@if [ ! -f "$(MAC_ROM)" ] || [ ! -f "$(MAC_DISK)" ]; then \
 		echo "mac-iso: SKIP (no ROM or disk; set MAC_ROM and MAC_DISK)"; exit 0; fi; \
 	mkdir -p $(BUILD)/mac; \
-	$(MAKE) --no-print-directory BUILD=$(BUILD)/mac/kernel-$(MAC_SHOT_FRAMES) \
-		EXTRA_CFLAGS="-DKERNEL_MAC_TEST -DKERNEL_MAC_TEST_FRAMES=$(MAC_SHOT_FRAMES)" \
-		$(BUILD)/mac/kernel-$(MAC_SHOT_FRAMES)/kernel-gfx.elf || exit 1; \
+	$(MAKE) --no-print-directory BUILD=$(BUILD)/mac/kernel-$(MAC_SHOT_FRAMES)-$(MAC_SHOT_SCALE) \
+		EXTRA_CFLAGS="-DKERNEL_MAC_TEST -DKERNEL_MAC_TEST_FRAMES=$(MAC_SHOT_FRAMES) -DKERNEL_MAC_TEST_SCALE=$(MAC_SHOT_SCALE)" \
+		$(BUILD)/mac/kernel-$(MAC_SHOT_FRAMES)-$(MAC_SHOT_SCALE)/kernel-gfx.elf || exit 1; \
 	rm -rf $(BUILD)/mac/iso; mkdir -p $(BUILD)/mac/iso/boot/grub; \
-	cp $(BUILD)/mac/kernel-$(MAC_SHOT_FRAMES)/kernel-gfx.elf $(BUILD)/mac/iso/boot/; \
+	cp $(BUILD)/mac/kernel-$(MAC_SHOT_FRAMES)-$(MAC_SHOT_SCALE)/kernel-gfx.elf $(BUILD)/mac/iso/boot/; \
 	cp "$(MAC_ROM)" $(BUILD)/mac/iso/mac_rom; cp "$(MAC_DISK)" $(BUILD)/mac/iso/mac_disk; \
 	printf 'set default=0\nset timeout=0\nmenuentry "mac" {\n  multiboot /boot/kernel-gfx.elf\n  module /mac_rom mac_rom\n  module /mac_disk mac_disk\n  boot\n}\n' > $(BUILD)/mac/iso/boot/grub/grub.cfg; \
 	grub-mkrescue -o $(BUILD)/mac/mac.iso $(BUILD)/mac/iso > /dev/null 2>&1
@@ -471,6 +475,12 @@ test-shell: iso
 		"run /bin/readline=Type something" \
 		"hello world=you typed: hello world (11 characters)"
 
+# The standard VGA card's mode can be chosen: set 1280x960 from the shell and
+# check a QEMU screendump (in graphics mode, GRUB's 640x480, and in text mode).
+test-video: iso
+	SHELL_TEST_SCREEN=1280x960 python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
+		"video 1280 960=video: 1280x960 32 bpp"
+
 # The source tree must pass every rule. Each tests/boundary/<rule>/ is a
 # fixture tree that breaks that rule, so the check must report <rule>.
 test-boundary:
@@ -484,4 +494,4 @@ test-boundary:
 	done
 	@echo "boundary check: PASS"
 
-test: test-boundary test-host test-qemu test-shell
+test: test-boundary test-host test-qemu test-shell test-video

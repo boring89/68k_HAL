@@ -13,6 +13,7 @@ variable.
 """
 
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -34,6 +35,33 @@ def keys_for(text):
             yield "shift-" + ch.lower()
         else:
             yield ch
+
+
+BAR_COLORS = [(255, 255, 255), (255, 255, 0), (0, 255, 255), (0, 255, 0),
+              (255, 0, 255), (255, 0, 0), (0, 0, 255), (0, 0, 0)]
+
+
+def check_screen(path, width, height):
+    """The QEMU screendump must be width x height and show the test pattern's colour bars."""
+    data = open(path, "rb").read()
+    match = re.match(rb"P6\s+(\d+)\s+(\d+)\s+255\s", data)
+    if not match:
+        print("shell_test: the screendump is not a PPM file")
+        return False
+    w, h = int(match.group(1)), int(match.group(2))
+    if (w, h) != (width, height):
+        print("shell_test: FAIL: the screen is %dx%d, expected %dx%d" % (w, h, width, height))
+        return False
+    body = data[match.end():]
+    y = height // 4
+    for i, want in enumerate(BAR_COLORS):
+        x = (2 * i + 1) * width // 16
+        got = tuple(body[(y * w + x) * 3:(y * w + x) * 3 + 3])
+        if got != want:
+            print("shell_test: FAIL: bar %d is %s, expected %s" % (i, got, want))
+            return False
+    print("shell_test: ok: screen is %dx%d with the colour bars" % (w, h))
+    return True
 
 
 def main():
@@ -103,6 +131,17 @@ def main():
                 print(output()[mark:][-600:])
                 return 1
             print("shell_test: ok: %s" % command)
+
+        # SHELL_TEST_SCREEN=WxH: finally take a screendump and check the test pattern.
+        screen = os.environ.get("SHELL_TEST_SCREEN")
+        if screen:
+            width, height = (int(v) for v in screen.split("x"))
+            dump = os.path.join(tmp, "screen.ppm")
+            time.sleep(0.5)
+            send("screendump " + dump)
+            time.sleep(1.0)
+            if not check_screen(dump, width, height):
+                return 1
 
         return 0
     finally:
