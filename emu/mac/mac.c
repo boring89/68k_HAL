@@ -19,6 +19,10 @@
 #define DAC_BASE 0x50F24000u
 #define DAC_SPAN 0x2000u
 
+#define SCC_BASE 0x50F04000u
+#define SCC_SPAN 0x2000u
+#define SCC_RR0_IDLE 0x54       /* Tx buffer empty, hunting for a flag, Tx underrun */
+
 #define IWM_BASE 0x50F16000u
 #define IWM_SPAN 0x2000u
 
@@ -152,6 +156,14 @@ static uint32_t io_access(mac_t *mac, uint32_t addr, bool write, uint32_t value)
     if (addr >= DAC_BASE && addr < DAC_BASE + DAC_SPAN)
     {
         return mac_dac_access(&mac->dac, addr - DAC_BASE, write, value);
+    }
+
+    if (addr >= SCC_BASE && addr < SCC_BASE + SCC_SPAN)
+    {
+        /* A serial controller that is idle and never receives anything:
+         * enough for the LocalTalk driver's start-up checks, which only look
+         * at the status bits. */
+        return write ? 0 : SCC_RR0_IDLE;
     }
 
     if (addr >= SCSI_BASE && addr < SCSI_BASE + SCSI_SPAN)
@@ -377,6 +389,10 @@ static void emul_reset(mac_t *mac)
 #define XPRAM_ADDRESSING 0x8A
 #define XPRAM_32BIT 0x05
 
+/* Parameter RAM bytes 0xE0-0xE3: the network driver AppleTalk uses (the
+ * sResource id and the slot of an Ethernet card; zero = LocalTalk). */
+#define XPRAM_NETWORK 0xE0
+
 #define CLK_READ 0x80
 #define CLK_EXT_MASK 0x78
 #define CLK_EXT 0x38
@@ -387,6 +403,12 @@ static void emul_clknomem(mac_t *mac)
     uint32_t data = m68k_vm_get_reg(M68K_VM_REG_D0 + 2);
     bool read = (cmd & CLK_READ) != 0;
     uint8_t *cell = NULL;
+
+    if (mac->clk_log_len < 1024)
+    {
+        mac->clk_log[mac->clk_log_len++] =
+            (read ? 0x80000000u : 0) | ((cmd & 0xFFFF) << 8) | (data & 0xFF);
+    }
     uint8_t secs[4];
 
     if ((cmd & CLK_EXT_MASK) == CLK_EXT)
@@ -408,16 +430,24 @@ static void emul_clknomem(mac_t *mac)
                 data = secs[reg & 3];
             }
         }
-        else if (reg >= 0x10)
+        else if (reg >= 0x10 || reg <= 0x0B)
         {
             cell = &mac->xpram[reg];
         }
-        else if (reg <= 0x0B)
-        {
-            cell = &mac->xpram[0x10 + reg - 8];     /* pre-extended cells */
-        }
     }
 
+    if (read && cell >= &mac->xpram[XPRAM_NETWORK] &&
+        cell < &mac->xpram[XPRAM_NETWORK + 4] && mac->xpram[XPRAM_NETWORK] == 0 &&
+        mac->xpram[XPRAM_NETWORK + 1] == 0)
+    {
+        /* Fresh parameter RAM selects LocalTalk, whose driver wants the SCC
+         * interrupts of a serial port. Select an Ethernet driver (sResource
+         * 0xF1 in slot 0xA) instead: it does not exist here, so AppleTalk
+         * stays off. Basilisk II returns the same values. */
+        static const uint8_t network[4] = { 0x00, 0xF1, 0x00, 0x0A };
+
+        *cell = network[cell - &mac->xpram[XPRAM_NETWORK]];
+    }
     if (cell == &mac->xpram[XPRAM_ADDRESSING])
     {
         /* The model only runs in 32-bit mode; whatever the ROM writes here,
@@ -693,7 +723,7 @@ static void advance_devices(mac_t *mac, int used)
     {
         mac->frame_cycles -= CPU_HZ / TICK_HZ;
         mac_via_set_flag(&mac->via1, VIA_INT_CA1);
-        mac_rbv_set_flag(&mac->rbv, RBV_INT_VBLANK);
+        mac_rbv_vblank(&mac->rbv);
     }
     m68k_vm_set_irq(mac_rbv_irq(&mac->rbv) ? IRQ_LEVEL_RBV
                     : mac_via_irq(&mac->via1) ? IRQ_LEVEL_VIA1 : 0);

@@ -39,6 +39,7 @@
  */
 #define MAC_STUB_BASE 0x4F000000u
 #define MAC_STUB_SIZE 0x2000u
+#define MAC_STUB_ADBOP 0x60u        /* offset of the ADBOp replacement */
 #define MAC_STUB_DRIVER 0x100u      /* offset of the driver header */
 #define MAC_STUB_DRIVE_RECORD 0x900u
 
@@ -53,7 +54,7 @@ typedef struct
     bool read_only;
 } mac_disk_t;
 
-#define MAC_UNIMPL_LOG_SIZE 256
+#define MAC_UNIMPL_LOG_SIZE 2048
 #define MAC_TRACE_SIZE 4096
 #define MAC_FLOW_SIZE 1024       /* ROM blocks remembered in first-seen order */
 #define MAC_FLOW_SHIFT 6         /* block = 64 bytes */
@@ -89,7 +90,9 @@ typedef struct
 /* RBV: the Mac IIci's replacement for VIA2, with the video control bits. */
 typedef struct
 {
-    uint8_t ifr, ier;
+    bool vblank_latched;        /* the internal video interrupt is pending */
+    uint8_t sier;               /* slot interrupt enable (register 0x12) */
+    uint8_t rier;               /* interrupt enable (register 0x13) */
     uint8_t depth;              /* bits 0-2 of register 0x10: 0=1 bpp .. 3=8 bpp */
     uint8_t other[0x20];        /* registers without special behavior */
 } mac_rbv_t;
@@ -142,6 +145,8 @@ typedef struct
     uint32_t unimpl_used;       /* distinct entries in unimpl[] */
 
     uint8_t xpram[256];         /* parameter RAM kept by the clock chip */
+    uint32_t clk_log[1024];      /* first clock chip commands: cmd << 8 | data, bit 31 = read */
+    uint32_t clk_log_len;
     uint32_t rtc_seconds;       /* seconds since 1 Jan 1904, set by the host */
 
     uint8_t stub[MAC_STUB_SIZE];
@@ -217,8 +222,9 @@ bool mac_via_irq(const mac_via_t *via);
 uint32_t mac_rbv_read(mac_rbv_t *rbv, uint32_t reg, bool vblank);
 void mac_rbv_write(mac_rbv_t *rbv, uint32_t reg, uint32_t value);
 bool mac_rbv_irq(const mac_rbv_t *rbv);
-void mac_rbv_set_flag(mac_rbv_t *rbv, uint8_t mask);
-#define RBV_INT_VBLANK 0x40
+/* A video frame starts: the internal video interrupt becomes pending (if
+ * enabled). */
+void mac_rbv_vblank(mac_rbv_t *rbv);
 #define RBV_SENSE_13_RGB 6      /* Apple 13" RGB, 640x480 */
 
 /* DAC registers: the address register at offset 0, data at offset 4. */

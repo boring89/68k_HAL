@@ -16,6 +16,7 @@
  *   -s   after a -b break, run this many more instructions
  *   -a   list all remembered unimplemented accesses (default: the first 24)
  *   -u   collapse loops in the trace tail (hide addresses seen recently)
+ *   -r   print the parameter RAM at the end
  *   -c   list the ROM blocks (64 bytes) in the order they were first executed
  *   -b   stop when the PC reaches this address, or range lo-hi (hex)
  *   -f   print the first N executed instructions (when the run is short)
@@ -177,6 +178,7 @@ int main(int argc, char **argv)
     uint32_t extra = 0;
     uint32_t break_hi = 0;
     bool flow = false;
+    bool show_xpram = false;
     uint32_t unimpl_max = 24;
     bool collapse = false;
     uint32_t recent[48] = { 0 };
@@ -221,6 +223,10 @@ int main(int argc, char **argv)
         else if (argv[i][0] == '-' && argv[i][1] == 'u')
         {
             collapse = true;
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'r')
+        {
+            show_xpram = true;
         }
         else if (argv[i][0] == '-' && argv[i][1] == 'c')
         {
@@ -419,6 +425,35 @@ int main(int argc, char **argv)
             printf(" %04X", m68k_vm_read16(dump[k] + b));
         }
         printf("\n");
+    }
+    if (show_xpram)
+    {
+        printf("VIA1 ifr=%02X ier=%02X acr=%02X pcr=%02X t1=%04X t2=%04X ora=%02X ddra=%02X orb=%02X ddrb=%02X\n",
+               mac.via1.ifr, mac.via1.ier, mac.via1.acr, mac.via1.pcr,
+               mac.via1.t1_counter, mac.via1.t2_counter, mac.via1.ora,
+               mac.via1.ddra, mac.via1.orb, mac.via1.ddrb);
+        printf("RBV latched=%d sier=%02X rier=%02X other:", mac.rbv.vblank_latched, mac.rbv.sier, mac.rbv.rier);
+        for (int i = 0; i < 0x20; i++)
+        {
+            printf(" %02X", mac.rbv.other[i]);
+        }
+        printf("\n");
+        printf("clock chip commands (first %u):", mac.clk_log_len);
+        for (uint32_t i = 0; i < mac.clk_log_len; i++)
+        {
+            printf(" %c%04X=%02X", (mac.clk_log[i] >> 31) ? 'R' : 'W',
+                   (mac.clk_log[i] >> 8) & 0xFFFF, mac.clk_log[i] & 0xFF);
+        }
+        printf("\n");
+        for (int row = 0; row < 16; row++)
+        {
+            printf("xpram %02X:", row * 16);
+            for (int col = 0; col < 16; col++)
+            {
+                printf(" %02X", mac.xpram[row * 16 + col]);
+            }
+            printf("\n");
+        }
     }
     if (flow)
     {

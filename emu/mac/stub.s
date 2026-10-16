@@ -10,16 +10,19 @@
 | emu/mac/mac.c intercepts to run native code (see emu/mac/mac.h).
 |
 | 0x000  install      called by the patched ROM instead of its code at 0x1166
+| 0x060  adbop        replaces the ADBOp trap ($A07C)
 | 0x100  .Disk driver header (a DRVR as the Device Manager expects it)
 | 0x1F0  name of the driver as a Pascal string
 |
     .text
+    .equ    ROM_INIT_DRIVERS_END, 0x40801182    | the RTS of InitDrivers
 
 | ---------------------------------------------------------------------------
 | install: add the .Disk driver to the unit table and open it.
 | Entered with JSR from ROM offset 0x1166, where the ROM was about to load the
-| serial drivers ("subq.w #4,sp; move.l #'SERD',-(sp)"); those two
-| instructions are executed here before returning.
+| serial drivers ("subq.w #4,sp; move.l #'SERD',-(sp)"). Their code drives the
+| SCC and waits for its interrupts, which this machine does not have, so it
+| is left out: install ends the routine with the ROM's own RTS at 0x1182.
 | ---------------------------------------------------------------------------
 install:
     movem.l %d0-%d7/%a0-%a6,-(%sp)
@@ -40,10 +43,33 @@ install:
     adda.w  #50,%sp
 install_done:
     movem.l (%sp)+,%d0-%d7/%a0-%a6
-    movea.l (%sp)+,%a0              | return address
-    subq.w  #4,%sp                  | the two displaced instructions
-    move.l  #0x53455244,-(%sp)      | 'SERD'
-    jmp     (%a0)
+    addq.l  #4,%sp                  | drop our return address and finish
+    jmp     ROM_INIT_DRIVERS_END    | InitDrivers like the ROM would, but
+                                    | without the serial drivers (no SCC)
+
+| ---------------------------------------------------------------------------
+| adbop: the ROM talks to keyboards and mice through the VIA and an interrupt
+| driven state machine. There is no ADB hardware, so every ADB command is
+| answered at once with "no data" (an empty block): ADBOp is called with
+| A0 -> { data pointer, completion routine, completion data }, D0 = command;
+| the completion routine gets A0 = the data block (first byte = length),
+| A1 = itself, A2 = the completion data, D0 = the command.
+| ---------------------------------------------------------------------------
+    .org    0x60
+adbop:
+    movem.l %d1-%d3/%a0-%a2,-(%sp)
+    movea.l 4(%a0),%a1              | completion routine
+    movea.l 8(%a0),%a2              | its data
+    move.l  %a1,%d3
+    beq.s   adbop_done
+    lea     adbop_empty(%pc),%a0
+    jsr     (%a1)
+adbop_done:
+    movem.l (%sp)+,%d1-%d3/%a0-%a2
+    moveq   #0,%d0
+    rts
+adbop_empty:
+    .word   0
 
 | ---------------------------------------------------------------------------
 | The .Disk driver (Inside Macintosh: Devices, "Device Manager", driver header)

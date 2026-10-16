@@ -24,27 +24,61 @@
  * "Built-in video".
  */
 
-#define RBV_REG_IFR 0x02
+/*
+ * Register use, from the ROM's video driver and slot interrupt code and the
+ * Linux m68k header mac_via.h (rSIFR = 0x02, rIFR = 0x03, rSIER = 0x12,
+ * rIER = 0x13):
+ *   0x02  slot interrupt flags, active low: bit 6 is the built-in video's
+ *         vertical blanking (the driver polls it: 1 -> 0 at the blanking)
+ *   0x03  interrupt flags, active high: bit 1 = a slot interrupt is pending,
+ *         bit 4 = sound chip; bit 7 = any enabled one
+ *   0x10  depth in bits 0-2, monitor sense in bits 3-5
+ *   0x12  slot interrupt enable (bit 7 set/clear, bit 6 = built-in video);
+ *         writing bit 6 again also re-arms the video interrupt
+ *   0x13  interrupt enable (bit 7 set/clear)
+ */
+#define RBV_REG_SIFR 0x02
+#define RBV_REG_IFR 0x03
 #define RBV_REG_VIDEO 0x10
-#define RBV_REG_IER 0x12
+#define RBV_REG_SIER 0x12
+#define RBV_REG_IER 0x13
 #define RBV_REG_MASK 0x1F
 
 #define RBV_DEPTH_MASK 0x07
 #define RBV_SENSE_SHIFT 3
-#define IER_SET 0x80
+#define SIFR_VIDEO 0x40
+#define IFR_SLOT 0x02
 #define IFR_ANY 0x80
-#define IFR_MASK 0x7F
+#define SET_BIT 0x80
+#define REG_MASK 0x7F
+
+
+/* Interrupt flags register: computed from the state of the sources. */
+static uint8_t rbv_ifr(const mac_rbv_t *rbv)
+{
+    uint8_t ifr = 0;
+
+    if (rbv->vblank_latched && (rbv->sier & SIFR_VIDEO))
+    {
+        ifr |= IFR_SLOT;
+    }
+    if (ifr & rbv->rier & REG_MASK)
+    {
+        ifr |= IFR_ANY;
+    }
+    return ifr;
+}
 
 
 bool mac_rbv_irq(const mac_rbv_t *rbv)
 {
-    return (rbv->ifr & rbv->ier & IFR_MASK) != 0;
+    return (rbv_ifr(rbv) & rbv->rier & REG_MASK) != 0;
 }
 
 
-void mac_rbv_set_flag(mac_rbv_t *rbv, uint8_t mask)
+void mac_rbv_vblank(mac_rbv_t *rbv)
 {
-    rbv->ifr |= mask;
+    rbv->vblank_latched = true;
 }
 
 
@@ -53,19 +87,27 @@ uint32_t mac_rbv_read(mac_rbv_t *rbv, uint32_t reg, bool vblank)
     reg &= RBV_REG_MASK;
     switch (reg)
     {
+    case RBV_REG_SIFR:
+        /* Active low: 0 while the frame is being blanked. */
+        return 0xBF | (vblank ? 0 : SIFR_VIDEO);
     case RBV_REG_IFR:
-        /* Bit 6 follows the video timing while the interrupt flag is
-         * separate; the driver polls this bit to wait for the blanking. */
-        return (rbv->ifr & ~RBV_INT_VBLANK) | (vblank ? RBV_INT_VBLANK : 0) |
-               (mac_rbv_irq(rbv) ? IFR_ANY : 0);
+        return rbv_ifr(rbv);
     case RBV_REG_VIDEO:
         return (RBV_SENSE_13_RGB << RBV_SENSE_SHIFT) |
                (rbv->depth & RBV_DEPTH_MASK);
+    case RBV_REG_SIER:
+        return rbv->sier | SET_BIT;
     case RBV_REG_IER:
-        return rbv->ier | IER_SET;
+        return rbv->rier | SET_BIT;
     default:
         return rbv->other[reg];
     }
+}
+
+
+static uint8_t enable_bits(uint8_t old, uint8_t v)
+{
+    return (v & SET_BIT) ? (old | (v & REG_MASK)) : (old & ~v);
 }
 
 
@@ -77,20 +119,19 @@ void mac_rbv_write(mac_rbv_t *rbv, uint32_t reg, uint32_t value)
     switch (reg)
     {
     case RBV_REG_IFR:
-        rbv->ifr &= ~(v & IFR_MASK);
-        break;
+        break;      /* flags follow their sources */
     case RBV_REG_VIDEO:
         rbv->depth = v & RBV_DEPTH_MASK;
         break;
+    case RBV_REG_SIER:
+        rbv->sier = enable_bits(rbv->sier, v);
+        if (v & SIFR_VIDEO)
+        {
+            rbv->vblank_latched = false;
+        }
+        break;
     case RBV_REG_IER:
-        if (v & IER_SET)
-        {
-            rbv->ier |= v & IFR_MASK;
-        }
-        else
-        {
-            rbv->ier &= ~v;
-        }
+        rbv->rier = enable_bits(rbv->rier, v);
         break;
     default:
         rbv->other[reg] = v;

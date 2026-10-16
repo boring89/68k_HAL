@@ -179,16 +179,26 @@ static void test_rbv_registers(void)
     mac_rbv_write(&rbv, 0x10, 3);
     TEST_ASSERT_EQ_INT((6 << 3) | 3, mac_rbv_read(&rbv, 0x10, false));
 
-    /* Bit 6 of register 2 follows the blanking input. */
-    TEST_ASSERT(!(mac_rbv_read(&rbv, 0x02, false) & 0x40));
-    TEST_ASSERT(mac_rbv_read(&rbv, 0x02, true) & 0x40);
+    /* Slot flags are active low: bit 6 is 1 at rest, 0 while blanked. */
+    TEST_ASSERT(mac_rbv_read(&rbv, 0x02, false) & 0x40);
+    TEST_ASSERT(!(mac_rbv_read(&rbv, 0x02, true) & 0x40));
 
-    /* The vertical blank interrupt needs the enable bit. */
-    mac_rbv_set_flag(&rbv, RBV_INT_VBLANK);
+    /* The video interrupt needs both enables; the ISR re-arms it. */
+    mac_rbv_vblank(&rbv);
     TEST_ASSERT(!mac_rbv_irq(&rbv));
+    mac_rbv_write(&rbv, 0x12, 0xC0);        /* slot enable: video */
+    mac_rbv_write(&rbv, 0x13, 0x82);        /* enable: slot interrupts */
     mac_rbv_write(&rbv, 0x12, 0xC0);
+    mac_rbv_vblank(&rbv);
     TEST_ASSERT(mac_rbv_irq(&rbv));
-    mac_rbv_write(&rbv, 0x02, 0x40);
+    TEST_ASSERT(mac_rbv_read(&rbv, 0x03, false) & 0x82);
+    mac_rbv_write(&rbv, 0x12, 0xC0);        /* what the ISR does */
+    TEST_ASSERT(!mac_rbv_irq(&rbv));
+
+    /* Clearing the enable bit stops it. */
+    mac_rbv_vblank(&rbv);
+    TEST_ASSERT(mac_rbv_irq(&rbv));
+    mac_rbv_write(&rbv, 0x12, 0x40);
     TEST_ASSERT(!mac_rbv_irq(&rbv));
 }
 

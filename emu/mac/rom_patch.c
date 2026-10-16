@@ -106,6 +106,11 @@
 #define ENTRY_HWCFG 16
 #define HWCFG_FPU_PRESENT 0x10000000u
 
+/* _ADBOp ($A07C): the routine for the trap starts at ROM offset 0xA3DC. It is
+ * replaced by a jump to the stub that answers every ADB command with "no
+ * device". */
+#define PATCH_ADBOP 0xA3DC
+
 
 static void put16(uint8_t *rom, uint32_t off, uint16_t v)
 {
@@ -163,6 +168,9 @@ int mac_rom_patch(uint8_t *rom, uint32_t size)
 
         put32(rom, at, flags & ~HWCFG_FPU_PRESENT);
     }
+
+    put16(rom, PATCH_ADBOP, OP_JMP_ABS_L);
+    put32(rom, PATCH_ADBOP + 2, MAC_STUB_BASE + MAC_STUB_ADBOP);
 
     put16(rom, PATCH_BOOT_GLOBS, MAC_EMUL_OP_PATCH_BOOT_GLOBS);
     put16(rom, PATCH_BOOT_GLOBS + 2, OP_NOP);
