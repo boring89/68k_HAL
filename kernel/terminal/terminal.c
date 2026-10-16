@@ -76,6 +76,67 @@ void terminal_tab(void)
     // }
 }
 
+void terminal_mirror_raw(char c)
+{
+    if (mirror != NULL)
+        mirror(c);
+}
+
+int terminal_width(void)
+{
+    return display != NULL ? display->width : 80;
+}
+
+int terminal_height(void)
+{
+    return display != NULL ? display->height : 25;
+}
+
+void terminal_get_cursor(int *x, int *y)
+{
+    *x = cursor_x;
+    *y = cursor_y;
+}
+
+void terminal_move_cursor(int x, int y)
+{
+    if (display == NULL)
+        return;
+
+    if (x < 0)
+        x = 0;
+
+    if (x >= display->width)
+        x = display->width - 1;
+
+    if (y < 0)
+        y = 0;
+
+    if (y >= display->height)
+        y = display->height - 1;
+
+    cursor_x = x;
+    cursor_y = y;
+
+    terminal_update_cursor();
+}
+
+void terminal_erase(int from_x, int from_y, int to_x, int to_y)
+{
+    if (display == NULL)
+        return;
+
+    /* Cells from (from_x, from_y) to (to_x, to_y), both included, in reading order. */
+    for (int y = from_y; y <= to_y; y++)
+    {
+        int first = y == from_y ? from_x : 0;
+        int last = y == to_y ? to_x : display->width - 1;
+
+        for (int x = first; x <= last; x++)
+            display->put_cell(x, y, ' ', terminal_fg, terminal_bg);
+    }
+}
+
 void terminal_clear(void)
 {
     terminal_fg = COLOR_LIGHT_GREY;

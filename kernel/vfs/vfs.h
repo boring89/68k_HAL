@@ -96,6 +96,8 @@ typedef struct
      * ready for reading and writing. May poll the hardware; must not block.
      */
     uint32_t (*poll)(vfs_file_t *file, uint32_t events);
+    /* ioctl(): request and arg as the program gave them (arg is usually a user address). Returns 0 or -errno; -ENOTTY without it. */
+    int32_t (*ioctl)(vfs_file_t *file, uint32_t request, uint32_t arg);
     void (*close)(vfs_file_t *file);
 } vfs_file_ops_t;
 
@@ -170,6 +172,9 @@ int32_t vfs_fstat(vfs_file_t *file, vfs_stat_t *stat);
 int32_t vfs_readdir(vfs_file_t *file, vfs_dirent_t *entry);
 
 int32_t vfs_ftruncate(vfs_file_t *file, uint64_t size);
+
+/* ioctl(): 0 or -errno (-ENOTTY for files that have none). */
+int32_t vfs_ioctl(vfs_file_t *file, uint32_t request, uint32_t arg);
 
 /* The events (VFS_POLL*) of events that are ready now. */
 uint32_t vfs_poll(vfs_file_t *file, uint32_t events);

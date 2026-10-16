@@ -33,8 +33,19 @@ def keys_for(text):
         yield "ctrl-d"
         return
 
+    # "{up}" is a key by its QEMU name (sendkey): {up}, {f1}, {ctrl-c}, {delete}...
+    pending = None
+
     for ch in text:
-        if ch in KEYS:
+        if pending is not None:
+            if ch == "}":
+                yield pending
+                pending = None
+            else:
+                pending += ch
+        elif ch == "{":
+            pending = ""
+        elif ch in KEYS:
             yield KEYS[ch]
         elif ch.isupper():
             yield "shift-" + ch.lower()

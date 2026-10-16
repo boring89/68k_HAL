@@ -444,8 +444,11 @@ int32_t user_run(const char *path, const char *const *argv, const char *const *e
         return status;
     }
 
+    user_console_reset();
+
     int exit_status = hal_user_run(image.entry, sp);
 
+    user_console_reset();
     cleanup();
 
     return exit_status & 0xFF;

@@ -20,7 +20,9 @@
 #include "kernel/m68k/guest.h"
 #include "kernel/net/net.h"
 #include "kernel/printf/printf.h"
+#include "kernel/display/text_display.h"
 #include "kernel/sound/sound.h"
+#include "kernel/terminal/terminal.h"
 #include "kernel/usb/usb.h"
 #include "kernel/user/console.h"
 #include "kernel/user/process.h"
@@ -554,6 +556,7 @@ static const struct
     {"hfs", 0, NULL, NULL},
     {"lua", 0, "/data/test.lua", NULL}, /* the Lua interpreter, a ported program */
     {"sqlite3", 0, "/tmp/test.db", ".read /data/test.sql"}, /* a database engine */
+    {"termios", 0, NULL, NULL},         /* raw mode, VMIN / VTIME */
     {"protect", 139, NULL, NULL},       /* read-only and unreachable pages; ends by writing a constant */
     {"crash", 139, NULL, NULL},         /* 128 + SIGSEGV */
 };
@@ -614,6 +617,105 @@ static void test_user_programs(void)
         SELFTEST_ASSERT(status == user_tests[i].status);
         SELFTEST_ASSERT(k_strcmp(output, expected) == 0);
     }
+}
+
+/* A recording 80x25 text display for test_user_ansi. */
+#define FAKE_WIDTH 80
+#define FAKE_HEIGHT 25
+
+static struct
+{
+    char c;
+    color_t fg;
+    color_t bg;
+} fake_cells[FAKE_HEIGHT][FAKE_WIDTH];
+
+static void fake_put_cell(int x, int y, char c, color_t fg, color_t bg)
+{
+    fake_cells[y][x].c = c;
+    fake_cells[y][x].fg = fg;
+    fake_cells[y][x].bg = bg;
+}
+
+static void fake_copy_cell(int src_x, int src_y, int dst_x, int dst_y)
+{
+    fake_cells[dst_y][dst_x] = fake_cells[src_y][src_x];
+}
+
+static void fake_set_cursor(int x, int y)
+{
+    (void)x;
+    (void)y;
+}
+
+static void fake_clear(void)
+{
+    for (int y = 0; y < FAKE_HEIGHT; y++)
+    {
+        for (int x = 0; x < FAKE_WIDTH; x++)
+            fake_put_cell(x, y, ' ', COLOR_LIGHT_GREY, COLOR_BLACK);
+    }
+}
+
+static const text_display_t fake_display = {
+    FAKE_WIDTH, FAKE_HEIGHT, fake_put_cell, fake_copy_cell, fake_set_cursor, fake_clear};
+
+/*
+ * A program writes escape sequences to the console: swap the screen for a
+ * recording one and check the letters, their places and colours.
+ */
+static void test_user_ansi(void)
+{
+    vfs_stat_t stat;
+
+    if (vfs_stat("/bin/ansi", &stat) != 0)
+        return;
+
+    const text_display_t *real = text_display_get();
+    static char output[512];
+    static char expected[512];
+    static const char *const environment[] = {"PATH=/bin", NULL};
+    const char *args[] = {"/bin/ansi", NULL};
+
+    text_display_reset();
+    SELFTEST_ASSERT(text_display_register(&fake_display) == 0);
+    terminal_init();
+
+    user_console_capture_start(output, sizeof(output));
+
+    int32_t status = user_run("/bin/ansi", args, environment);
+
+    user_console_capture_stop();
+
+    text_display_reset();
+
+    if (real != NULL)
+        text_display_register(real);
+
+    terminal_init();
+
+    SELFTEST_ASSERT(status == 0);
+
+    vfs_file_t *file;
+    int32_t length = 0;
+
+    if (vfs_open("/expected/ansi.txt", VFS_O_RDONLY, 0, &file) == 0)
+    {
+        length = vfs_read(file, expected, sizeof(expected) - 1);
+        vfs_file_close(file);
+    }
+
+    expected[length > 0 ? length : 0] = '\0';
+
+    SELFTEST_ASSERT(k_strcmp(output, expected) == 0);
+
+    SELFTEST_ASSERT(fake_cells[0][0].c == 'A' && fake_cells[0][0].fg == COLOR_LIGHT_GREY);
+    SELFTEST_ASSERT(fake_cells[0][1].c == 'B');
+    SELFTEST_ASSERT(fake_cells[0][2].c == 'G' && fake_cells[0][2].fg == COLOR_LIGHT_GREEN);
+    SELFTEST_ASSERT(fake_cells[2][4].c == 'X' && fake_cells[2][4].fg == COLOR_RED);
+    SELFTEST_ASSERT(fake_cells[2][5].c == ' ');
+    /* "size 25x80" after the line break, in the default colours */
+    SELFTEST_ASSERT(fake_cells[1][0].c == 's' && fake_cells[1][0].fg == COLOR_LIGHT_GREY);
 }
 
 /*
@@ -750,6 +852,7 @@ void selftest_run(void)
     SELFTEST_RUN(test_net);
     SELFTEST_RUN(test_sound);
     SELFTEST_RUN(test_user_programs);
+    SELFTEST_RUN(test_user_ansi);
     SELFTEST_RUN(test_user_compiler);
 
     selftest_arch_run();

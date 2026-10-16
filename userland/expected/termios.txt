@@ -1,0 +1,5 @@
+canonical 1 echo 1 signals 1
+raw: canonical 0 echo 0 vmin 0
+poll read: 0, quick 1
+timed read: 0, waited about 300 ms 1
+restored: canonical 1 echo 1

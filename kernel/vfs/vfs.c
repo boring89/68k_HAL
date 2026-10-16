@@ -399,6 +399,14 @@ int32_t vfs_ftruncate(vfs_file_t *file, uint64_t size)
     return file->ops->truncate != NULL ? file->ops->truncate(file, size) : -K_EINVAL;
 }
 
+int32_t vfs_ioctl(vfs_file_t *file, uint32_t request, uint32_t arg)
+{
+    if (file->ops->ioctl == NULL)
+        return -K_ENOTTY;
+
+    return file->ops->ioctl(file, request, arg);
+}
+
 uint32_t vfs_poll(vfs_file_t *file, uint32_t events)
 {
     if (file->ops->poll != NULL)

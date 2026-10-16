@@ -140,6 +140,7 @@ HOST_LIB_SOURCES := \
 	drivers/ps2_mouse/mouse_packet.c \
 	kernel/input/event.c \
 	kernel/keyboard/keychar.c \
+	kernel/keyboard/keyseq.c \
 	kernel/mac/adbkeys.c \
 	kernel/block/block.c \
 	kernel/block/ramdisk.c \
@@ -169,6 +170,7 @@ HOST_LIB_SOURCES := \
 	kernel/vfs/tarfs.c \
 	kernel/vfs/vfs.c \
 	kernel/user/stack.c \
+	kernel/terminal/ansi.c \
 	kernel/terminal/terminal.c \
 	platform/pc/boot/hal_boot.c \
 	platform/pc/boot/multiboot.c \
@@ -543,7 +545,14 @@ test-shell: iso
 		"run /bin/readline=Type something" \
 		"hello world=you typed: hello world (11 characters)" \
 		"run /bin/readline=Type something" \
-		"^D=end of input"
+		"^D=end of input" \
+		"run /bin/rawkeys=raw mode" \
+		"a{up}{f1}{delete}q=97 27 91 65 27 79 80 27 91 51 126 113" \
+		"run /bin/readline=Type something" \
+		"ab{up}c=you typed: abc (3 characters)" \
+		"run /bin/readline=Type something" \
+		"{ctrl-c}=^C" \
+		"run /bin/hello=Hello from user mode!"
 
 # GRUB's graphics mode (640x480) must still show the test pattern: nothing the
 # drivers do at start-up may switch the screen off (tools/fb_check.py).

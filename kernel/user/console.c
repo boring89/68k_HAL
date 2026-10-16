@@ -7,21 +7,36 @@
 
 #include "kernel/console/console.h"
 #include "kernel/input/event_buffer.h"
-#include "kernel/keyboard/keychar.h"
+#include "kernel/keyboard/keyseq.h"
 #include "kernel/keyboard/state.h"
 #include "kernel/lib/k_errno.h"
 #include "kernel/lib/k_memory.h"
 #include "kernel/lib/k_string.h"
 #include "kernel/memory/heap.h"
+#include "kernel/terminal/ansi.h"
+#include "kernel/terminal/terminal.h"
+#include "process.h"
 
 #include "hal/cpu.h"
+#include "hal/timer.h"
+#include "hal/usermode.h"
+
+#include <stdbool.h>
 
 /*
- * Line discipline of the console: characters typed are echoed and
- * collected until Enter, then handed to read() in order. Backspace
- * edits the line that is being typed.
+ * Line discipline of the console, configured like a Linux terminal
+ * (struct termios, set with the TCGETS/TCSETS ioctls).
+ *
+ * Canonical mode (ICANON, the default): characters typed are echoed and
+ * collected until Enter, then handed to read() in order. Backspace edits the
+ * line that is being typed.
+ *
+ * Non-canonical ("raw") mode: every key is available to read() at once, as
+ * the bytes of keyboard_key_sequence (arrows are escape sequences); VMIN and
+ * VTIME say how long read() waits.
  */
 #define LINE_MAX 256
+#define RAW_QUEUE_SIZE 128
 
 static char line[LINE_MAX];
 static uint32_t line_length;   /* characters typed so far */
@@ -29,17 +44,124 @@ static uint32_t line_ready;    /* the line is complete: read() may take it */
 static uint32_t line_consumed; /* how much of a complete line read() has taken */
 static uint32_t line_eof;      /* Ctrl-D on an empty line: the next read() returns 0 (end of file) */
 
-static void feed_key(char c)
+static uint8_t raw_queue[RAW_QUEUE_SIZE];
+static uint32_t raw_head;
+static uint32_t raw_count;
+
+/* Linux asm-generic/termbits.h */
+#define IGNCR 0x80u
+#define INLCR 0x40u
+#define ICRNL 0x100u
+#define IXON 0x400u
+#define OPOST 0x1u
+#define ONLCR 0x4u
+#define CS8 0x30u
+#define CREAD 0x80u
+#define HUPCL 0x400u
+#define B38400 0xFu
+#define ISIG 0x1u
+#define ICANON 0x2u
+#define ECHO 0x8u
+#define ECHOE 0x10u
+#define ECHOK 0x20u
+#define ECHONL 0x40u
+#define IEXTEN 0x8000u
+
+#define VINTR 0
+#define VQUIT 1
+#define VERASE 2
+#define VKILL 3
+#define VEOF 4
+#define VTIME 5
+#define VMIN 6
+#define VSUSP 10
+#define NCCS 19
+
+#define TCGETS 0x5401u
+#define TCSETS 0x5402u
+#define TCSETSW 0x5403u
+#define TCSETSF 0x5404u
+#define TIOCGPGRP 0x540Fu
+#define TIOCSPGRP 0x5410u
+#define TIOCGWINSZ 0x5413u
+#define TIOCSWINSZ 0x5414u
+#define FIONREAD 0x541Bu
+
+/* The kernel's struct termios on i386: 36 bytes. */
+typedef struct
+{
+    uint32_t c_iflag;
+    uint32_t c_oflag;
+    uint32_t c_cflag;
+    uint32_t c_lflag;
+    uint8_t c_line;
+    uint8_t c_cc[NCCS];
+} termios_t;
+
+typedef struct
+{
+    uint16_t rows;
+    uint16_t columns;
+    uint16_t x_pixels;
+    uint16_t y_pixels;
+} winsize_t;
+
+static termios_t termios;
+
+static void termios_defaults(void)
+{
+    k_memset(&termios, 0, sizeof(termios));
+    termios.c_iflag = ICRNL | IXON;
+    termios.c_oflag = OPOST | ONLCR;
+    termios.c_cflag = B38400 | CS8 | CREAD | HUPCL;
+    termios.c_lflag = ISIG | ICANON | ECHO | ECHOE | ECHOK | IEXTEN;
+    termios.c_cc[VINTR] = 3;   /* Ctrl-C */
+    termios.c_cc[VQUIT] = 28;  /* Ctrl-\ */
+    termios.c_cc[VERASE] = 127;
+    termios.c_cc[VKILL] = 21;  /* Ctrl-U */
+    termios.c_cc[VEOF] = 4;    /* Ctrl-D */
+    termios.c_cc[VTIME] = 0;
+    termios.c_cc[VMIN] = 1;
+    termios.c_cc[VSUSP] = 26;
+}
+
+static void drop_input(void)
+{
+    line_length = 0;
+    line_ready = 0;
+    line_consumed = 0;
+    line_eof = 0;
+    raw_head = 0;
+    raw_count = 0;
+}
+
+void user_console_reset(void)
+{
+    termios_defaults();
+    drop_input();
+    ansi_reset();
+}
+
+/* Echo a byte typed, if the terminal is set to. */
+static void echo_byte(uint8_t c)
+{
+    if (termios.c_lflag & ECHO)
+        console_write_char((char)c);
+    else if (c == '\n' && (termios.c_lflag & ECHONL))
+        console_write_char('\n');
+}
+
+static void canonical_byte(uint8_t c)
 {
     /* A complete line waits for read(): typing more would edit text already handed out. */
     if (line_ready)
         return;
 
     /*
-     * Ctrl-D (4): at the start of a line it is the end of the input; in the middle
+     * End of file (Ctrl-D): at the start of a line it is the end of the input; in the middle
      * it hands over what has been typed, without a newline (as on Unix terminals).
      */
-    if (c == 4)
+    if (c == termios.c_cc[VEOF])
     {
         line_eof = line_length == 0;
         line_ready = 1;
@@ -47,40 +169,102 @@ static void feed_key(char c)
         return;
     }
 
-    /* Other control characters do nothing here. */
-    if (c < 0x20 && c != '\n' && c != '\r' && c != '\t' && c != '\b')
-        return;
-
-    if (c == '\b' || c == 0x7F)
+    if (c == termios.c_cc[VERASE] || c == '\b')
     {
         if (line_length > 0)
         {
             line_length--;
-            console_write_char('\b');
+
+            if (termios.c_lflag & ECHOE)
+                console_write_char('\b');
         }
 
         return;
     }
 
-    if (c == '\r')
-        c = '\n';
+    if (c == termios.c_cc[VKILL])
+    {
+        while (line_length > 0)
+        {
+            line_length--;
+
+            if (termios.c_lflag & ECHOE)
+                console_write_char('\b');
+        }
+
+        return;
+    }
+
+    /* Other control characters do nothing here. */
+    if (c < 0x20 && c != '\n' && c != '\t')
+        return;
 
     if (line_length >= LINE_MAX - 1 && c != '\n')
         return;
 
-    console_write_char(c);
-    line[line_length++] = c;
+    echo_byte(c);
+    line[line_length++] = (char)c;
 
     if (c == '\n')
         line_ready = 1;
 }
 
-/* Feed the keyboard events that have arrived to the line editor, until a line is complete. */
+static void raw_byte(uint8_t c)
+{
+    if (raw_count == RAW_QUEUE_SIZE)
+        return;
+
+    raw_queue[(raw_head + raw_count++) % RAW_QUEUE_SIZE] = c;
+
+    if (c >= 0x20 || c == '\n' || c == '\t')
+        echo_byte(c);
+}
+
+/* One byte typed, after the signal and CR/NL translation of the input flags. */
+static void feed_byte(uint8_t c)
+{
+    if (termios.c_lflag & ISIG)
+    {
+        if (c == termios.c_cc[VINTR] || c == termios.c_cc[VQUIT])
+        {
+            /* The program ends as if by SIGINT / SIGQUIT (there are no signal handlers for this). */
+            if (termios.c_lflag & ECHO)
+                console_write_line(c == termios.c_cc[VINTR] ? "^C" : "^\\");
+
+            hal_user_exit(c == termios.c_cc[VINTR] ? 130 : 131);
+        }
+    }
+
+    if (c == '\r')
+    {
+        if (termios.c_iflag & IGNCR)
+            return;
+
+        if (termios.c_iflag & ICRNL)
+            c = '\n';
+    }
+    else if (c == '\n' && (termios.c_iflag & INLCR))
+    {
+        c = '\r';
+    }
+
+    if (termios.c_lflag & ICANON)
+        canonical_byte(c);
+    else
+        raw_byte(c);
+}
+
+static bool input_full(void)
+{
+    return (termios.c_lflag & ICANON) ? line_ready != 0 : raw_count == RAW_QUEUE_SIZE;
+}
+
+/* Feed the keyboard events that have arrived to the line discipline, until it cannot take more. */
 static void process_keys(void)
 {
     input_event_t event;
 
-    while (!line_ready && input_event_pop(&event) == 0)
+    while (!input_full() && input_event_pop(&event) == 0)
     {
         if (event.type != INPUT_EVENT_KEYBOARD)
             continue;
@@ -90,10 +274,15 @@ static void process_keys(void)
         if (!event.data.keyboard.pressed)
             continue;
 
-        char c = keyboard_keycode_to_ascii(event.data.keyboard.key, keyboard_state_get());
+        char bytes[KEYBOARD_SEQUENCE_MAX];
+        int count = keyboard_key_sequence(event.data.keyboard.key, keyboard_state_get(), bytes);
 
-        if (c)
-            feed_key(c);
+        /* Arrows, function keys and the like have no meaning when editing a line. */
+        if ((termios.c_lflag & ICANON) && count > 1 && bytes[0] == 0x1B)
+            continue;
+
+        for (int i = 0; i < count; i++)
+            feed_byte((uint8_t)bytes[i]);
     }
 }
 
@@ -111,13 +300,72 @@ static void wait_for_line(void)
     }
 }
 
-/* poll(): the console can always be written; it can be read once a line is complete. */
+static uint64_t now_ms(void)
+{
+    return hal_timer_ns() / 1000000u;
+}
+
+/*
+ * Non-canonical read: wait as VMIN / VTIME say (termios(3)): VMIN bytes, or if VMIN is 0
+ * the first byte, each limited by the VTIME tenths of a second when that is not 0.
+ */
+static void wait_for_raw(uint32_t count)
+{
+    uint32_t want = termios.c_cc[VMIN];
+    uint64_t timeout_ms = (uint64_t)termios.c_cc[VTIME] * 100u;
+
+    if (want > count)
+        want = count;
+
+    uint64_t last_change = now_ms();
+    uint32_t last_count = raw_count;
+
+    for (;;)
+    {
+        process_keys();
+
+        if (raw_count != last_count)
+        {
+            last_count = raw_count;
+            last_change = now_ms();
+        }
+
+        if (want == 0)
+        {
+            /* VMIN = 0: return what is there; with VTIME wait that long for the first byte. */
+            if (raw_count > 0 || timeout_ms == 0 || now_ms() - last_change >= timeout_ms)
+                return;
+        }
+        else if (raw_count >= want)
+        {
+            return;
+        }
+        else if (raw_count > 0 && timeout_ms != 0 && now_ms() - last_change >= timeout_ms)
+        {
+            /* VMIN > 0 with VTIME: the time between bytes. */
+            return;
+        }
+
+        hal_cpu_enable_interrupts();
+        hal_cpu_idle();
+    }
+}
+
+static bool input_ready(void)
+{
+    if (termios.c_lflag & ICANON)
+        return line_ready != 0;
+
+    return raw_count >= (termios.c_cc[VMIN] > 0 ? termios.c_cc[VMIN] : 1);
+}
+
+/* poll(): the console can always be written; it can be read once a line (or, in raw mode, enough bytes) is there. */
 static uint32_t console_poll(vfs_file_t *file, uint32_t events)
 {
     (void)file;
     process_keys();
 
-    return (events & VFS_POLLOUT) | ((events & VFS_POLLIN) && line_ready ? VFS_POLLIN : 0);
+    return (events & VFS_POLLOUT) | ((events & VFS_POLLIN) && input_ready() ? VFS_POLLIN : 0);
 }
 
 static int32_t console_read(vfs_file_t *file, uint64_t pos, void *buffer, uint32_t count)
@@ -127,6 +375,24 @@ static int32_t console_read(vfs_file_t *file, uint64_t pos, void *buffer, uint32
 
     if (count == 0)
         return 0;
+
+    if (!(termios.c_lflag & ICANON))
+    {
+        wait_for_raw(count);
+
+        uint32_t n = raw_count < count ? raw_count : count;
+        uint8_t *out = buffer;
+
+        for (uint32_t i = 0; i < n; i++)
+        {
+            out[i] = raw_queue[raw_head];
+            raw_head = (raw_head + 1) % RAW_QUEUE_SIZE;
+        }
+
+        raw_count -= n;
+
+        return (int32_t)n;
+    }
 
     wait_for_line();
 
@@ -156,6 +422,92 @@ static int32_t console_read(vfs_file_t *file, uint64_t pos, void *buffer, uint32
     }
 
     return (int32_t)count;
+}
+
+static int32_t console_ioctl(vfs_file_t *file, uint32_t request, uint32_t arg)
+{
+    (void)file;
+
+    switch (request)
+    {
+    case TCGETS:
+        if (!user_range_writable(arg, sizeof(termios)))
+            return -K_EFAULT;
+
+        k_memcpy((void *)(uintptr_t)arg, &termios, sizeof(termios));
+
+        return 0;
+
+    case TCSETS:
+    case TCSETSW:
+    case TCSETSF:
+    {
+        if (!user_range_ok(arg, sizeof(termios)))
+            return -K_EFAULT;
+
+        uint32_t old_lflag = termios.c_lflag;
+
+        k_memcpy(&termios, (const void *)(uintptr_t)arg, sizeof(termios));
+
+        /* TCSETSF throws away what was typed but not read. */
+        if (request == TCSETSF)
+            drop_input();
+        else if ((old_lflag ^ termios.c_lflag) & ICANON)
+            drop_input(); /* The text typed so far belongs to the other mode. */
+
+        return 0;
+    }
+
+    case TIOCGWINSZ:
+    {
+        winsize_t size = {
+            .rows = (uint16_t)terminal_height(),
+            .columns = (uint16_t)terminal_width(),
+        };
+
+        if (!user_range_writable(arg, sizeof(size)))
+            return -K_EFAULT;
+
+        k_memcpy((void *)(uintptr_t)arg, &size, sizeof(size));
+
+        return 0;
+    }
+
+    case TIOCSWINSZ:
+        return 0;
+
+    case TIOCGPGRP:
+    {
+        uint32_t group = 1;
+
+        if (!user_range_writable(arg, sizeof(group)))
+            return -K_EFAULT;
+
+        k_memcpy((void *)(uintptr_t)arg, &group, sizeof(group));
+
+        return 0;
+    }
+
+    case TIOCSPGRP:
+        return 0;
+
+    case FIONREAD:
+    {
+        process_keys();
+
+        uint32_t bytes = (termios.c_lflag & ICANON) ? (line_ready ? line_length - line_consumed : 0) : raw_count;
+
+        if (!user_range_writable(arg, sizeof(bytes)))
+            return -K_EFAULT;
+
+        k_memcpy((void *)(uintptr_t)arg, &bytes, sizeof(bytes));
+
+        return 0;
+    }
+
+    default:
+        return -K_ENOTTY;
+    }
 }
 
 static char *capture_buffer;
@@ -188,7 +540,7 @@ static int32_t console_write_bytes(vfs_file_t *file, uint64_t pos, const void *b
 
     for (uint32_t i = 0; i < count; i++)
     {
-        console_write_char(text[i]);
+        ansi_put_char(text[i]);
 
         if (capture_buffer != NULL && capture_length + 1 < capture_size)
         {
@@ -216,6 +568,7 @@ static const vfs_file_ops_t console_ops = {
     .write = console_write_bytes,
     .stat = char_device_stat,
     .poll = console_poll,
+    .ioctl = console_ioctl,
 };
 
 static int32_t null_read(vfs_file_t *file, uint64_t pos, void *buffer, uint32_t count)

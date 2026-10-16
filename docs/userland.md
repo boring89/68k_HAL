@@ -126,13 +126,31 @@ compiled by tcc: fib(20)=6765 1099511627 ok 6.28
 | 訊號 | `rt_sigaction`、`rt_sigprocmask`（接受並忽略）；`kill`/`tgkill` 對自己 = 結束程式 |
 | 網路 | `socketcall`（`socket`、`bind`、`connect`、`listen`、`accept`、`send`/`recv`/`sendto`/`recvfrom`/`sendmsg`/`recvmsg`、`shutdown`、`getsockname`/`getpeername`、`setsockopt`/`getsockopt`，見 `docs/net.md` 3.5） |
 | 等待 | `poll`、`ppoll`、`_newselect`、`pselect6`（檔案、console 與 socket） |
-| 其他 | `ioctl`（一律 `ENOTTY`）、`getrandom` |
+| 其他 | `ioctl`（console：termios、視窗大小、`FIONREAD`；其他檔案 `ENOTTY`，見 5.5）、`getrandom` |
 
 沒實作的呼叫回傳 `-ENOSYS`，並在 console 印一次：
 
 ```
 /bin/foo: unimplemented system call 119
 ```
+
+### 5.5 終端機：ANSI 輸出與 termios 輸入
+
+比喻：console 以前像一台只能印字的電報機；現在是真正的終端機：程式可以叫它「移到第 3 列第 5 欄」「用紅色印」，也可以叫鍵盤「不要等 Enter，按一下就給我」。
+
+**輸出（`kernel/terminal/ansi.c`）**：程式寫到 console 的位元組先經過 ANSI 解析器（ECMA-48 的 CSI 子集）：游標移動（`A B C D E F G H f d`、`s u` 存取）、清除（`J K`）、顏色（`m`：0、1、7、22、27、30–37、40–47、90–97、100–107、39、49；ANSI 的顏色順序轉成 VGA 的順序，粗體 = 亮色）。`\r` 回到行首、`\t` 到下一個 8 的倍數。不認得的序列讀完後忽略。原始位元組**照樣**送到序列埠，所以接在序列埠另一頭的終端機程式看到一樣的畫面。`isatty(1)` 現在是真的，所以 stdout 變成行緩衝。
+
+**輸入（`kernel/user/console.c`、`kernel/keyboard/keyseq.c`）**：console 有 Linux 風格的 `struct termios`（`TCGETS/TCSETS/TCSETSW/TCSETSF`，36 位元組的核心格式）：
+
+| 設定 | 效果 |
+|---|---|
+| `ICANON`（預設開） | 一次一行，行編輯（Backspace、Ctrl-U、Ctrl-D）；方向鍵與功能鍵在行編輯時忽略 |
+| 關掉 `ICANON`（raw） | 每個按鍵立刻可讀；`VMIN`／`VTIME` 決定 `read` 等多久（`termios(3)` 的四種組合） |
+| `ECHO` | 打的字顯示在螢幕上 |
+| `ISIG` | Ctrl-C（`VINTR`）結束程式（狀態 130），Ctrl-\（`VQUIT`）= 131；只在程式讀鍵盤時（`read`/`poll`）才會處理，空轉的迴圈停不下來 |
+| `ICRNL` | Enter 的 `\r` 轉成 `\n` |
+
+按鍵變成的位元組（xterm／Linux console）：方向鍵 `ESC [ A/B/C/D`、Home／End `ESC [ H`／`ESC [ F`、Delete `ESC [ 3 ~`、F1–F4 `ESC O P…S`、F5–F12 `ESC [ 15~…24~`、Alt+鍵 = ESC 加上該鍵、Backspace = 0x7F、Enter = `\r`。程式結束（或被 Ctrl-C 終止）時 termios 與顏色回到預設，所以 shell 不會被留在 raw 模式。`ioctl(TIOCGWINSZ)` 回傳螢幕的列數與欄數（文字模式 25×80）。
 
 ### 遇到 ENOSYS 時怎麼補
 
@@ -159,7 +177,8 @@ compiled by tcc: fib(20)=6765 1099511627 ok 6.28
 
 ## 7. 限制（已知）
 
-- 一次一個程式；沒有 `fork`/`execve`/`pipe`/`socket`/`poll`、執行緒、訊號。
+- 一次一個程式；沒有 `fork`/`execve`/`pipe`、執行緒、訊號處理常式（Ctrl-C 直接結束程式）。
+- 終端機：沒有 UTF-8（VGA 文字模式只有 CP437）、不是所有 CSI 都支援（沒有捲動區域、替代螢幕、滑鼠）、圖形模式下沒有畫面（只有序列埠）；termios 沒有 `IXON`/`OPOST` 的實際作用、鮑率設定被忽略。
 - 沒有 NX（需要 PAE）：可讀的頁面都能執行；`PROT_EXEC` 被忽略。
 - 堆疊固定 2 MiB，不會自動成長。
 - `mmap` 的位址只增不減（`munmap` 釋放頁面，但位址不重用）；不支援 `MAP_FIXED`。
@@ -171,4 +190,5 @@ compiled by tcc: fib(20)=6765 1099511627 ok 6.28
 - `tests/host/test_elf.c`、`test_user_stack.c`、`test_region.c`、`test_vfs.c`：不需硬體的部分。
 - `kernel/test/selftest.c` 的 `test_user_programs`：在 QEMU 中執行 `userland/` 的範例程式，比對輸出與 `userland/expected/*.txt`（同一份輸出在 host 上用 `unshare -Ur chroot` 跑也相同，這就是預期檔的來源）。
 - `arch/x86/test/selftest_x86.c`：手寫機器碼測試 ring 3 切換、系統呼叫、page fault、特權指令。
-- `make test-shell`：開機 ISO，用 QEMU monitor 打字執行 `run …`，檢查序列埠輸出（`tools/shell_test.py`）。
+- `make test-shell`：開機 ISO，用 QEMU monitor 打字執行 `run …`，檢查序列埠輸出（`tools/shell_test.py`；`{up}`、`{f1}`、`{ctrl-c}` 這種寫法是按那個鍵）。raw 模式的 `rawkeys` 驗證按鍵序列，Ctrl-C 結束 `readline`。
+- `tests/host/test_ansi.c`（解析器）、`test_keyseq.c`（按鍵序列）；`selftest` 的 `test_user_ansi` 把螢幕換成記錄用的假螢幕，執行 `userland/ansi.c`，檢查字元、位置與顏色；`userland/termios.c`（raw、VMIN/VTIME、還原）在 `user_tests` 表。

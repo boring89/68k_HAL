@@ -465,15 +465,14 @@ static int32_t sys_dup2(int old_fd, int new_fd)
     return new_fd;
 }
 
-static int32_t sys_ioctl(int fd, uint32_t request)
+static int32_t sys_ioctl(int fd, uint32_t request, uint32_t arg)
 {
-    if (user_fd_get(fd) == NULL)
+    vfs_file_t *file = user_fd_get(fd);
+
+    if (file == NULL)
         return -K_EBADF;
 
-    (void)request;
-
-    /* TIOCGWINSZ and friends: musl asks whether stdout is a terminal. The console says no. */
-    return -K_ENOTTY;
+    return vfs_ioctl(file, request, arg);
 }
 
 static int32_t sys_mkdir(uint32_t path_address, uint32_t mode)
@@ -1250,7 +1249,7 @@ int32_t user_syscall(const hal_user_syscall_t *call)
         return sys_dup2((int)a[0], (int)a[1]);
 
     case SYS_ioctl:
-        return sys_ioctl((int)a[0], a[1]);
+        return sys_ioctl((int)a[0], a[1], a[2]);
 
     case SYS_mkdir:
         return sys_mkdir(a[0], a[1]);

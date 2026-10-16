@@ -56,4 +56,24 @@ void terminal_write_color_line(
 
 void terminal_clear(void);
 
+/*
+ * Cursor and screen primitives for the escape-sequence parser (ansi.h).
+ * Without a display they do nothing (the size is then 80x25 and the
+ * cursor is 0, 0).
+ */
+
+/* Send c to the mirror only, without showing it. */
+void terminal_mirror_raw(char c);
+
+int terminal_width(void);
+int terminal_height(void);
+
+void terminal_get_cursor(int *x, int *y);
+
+/* Move the cursor, limited to the screen. */
+void terminal_move_cursor(int x, int y);
+
+/* Fill the cells from (from_x, from_y) to (to_x, to_y), both included, with blanks in the current colours. */
+void terminal_erase(int from_x, int from_y, int to_x, int to_y);
+
 #endif

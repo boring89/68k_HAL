@@ -10,9 +10,15 @@
 
 /*
  * The device directory /dev: console (and tty, the same), null, zero,
- * urandom. The console writes to the screen and the serial port; reads
- * come from the keyboard, one line at a time with echo and backspace.
+ * urandom. The console writes to the screen and the serial port
+ * (ANSI escape sequences are understood, see kernel/terminal/ansi.h);
+ * reads come from the keyboard, by default one line at a time with echo
+ * and backspace. The ioctls TCGETS/TCSETS (termios: raw mode, no echo,
+ * VMIN/VTIME, Ctrl-C), TIOCGWINSZ and FIONREAD are supported.
  */
+
+/* Default termios, no pending input, default colours. Called before and after each program. */
+void user_console_reset(void);
 
 /* A file system with the devices, for mounting at /dev. NULL if out of memory. */
 vfs_fs_t *devfs_create(void);
