@@ -144,6 +144,7 @@ HOST_LIB_SOURCES := \
 	kernel/display/text_display.c \
 	kernel/display/fb_pattern.c \
 	kernel/fs/apm.c \
+	kernel/fs/hfs/hfs.c \
 	kernel/lib/k_string.c \
 	kernel/lib/k_number.c \
 	kernel/lib/k_memory.c \
@@ -193,7 +194,12 @@ $(BUILD)/images/apm.img: tools/make_apm_image.py
 	mkdir -p $(dir $@)
 	python3 -I $< $@
 
-test-host: $(HOST_TESTS) $(M68K_TEST_BINS) $(BUILD)/images/apm.img
+# Needs hfsutils; the script gives it a temporary HOME (see the script).
+$(BUILD)/images/hfs.img: tools/make_hfs_image.sh
+	mkdir -p $(dir $@)
+	tools/make_hfs_image.sh $@
+
+test-host: $(HOST_TESTS) $(M68K_TEST_BINS) $(BUILD)/images/apm.img $(BUILD)/images/hfs.img
 	@for t in $(HOST_TESTS); do ./$$t || exit 1; done
 
 # SingleStepTests 68000 data (https://github.com/SingleStepTests/680x0, put
