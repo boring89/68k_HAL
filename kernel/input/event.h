@@ -36,6 +36,17 @@ typedef struct
 } keyboard_event_t;
 
 /*
+ * Mouse event data: movement since the last event (+x right, +y down) and
+ * the buttons held now (bit 0 left, bit 1 right, bit 2 middle).
+ */
+typedef struct
+{
+    int16_t dx;
+    int16_t dy;
+    uint8_t buttons;
+} mouse_event_t;
+
+/*
  * Generic input event
  */
 typedef struct 
@@ -45,6 +56,7 @@ typedef struct
     union 
     {
         keyboard_event_t keyboard;
+        mouse_event_t mouse;
         
     } data;
     
@@ -56,6 +68,12 @@ typedef struct
 input_event_t input_event_keyboard(
     keycode_t key,
     bool pressed
+);
+
+input_event_t input_event_mouse(
+    int dx,
+    int dy,
+    uint8_t buttons
 );
 
 #endif

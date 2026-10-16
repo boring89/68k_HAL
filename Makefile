@@ -136,6 +136,8 @@ HOST_LIB_SOURCES := \
 	arch/x86/mmu/paging_entry.c \
 	drivers/ps2_keyboard/keymap.c \
 	drivers/ps2_keyboard/scancode.c \
+	drivers/ps2_mouse/mouse_packet.c \
+	kernel/input/event.c \
 	kernel/console/sink.c \
 	kernel/display/text_display.c \
 	kernel/display/fb_pattern.c \

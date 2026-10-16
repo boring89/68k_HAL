@@ -121,7 +121,7 @@ kernel_main()（kernel/main.c）
 |---|---|---|---|
 | `kernel/display/text_display.h` | `text_display_t`：寬、高、`put_cell`、`copy_cell`、`set_cursor`、`clear` | `text_display_register`（只有一個） | `drivers/vga`：`vga_text_display` |
 | `kernel/console/sink.h` | `console_sink_t`：`write`、`write_char` | `console_register_sink`（最多 4 個） | `drivers/serial`：`serial_console_sink` |
-| `kernel/input/event_buffer.h` | `input_event_push` | —（驅動直接推入） | `drivers/ps2_keyboard` |
+| `kernel/input/event_buffer.h` | `input_event_push` | —（驅動直接推入） | `drivers/ps2_keyboard`、`drivers/ps2_mouse`（IRQ 12，3 位元組封包 → `INPUT_EVENT_MOUSE`，dx 向右、dy 向下為正，溢位時飽和到 ±255）|
 
 ### 跨層的約定函式
 
@@ -232,7 +232,7 @@ IDT[0x20 + n] = irq_stub_table[n]（arch/x86/interrupt/irq_stub.asm）  ▼
 
 ## 11. 測試
 
-- **host**（`tests/host/`）：`test_console_sink`（註冊與廣播）、`test_terminal`（用假的顯示裝置測換行、捲動、退格、顏色、headless）、`test_ps2_keyboard`（scancode 與 keymap）、`test_multiboot`（含 `hal_boot_*`）、`test_paging_entry`（含 `paging_flags_from_hal`）。
+- **host**（`tests/host/`）：`test_console_sink`（註冊與廣播）、`test_terminal`（用假的顯示裝置測換行、捲動、退格、顏色、headless）、`test_ps2_keyboard`（scancode 與 keymap）、`test_ps2_mouse`（封包解碼）、`test_multiboot`（含 `hal_boot_*`）、`test_paging_entry`（含 `paging_flags_from_hal`）。
 - **QEMU selftest**：
   - `kernel/test/selftest.c`：框架、heap、`hal_timer_ticks`、`hal_cpu_idle`
   - `arch/x86/test/selftest_x86.c`：EFLAGS.IF、`cpu_irq_save`/`cpu_irq_restore`、CR0、分頁、`hal_mmu`、例外、IDT gate、IRQ stub 線號

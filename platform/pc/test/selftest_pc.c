@@ -90,11 +90,24 @@ static void test_hal_irq_register_rejects(void)
 #define PIC_MASTER_DATA 0x21
 #define PIC_SLAVE_DATA 0xA1
 
-/* pic_init masks everything; only the PIT (0) and keyboard (1) unmask. */
+/*
+ * pic_init masks everything; the PIT (0), keyboard (1) and mouse (12) unmask,
+ * and the mouse is on the slave, so the cascade line (2) is open too.
+ */
+#define BOOT_MASTER_MASK 0xF8
+#define BOOT_SLAVE_MASK 0xEF
+
 static void test_pic_boot_mask(void)
 {
-    SELFTEST_ASSERT(inb(PIC_MASTER_DATA) == 0xFC);
-    SELFTEST_ASSERT(inb(PIC_SLAVE_DATA) == 0xFF);
+    SELFTEST_ASSERT(inb(PIC_MASTER_DATA) == BOOT_MASTER_MASK);
+    SELFTEST_ASSERT(inb(PIC_SLAVE_DATA) == BOOT_SLAVE_MASK);
+}
+
+/* The mouse initialised in hal_init and has its handler on IRQ 12. */
+static void test_ps2_mouse_irq(void)
+{
+    SELFTEST_ASSERT((inb(PIC_SLAVE_DATA) & (1u << 4)) == 0);
+    SELFTEST_ASSERT(hal_irq_register(12, unused_irq_handler) == -1);
 }
 
 static void test_hal_irq_unmask_rejects(void)
@@ -102,8 +115,8 @@ static void test_hal_irq_unmask_rejects(void)
     SELFTEST_ASSERT(hal_irq_unmask(16) == -1);
     SELFTEST_ASSERT(hal_irq_unmask(0xFFFFFFFFu) == -1);
 
-    SELFTEST_ASSERT(inb(PIC_MASTER_DATA) == 0xFC);
-    SELFTEST_ASSERT(inb(PIC_SLAVE_DATA) == 0xFF);
+    SELFTEST_ASSERT(inb(PIC_MASTER_DATA) == BOOT_MASTER_MASK);
+    SELFTEST_ASSERT(inb(PIC_SLAVE_DATA) == BOOT_SLAVE_MASK);
 }
 
 static void test_hal_irq_unmask_master(void)
@@ -122,13 +135,17 @@ static void test_hal_irq_unmask_master(void)
     hal_cpu_enable_interrupts();
 }
 
-/* A slave line also needs the cascade input (master line 2) unmasked. */
+/*
+ * A slave line also needs the cascade input (master line 2) unmasked. It is
+ * already open here because of the mouse, so close it first.
+ */
 static void test_hal_irq_unmask_slave(void)
 {
     uint8_t master = inb(PIC_MASTER_DATA);
     uint8_t slave = inb(PIC_SLAVE_DATA);
 
     hal_cpu_disable_interrupts();
+    outb(PIC_MASTER_DATA, master | (1u << 2));
 
     SELFTEST_ASSERT(hal_irq_unmask(8) == 0);
     SELFTEST_ASSERT(inb(PIC_MASTER_DATA) == (master & ~(1u << 2)));
@@ -158,8 +175,8 @@ static void test_pic_spurious(void)
     SELFTEST_ASSERT(pic_get_spurious_count() == before + 2);
 
     /* Reading the ISR must not disturb the masks. */
-    SELFTEST_ASSERT(inb(PIC_MASTER_DATA) == 0xFC);
-    SELFTEST_ASSERT(inb(PIC_SLAVE_DATA) == 0xFF);
+    SELFTEST_ASSERT(inb(PIC_MASTER_DATA) == BOOT_MASTER_MASK);
+    SELFTEST_ASSERT(inb(PIC_SLAVE_DATA) == BOOT_SLAVE_MASK);
 
     hal_cpu_enable_interrupts();
 }
@@ -189,6 +206,7 @@ void selftest_platform_run(void)
     SELFTEST_RUN(test_hal_timer_frequency);
     SELFTEST_RUN(test_hal_irq_register_rejects);
     SELFTEST_RUN(test_pic_boot_mask);
+    SELFTEST_RUN(test_ps2_mouse_irq);
     SELFTEST_RUN(test_hal_irq_unmask_rejects);
     SELFTEST_RUN(test_hal_irq_unmask_master);
     SELFTEST_RUN(test_hal_irq_unmask_slave);
