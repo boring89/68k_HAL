@@ -51,11 +51,21 @@ static void test_memory(void)
     TEST_ASSERT(k_memcmp(b, "1234568", 8) != 0);
 }
 
+static void test_strncmp(void)
+{
+    TEST_ASSERT_EQ_INT(0, k_strncmp("/tmp/x", "/tmp", 4));
+    TEST_ASSERT_EQ_INT(0, k_strncmp("abc", "abd", 2));
+    TEST_ASSERT(k_strncmp("abc", "abd", 3) < 0);
+    TEST_ASSERT_EQ_INT(0, k_strncmp("abc", "xyz", 0));
+    TEST_ASSERT(k_strncmp("ab", "abc", 3) < 0);
+}
+
 int main(void)
 {
     TEST_RUN(test_strlen);
     TEST_RUN(test_strcmp);
     TEST_RUN(test_strcpy);
+    TEST_RUN(test_strncmp);
     TEST_RUN(test_memory);
 
     return TEST_REPORT("k_string");

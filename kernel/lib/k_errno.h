@@ -1,0 +1,38 @@
+/*
+ * Copyright (C) 2026 YuanChi Hsieh
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+#ifndef KERNEL_LIB_K_ERRNO_H
+#define KERNEL_LIB_K_ERRNO_H
+
+/*
+ * Error numbers. They have the values Linux uses on i386 because
+ * programs built with musl get them back from system calls as -errno
+ * (Linux asm-generic/errno-base.h and errno.h). Kernel code that
+ * reports errors this way returns the negated value.
+ */
+#define K_EPERM 1
+#define K_ENOENT 2
+#define K_EIO 5
+#define K_EBADF 9
+#define K_ENOMEM 12
+#define K_EACCES 13
+#define K_EFAULT 14
+#define K_EBUSY 16
+#define K_EEXIST 17
+#define K_ENOTDIR 20
+#define K_EISDIR 21
+#define K_EINVAL 22
+#define K_EMFILE 24
+#define K_ENOTTY 25
+#define K_EFBIG 27
+#define K_ENOSPC 28
+#define K_ESPIPE 29
+#define K_EROFS 30
+#define K_ERANGE 34
+#define K_ENAMETOOLONG 36
+#define K_ENOSYS 38
+#define K_ENOTEMPTY 39
+
+#endif

@@ -14,4 +14,7 @@ void k_strcpy(char *dst, const char *src);
 
 int k_strcmp(const char *a, const char *b);
 
+/* Compare at most n characters. */
+int k_strncmp(const char *a, const char *b, size_t n);
+
 #endif

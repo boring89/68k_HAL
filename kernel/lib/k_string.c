@@ -38,3 +38,18 @@ int k_strcmp(const char *a, const char *b)
     return *(unsigned char *)a -
         *(unsigned char *)b;
 }
+int k_strncmp(const char *a, const char *b, size_t n)
+{
+    while (n > 0 && *a && (*a == *b))
+    {
+        a++;
+        b++;
+        n--;
+    }
+
+    if (n == 0)
+        return 0;
+
+    return *(unsigned char *)a -
+        *(unsigned char *)b;
+}
