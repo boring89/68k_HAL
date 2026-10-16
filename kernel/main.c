@@ -22,6 +22,7 @@
 #include "kernel/keyboard/keychar.h"
 
 #include "kernel/mac/machine.h"
+#include "kernel/net/net.h"
 #include "kernel/user/process.h"
 #include "kernel/memory/memory.h"
 #include "kernel/memory/heap.h"
@@ -113,6 +114,8 @@ void kernel_main(void)
     while (1)
     {
         uint32_t tick = hal_timer_ticks();
+
+        net_poll();
 
         if (tick - last_tick >= hal_timer_frequency())
         {

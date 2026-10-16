@@ -25,6 +25,7 @@
 #include "hal/acpi.h"
 #include "hal/cpu.h"
 #include "hal/pci.h"
+#include "kernel/net/net.h"
 #include "kernel/pci/pci_names.h"
 
 static void cmd_help(
@@ -88,6 +89,18 @@ static void cmd_run(
     int argc,
     char **argv);
 static void cmd_lspci(
+    int argc,
+    char **argv);
+static void cmd_net(
+    int argc,
+    char **argv);
+static void cmd_dhcp(
+    int argc,
+    char **argv);
+static void cmd_ping(
+    int argc,
+    char **argv);
+static void cmd_dns(
     int argc,
     char **argv);
 static void cmd_mac(
@@ -179,7 +192,23 @@ static shell_command_entry_t commands[] =
         {COMMAND_LSPCI,
          "lspci",
          "List PCI devices (lspci -v also shows the base address registers)",
-         cmd_lspci}};
+         cmd_lspci},
+        {COMMAND_NET,
+         "net",
+         "Show the network card and its address",
+         cmd_net},
+        {COMMAND_DHCP,
+         "dhcp",
+         "Get an address from a DHCP server",
+         cmd_dhcp},
+        {COMMAND_PING,
+         "ping",
+         "Send an ICMP echo request (ping <a.b.c.d>)",
+         cmd_ping},
+        {COMMAND_DNS,
+         "dns",
+         "Look up the address of a name (dns <name>)",
+         cmd_dns}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -1147,4 +1176,160 @@ static void cmd_lspci(
             terminal_write_line(" bytes)");
         }
     }
+}
+
+/* Parse "a.b.c.d" into four bytes. Returns 0 or -1. */
+static int parse_ip(const char *text, uint8_t ip[4])
+{
+    for (int i = 0; i < 4; i++)
+    {
+        unsigned int value = 0;
+        int digits = 0;
+
+        while (*text >= '0' && *text <= '9' && digits < 4)
+        {
+            value = value * 10 + (unsigned int)(*text - '0');
+            text++;
+            digits++;
+        }
+
+        if (digits == 0 || value > 255 || (i < 3 && *text != '.') || (i == 3 && *text != '\0'))
+            return -1;
+
+        ip[i] = (uint8_t)value;
+
+        if (i < 3)
+            text++;
+    }
+
+    return 0;
+}
+
+static void write_ip_line(const char *label, const uint8_t ip[4])
+{
+    char text[16];
+
+    net_format_ip(ip, text);
+    terminal_write(label);
+    terminal_write_line(text);
+}
+
+static void cmd_net(
+    int argc,
+    char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    net_device_t *device = net_device_get();
+
+    if (device == NULL)
+    {
+        terminal_write_line("No network card");
+        return;
+    }
+
+    terminal_write("Card:     ");
+    terminal_write_line(device->name);
+    terminal_write("MAC:      ");
+
+    for (int i = 0; i < 6; i++)
+    {
+        write_hex_padded(device->mac[i], 2);
+
+        if (i < 5)
+            terminal_put_char(':');
+    }
+
+    terminal_newline();
+
+    const net_config_t *config = net_config();
+
+    if (!config->configured)
+    {
+        terminal_write_line("No address yet (run dhcp)");
+        return;
+    }
+
+    write_ip_line("Address:  ", config->ip);
+    write_ip_line("Mask:     ", config->mask);
+    write_ip_line("Gateway:  ", config->gateway);
+    write_ip_line("DNS:      ", config->dns);
+}
+
+static void cmd_dhcp(
+    int argc,
+    char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    if (net_device_get() == NULL)
+    {
+        terminal_write_line("No network card");
+        return;
+    }
+
+    if (net_dhcp(10000) != 0)
+    {
+        terminal_write_line("dhcp: no answer");
+        return;
+    }
+
+    write_ip_line("Address: ", net_config()->ip);
+}
+
+static void cmd_ping(
+    int argc,
+    char **argv)
+{
+    uint8_t ip[4];
+
+    if (argc < 2 || parse_ip(argv[1], ip) != 0)
+    {
+        terminal_write_line("usage: ping <a.b.c.d>");
+        return;
+    }
+
+    for (int i = 0; i < 3; i++)
+    {
+        uint32_t microseconds;
+        char number[16];
+
+        if (net_ping(ip, 2000, &microseconds) == 0)
+        {
+            terminal_write("reply from ");
+            terminal_write(argv[1]);
+            terminal_write(": time=");
+            k_utoa(microseconds, number);
+            terminal_write(number);
+            terminal_write_line(" us");
+        }
+        else
+        {
+            terminal_write_line("no reply");
+        }
+    }
+}
+
+static void cmd_dns(
+    int argc,
+    char **argv)
+{
+    uint8_t ip[4];
+
+    if (argc < 2)
+    {
+        terminal_write_line("usage: dns <name>");
+        return;
+    }
+
+    int status = net_dns_resolve(argv[1], ip, 5000);
+
+    if (status == 0)
+        write_ip_line("address: ", ip);
+    else if (status == 1)
+        terminal_write_line("no such name");
+    else
+        terminal_write_line("dns: no answer (is the network up? run dhcp)");
 }

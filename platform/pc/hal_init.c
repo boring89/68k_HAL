@@ -15,6 +15,7 @@
 #include "platform/pc/boot/multiboot.h"
 #include "platform/pc/interrupt/pic.h"
 #include "platform/pc/pci/pci.h"
+#include "hal/pci.h"
 #include "platform/pc/smp/smp.h"
 #include "platform/pc/video/framebuffer.h"
 #include "platform/pc/timer/pit.h"
@@ -175,4 +176,8 @@ void hal_init(void)
     /* Registers the disk as a block device; nothing else needs it yet. */
     if (ata_init() == 0)
         kernel_log(LOG_INFO, "ATA disk found");
+
+    /* Last: drivers for PCI cards (network...) use the timer and the interrupt controller. */
+    if (hal_pci_probe_drivers() > 0)
+        kernel_log(LOG_INFO, "PCI drivers started");
 }

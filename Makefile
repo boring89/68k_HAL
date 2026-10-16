@@ -122,7 +122,7 @@ iso: $(BUILD)/kernel.elf $(BUILD)/kernel-gfx.elf $(INITRD)
 	grub-mkrescue -o $(BUILD)/68k_HAL.iso $(ISO_ROOT)
 
 run: iso
-	qemu-system-i386 -cdrom $(BUILD)/68k_HAL.iso -serial stdio
+	qemu-system-i386 -cdrom $(BUILD)/68k_HAL.iso -serial stdio -netdev user,id=n0 -device e1000,netdev=n0
 
 all: $(BUILD)/kernel.elf $(BUILD)/kernel-gfx.elf
 
@@ -155,6 +155,7 @@ HOST_LIB_SOURCES := \
 	kernel/lib/k_time.c \
 	kernel/lib/ring_buffer.c \
 	kernel/memory/heap.c \
+	kernel/net/packet.c \
 	kernel/pci/pci_names.c \
 	kernel/memory/pmm.c \
 	kernel/shell/parser.c \
@@ -389,6 +390,7 @@ $(INITRD): $(USERLAND_BINS) $(wildcard userland/data/*) $(wildcard userland/expe
 # Kernel built with -DKERNEL_SELFTEST, booted directly by QEMU (no ISO).
 # QEMU exits with 33 on PASS (see kernel/test/selftest.c).
 QEMU_TEST_FLAGS := -display none -serial stdio -no-reboot -smp 4 \
+	-netdev user,id=n0 -device e1000,netdev=n0 \
 	-device isa-debug-exit,iobase=0xf4,iosize=0x04
 
 # Boot module for the selftest: -initrd "<file> <name>". Fixed content, so
@@ -421,8 +423,13 @@ test-qemu: $(BUILD)/test/module_test.txt $(BUILD)/images/disk.img $(BUILD)/test/
 # Boot the ISO (GRUB, with the initrd module), type shell commands and
 # check what the programs print on the serial port (tools/shell_test.py).
 test-shell: iso
+	QEMU_ARGS="-netdev user,id=n0 -device e1000,netdev=n0" \
 	python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
 		"lspci=Host bridge" \
+		"net=MAC:" \
+		"dhcp=Address: 10.0.2.15" \
+		"ping 10.0.2.2=reply from 10.0.2.2" \
+		"dns localhost=address: 127.0.0.1" \
 		"cpuinfo=Features" \
 		"acpi=Processors" \
 		"run /bin/hello=Hello from user mode!" \

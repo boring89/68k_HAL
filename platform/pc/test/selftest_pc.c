@@ -228,10 +228,11 @@ static void test_hal_irq_register_rejects(void)
 
 /*
  * pic_init masks everything; the PIT (0), keyboard (1) and mouse (12) unmask,
- * and the mouse is on the slave, so the cascade line (2) is open too.
+ * and the mouse is on the slave, so the cascade line (2) is open too. The
+ * e1000 card of the test run (QEMU puts it on IRQ 11) unmasks line 11.
  */
 #define BOOT_MASTER_MASK 0xF8
-#define BOOT_SLAVE_MASK 0xEF
+#define BOOT_SLAVE_MASK 0xE7
 
 static void test_pic_boot_mask(void)
 {

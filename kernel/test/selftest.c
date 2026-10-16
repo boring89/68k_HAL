@@ -18,6 +18,7 @@
 #include "kernel/lib/k_memory.h"
 #include "kernel/lib/k_string.h"
 #include "kernel/m68k/guest.h"
+#include "kernel/net/net.h"
 #include "kernel/printf/printf.h"
 #include "kernel/user/console.h"
 #include "kernel/user/process.h"
@@ -486,6 +487,51 @@ static void test_user_programs(void)
     }
 }
 
+/*
+ * test-qemu gives the machine an e1000 card on QEMU's user-mode network
+ * (slirp): DHCP hands out 10.0.2.15, the gateway 10.0.2.2 answers ping,
+ * and 10.0.2.3 is a DNS server that forwards to the host's resolver.
+ */
+static void test_net(void)
+{
+    net_device_t *device = net_device_get();
+
+    SELFTEST_ASSERT(device != NULL);
+
+    if (device == NULL)
+        return;
+
+    SELFTEST_ASSERT(device->mac[0] == 0x52 && device->mac[1] == 0x54);
+    SELFTEST_ASSERT(net_dhcp(8000) == 0);
+
+    const net_config_t *config = net_config();
+    static const uint8_t expected_ip[4] = {10, 0, 2, 15};
+    static const uint8_t gateway[4] = {10, 0, 2, 2};
+    static const uint8_t dns[4] = {10, 0, 2, 3};
+
+    SELFTEST_ASSERT(config->configured);
+    SELFTEST_ASSERT(k_memcmp(config->ip, expected_ip, 4) == 0);
+    SELFTEST_ASSERT(k_memcmp(config->gateway, gateway, 4) == 0);
+    SELFTEST_ASSERT(k_memcmp(config->dns, dns, 4) == 0);
+    SELFTEST_ASSERT(config->mask[0] == 255 && config->mask[3] == 0);
+
+    uint32_t round_trip = 0;
+
+    SELFTEST_ASSERT(net_ping(gateway, 3000, &round_trip) == 0);
+    SELFTEST_ASSERT(round_trip > 0 && round_trip < 3000000);
+
+    /* A name the resolver answers without the Internet. */
+    uint8_t address[4];
+    int status = net_dns_resolve("localhost", address, 5000);
+
+    SELFTEST_ASSERT(status == 0 || status == 1); /* any reply is a working DNS exchange */
+
+    if (status == 0)
+        SELFTEST_ASSERT(address[0] == 127);
+
+    kernel_printf("  net: ping %u us, dns status %d\n", (unsigned)round_trip, status);
+}
+
 /* The C compiler runs inside the OS: compile a program to /tmp, then run it. */
 static void test_user_compiler(void)
 {
@@ -558,6 +604,7 @@ void selftest_run(void)
     SELFTEST_RUN(test_m68k_guest_program);
     SELFTEST_RUN(test_m68k_guest_divide_64);
     SELFTEST_RUN(test_m68k_guest_fline_exception);
+    SELFTEST_RUN(test_net);
     SELFTEST_RUN(test_user_programs);
     SELFTEST_RUN(test_user_compiler);
 

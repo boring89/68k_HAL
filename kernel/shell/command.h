@@ -30,7 +30,11 @@ typedef enum
     COMMAND_CPUINFO,
     COMMAND_ACPI,
     COMMAND_RUN,
-    COMMAND_LSPCI
+    COMMAND_LSPCI,
+    COMMAND_NET,
+    COMMAND_DHCP,
+    COMMAND_PING,
+    COMMAND_DNS
 
 } shell_command_id_t;
 
