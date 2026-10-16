@@ -219,6 +219,51 @@ static void test_block_ramdisk_module(void)
     SELFTEST_ASSERT(block_read(disk, 2, 1, blocks) == -1);
 }
 
+/* make test-qemu attaches a 300-sector IDE disk: byte i of sector s is s * 13 + i. */
+static void test_ata_disk(void)
+{
+    block_device_t *disk = block_device_find("ata0");
+
+    SELFTEST_ASSERT(disk != 0);
+
+    if (disk == 0)
+        return;
+
+    SELFTEST_ASSERT(disk->block_size == 512);
+    SELFTEST_ASSERT(disk->block_count == 300);
+
+    uint8_t *sectors = kmalloc(300 * 512);
+
+    SELFTEST_ASSERT(sectors != 0);
+
+    if (sectors == 0)
+        return;
+
+    /* All 300 at once: the driver needs two commands for that. */
+    SELFTEST_ASSERT(block_read(disk, 0, 300, sectors) == 0);
+
+    int bad = 0;
+
+    for (unsigned int s = 0; s < 300; s++)
+    {
+        for (unsigned int i = 0; i < 512; i++)
+            bad += sectors[s * 512 + i] != (uint8_t)(s * 13 + i);
+    }
+
+    SELFTEST_ASSERT(bad == 0);
+
+    /* A single sector from the middle, and the last one. */
+    uint8_t one[512];
+
+    SELFTEST_ASSERT(block_read(disk, 256, 1, one) == 0);
+    SELFTEST_ASSERT(one[0] == (uint8_t)(256 * 13) && one[511] == (uint8_t)(256 * 13 + 511));
+    SELFTEST_ASSERT(block_read(disk, 299, 1, one) == 0);
+    SELFTEST_ASSERT(one[5] == (uint8_t)(299 * 13 + 5));
+    SELFTEST_ASSERT(block_read(disk, 300, 1, one) == -1);
+
+    kfree(sectors);
+}
+
 /* The second boot module is a disk with an HFS volume (tools/make_disk_image.py). */
 static void test_hfs_volume_mounted(void)
 {
@@ -375,6 +420,7 @@ void selftest_run(void)
     SELFTEST_RUN(test_hal_clock);
     SELFTEST_RUN(test_block_ramdisk_module);
     SELFTEST_RUN(test_hfs_volume_mounted);
+    SELFTEST_RUN(test_ata_disk);
     SELFTEST_RUN(test_m68k_guest_ram_size);
     SELFTEST_RUN(test_m68k_guest_program);
     SELFTEST_RUN(test_m68k_guest_divide_64);

@@ -121,6 +121,7 @@ kernel_main()（kernel/main.c）
 
 | Header | 型別 | 註冊 | 實作 |
 |---|---|---|---|
+| `kernel/block/block.h` | `block_device_t`：名稱、區塊大小、區塊數、`ops.read` | `block_register`（最多 8 個） | `drivers/ata`、`kernel/block/ramdisk`；見 `docs/storage.md` |
 | `kernel/display/text_display.h` | `text_display_t`：寬、高、`put_cell`、`copy_cell`、`set_cursor`、`clear` | `text_display_register`（只有一個） | `drivers/vga`：`vga_text_display` |
 | `kernel/console/sink.h` | `console_sink_t`：`write`、`write_char` | `console_register_sink`（最多 4 個） | `drivers/serial`：`serial_console_sink` |
 | `kernel/input/event_buffer.h` | `input_event_push` | —（驅動直接推入） | `drivers/ps2_keyboard`、`drivers/ps2_mouse`（IRQ 12，3 位元組封包 → `INPUT_EVENT_MOUSE`，dx 向右、dy 向下為正，溢位時飽和到 ±255）|

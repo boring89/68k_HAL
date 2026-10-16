@@ -5,6 +5,7 @@
 
 #include "hal/init.h"
 
+#include "drivers/ata/ata.h"
 #include "drivers/ps2_keyboard/ps2_keyboard.h"
 #include "drivers/ps2_mouse/ps2_mouse.h"
 #include "drivers/serial/serial.h"
@@ -150,4 +151,8 @@ void hal_init(void)
         kernel_log(LOG_INFO, "PS/2 mouse initialized");
     else
         kernel_log(LOG_WARN, "No PS/2 mouse");
+
+    /* Registers the disk as a block device; nothing else needs it yet. */
+    if (ata_init() == 0)
+        kernel_log(LOG_INFO, "ATA disk found");
 }

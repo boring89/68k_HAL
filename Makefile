@@ -230,11 +230,18 @@ $(BUILD)/test/module_test.txt: Makefile
 	@printf 'selftest module\n' > $@
 	@truncate -s 1024 $@
 
-test-qemu: $(BUILD)/test/module_test.txt $(BUILD)/images/disk.img
+# IDE disk for the selftest: 300 sectors (more than the 255 one command
+# reads), byte i of sector s is (s * 13 + i) mod 256.
+$(BUILD)/test/ata_test.img: Makefile
+	@mkdir -p $(dir $@)
+	@python3 -I -c "import sys; open(sys.argv[1], 'wb').write(bytes((s * 13 + i) & 255 for s in range(300) for i in range(512)))" $@
+
+test-qemu: $(BUILD)/test/module_test.txt $(BUILD)/images/disk.img $(BUILD)/test/ata_test.img
 	$(MAKE) --no-print-directory BUILD=$(BUILD)/test \
 		EXTRA_CFLAGS=-DKERNEL_SELFTEST $(BUILD)/test/kernel.elf
 	@timeout 10 qemu-system-i386 -kernel $(BUILD)/test/kernel.elf \
-		-initrd "$(BUILD)/test/module_test.txt testmod,$(BUILD)/images/disk.img disk" $(QEMU_TEST_FLAGS); \
+		-initrd "$(BUILD)/test/module_test.txt testmod,$(BUILD)/images/disk.img disk" \
+		-drive file=$(BUILD)/test/ata_test.img,format=raw,if=ide,index=0,media=disk $(QEMU_TEST_FLAGS); \
 	status=$$?; \
 	if [ $$status -eq 33 ]; then \
 		echo "QEMU selftest: PASS"; \
