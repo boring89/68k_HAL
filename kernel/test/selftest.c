@@ -150,6 +150,44 @@ static void test_m68k_guest_divide_64(void)
     SELFTEST_ASSERT(m68k_vm_get_reg(M68K_VM_REG_D0 + 2) == 2);
 }
 
+/* The guest RAM is 8 MiB by default and can be resized. */
+static void test_m68k_guest_ram_size(void)
+{
+    SELFTEST_ASSERT(m68k_guest_ram_size() == 8u * 1024 * 1024);
+    SELFTEST_ASSERT(m68k_guest_init() == 0);
+
+    /* The last longword of the 8 MiB is reachable, the next one is not. */
+    m68k_vm_write32(8u * 1024 * 1024 - 4, 0xCAFEF00Du);
+    SELFTEST_ASSERT(m68k_vm_read32(8u * 1024 * 1024 - 4) == 0xCAFEF00Du);
+    SELFTEST_ASSERT(*(volatile uint32_t *)(M68K_GUEST_RAM_BASE +
+                                           8u * 1024 * 1024 - 4) ==
+                    0x0DF0FECAu);
+    m68k_vm_write32(8u * 1024 * 1024, 0x12345678u);
+    SELFTEST_ASSERT(m68k_vm_read32(8u * 1024 * 1024) == 0);
+
+    /* Resizing frees the old frames and allocates new ones on init. */
+    size_t free_before = pmm_get_free_frames();
+
+    SELFTEST_ASSERT(m68k_guest_set_size(1u) == -1);
+    SELFTEST_ASSERT(m68k_guest_set_size(0) == -1);
+    SELFTEST_ASSERT(m68k_guest_set_size(M68K_GUEST_RAM_MAX_SIZE + 4096) == -1);
+    SELFTEST_ASSERT(m68k_guest_ram_size() == 8u * 1024 * 1024);
+
+    SELFTEST_ASSERT(m68k_guest_set_size(16u * 1024 * 1024) == 0);
+    SELFTEST_ASSERT(pmm_get_free_frames() == free_before + 2048);
+    SELFTEST_ASSERT(m68k_guest_init() == 0);
+    /* A bigger mapping also needs page tables, which are never freed. */
+    SELFTEST_ASSERT(pmm_get_free_frames() <= free_before - 2048);
+    SELFTEST_ASSERT(pmm_get_free_frames() >= free_before - 2048 - 4);
+    m68k_vm_write32(16u * 1024 * 1024 - 4, 0xCAFEF00Du);
+    SELFTEST_ASSERT(m68k_vm_read32(16u * 1024 * 1024 - 4) == 0xCAFEF00Du);
+
+    SELFTEST_ASSERT(m68k_guest_set_size(M68K_GUEST_RAM_DEFAULT_SIZE) == 0);
+    SELFTEST_ASSERT(m68k_guest_init() == 0);
+    SELFTEST_ASSERT(pmm_get_free_frames() <= free_before);
+    SELFTEST_ASSERT(pmm_get_free_frames() >= free_before - 4);
+}
+
 /* The guest has no FPU: an F-line opcode must reach its vector 11 handler. */
 static void test_m68k_guest_fline_exception(void)
 {
@@ -228,6 +266,7 @@ void selftest_run(void)
     SELFTEST_RUN(test_hal_timer_ticks);
     SELFTEST_RUN(test_hal_cpu_idle);
     SELFTEST_RUN(test_boot_module);
+    SELFTEST_RUN(test_m68k_guest_ram_size);
     SELFTEST_RUN(test_m68k_guest_program);
     SELFTEST_RUN(test_m68k_guest_divide_64);
     SELFTEST_RUN(test_m68k_guest_fline_exception);

@@ -128,5 +128,6 @@ Claude 依照上方工作規則直接實作。
 
 ## 已知問題（尚未修正）
 
+- 開機時的 identity map 只有前 4 MiB：kernel 結尾約 0x225000 加上 1 MiB heap 約 0x32A000，餘裕不到 1 MiB，kernel 再大就會在 `paging_init` panic（P1-6 把 heap 搬到專用虛擬位址後解除）。
 - heap 大小固定為 1 MiB（開機時由 `pmm_alloc_frames` 提供），用完不會自動擴充（見 `docs/pmm.md` 第 8 節）。
-- `emu/m68k`（Musashi）的限制：guest 視為沒有 FPU 的 68030（F-line 指令在 `m68k_vm_instr_hook` 轉成 vector 11 例外，不進入 Musashi 的 FPU）；SingleStepTests 中 address error 的測試全部不同（Musashi 沒有 prefetch queue，決定不補，見 `docs/m68k.md` 第 8 節）；其餘差異見 `docs/m68k.md`。guest RAM 固定 4 MiB，映射在虛擬位址 `0x10000000`。
+- `emu/m68k`（Musashi）的限制：guest 視為沒有 FPU 的 68030（F-line 指令在 `m68k_vm_instr_hook` 轉成 vector 11 例外，不進入 Musashi 的 FPU）；SingleStepTests 中 address error 的測試全部不同（Musashi 沒有 prefetch queue，決定不補，見 `docs/m68k.md` 第 8 節）；其餘差異見 `docs/m68k.md`。guest RAM 預設 8 MiB（`m68k_guest_set_size` 可改），映射在虛擬位址 `0x10000000`。
