@@ -54,6 +54,9 @@ static void cmd_mmap(
 static void cmd_m68k(
     int argc,
     char **argv);
+static void cmd_modules(
+    int argc,
+    char **argv);
 
 static shell_command_entry_t commands[] =
     {
@@ -100,7 +103,11 @@ static shell_command_entry_t commands[] =
         {COMMAND_M68K,
          "m68k",
          "Run a demo program on the 68k emulator",
-         cmd_m68k}};
+         cmd_m68k},
+        {COMMAND_MODULES,
+         "modules",
+         "List files loaded by the boot loader",
+         cmd_modules}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -505,4 +512,37 @@ static void cmd_m68k(
     (void)argv;
 
     m68k_demo_run();
+}
+
+static void cmd_modules(
+    int argc,
+    char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    hal_boot_module_t module;
+
+    if (hal_boot_module_count() == 0)
+    {
+        terminal_write_line("No boot modules");
+        return;
+    }
+
+    for (unsigned int i = 0; hal_boot_module(i, &module) == 0; i++)
+    {
+        char buffer[32];
+
+        k_utoa(i, buffer);
+        terminal_write(buffer);
+        terminal_write(": ");
+        terminal_write(module.name);
+        terminal_write(" at ");
+        k_utoa_hex((uint32_t)module.base, buffer);
+        terminal_write(buffer);
+        terminal_write(", ");
+        k_utoa((uint32_t)module.length, buffer);
+        terminal_write(buffer);
+        terminal_write_line(" bytes");
+    }
 }

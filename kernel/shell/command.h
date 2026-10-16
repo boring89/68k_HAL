@@ -20,7 +20,8 @@ typedef enum
     COMMAND_ALLOC,
     COMMAND_FREE,
     COMMAND_MMAP,
-    COMMAND_M68K
+    COMMAND_M68K,
+    COMMAND_MODULES
 
 } shell_command_id_t;
 

@@ -190,10 +190,17 @@ test-sst: $(BUILD)/host/sst_run
 QEMU_TEST_FLAGS := -display none -serial stdio -no-reboot \
 	-device isa-debug-exit,iobase=0xf4,iosize=0x04
 
-test-qemu:
+# Boot module for the selftest: -initrd "<file> <name>". Fixed content, so
+# the selftest can check it (see platform/pc/test/selftest_pc.c).
+$(BUILD)/test/module_test.txt:
+	@mkdir -p $(dir $@)
+	@printf 'selftest module\n' > $@
+
+test-qemu: $(BUILD)/test/module_test.txt
 	$(MAKE) --no-print-directory BUILD=$(BUILD)/test \
 		EXTRA_CFLAGS=-DKERNEL_SELFTEST $(BUILD)/test/kernel.elf
-	@timeout 10 qemu-system-i386 -kernel $(BUILD)/test/kernel.elf $(QEMU_TEST_FLAGS); \
+	@timeout 10 qemu-system-i386 -kernel $(BUILD)/test/kernel.elf \
+		-initrd "$(BUILD)/test/module_test.txt testmod" $(QEMU_TEST_FLAGS); \
 	status=$$?; \
 	if [ $$status -eq 33 ]; then \
 		echo "QEMU selftest: PASS"; \

@@ -10,6 +10,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 #include <sys/mman.h>
 
 #include "platform/pc/boot/multiboot.h"
@@ -237,6 +238,67 @@ static void test_hal_reserved_regions_without_map(void)
     TEST_ASSERT_EQ_INT(-1, hal_boot_reserved_region(1, &region));
 }
 
+/* Modules: table, then contents and name of each, after the info and map. */
+static void test_hal_modules(void)
+{
+    reset();
+
+    uint8_t *end = put_entry(table, 20, 0, 0x9FC00, 1);
+    multiboot_module_t *mods = (multiboot_module_t *)(area + 1024);
+    char *names = (char *)(area + 1536);
+
+    memcpy(names, "kernel.bin boot", 16);
+    mods[0] = (multiboot_module_t){0x200000, 0x200400, addr32(names), 0};
+    mods[1] = (multiboot_module_t){0x300000, 0x300000, 0, 0};
+    boot(MULTIBOOT_INFO_MEM_MAP | MULTIBOOT_INFO_MODS, end);
+    mbi->mods_count = 2;
+    mbi->mods_addr = addr32(mods);
+    multiboot_init(addr32(mbi));
+
+    hal_boot_module_t module;
+
+    TEST_ASSERT_EQ_INT(2, hal_boot_module_count());
+    TEST_ASSERT_EQ_INT(0, hal_boot_module(0, &module));
+    TEST_ASSERT_EQ_INT(0x200000, module.base);
+    TEST_ASSERT_EQ_INT(0x400, module.length);
+    TEST_ASSERT_EQ_INT(0, strcmp(module.name, "kernel.bin boot"));
+    TEST_ASSERT_EQ_INT(0, hal_boot_module(1, &module));
+    TEST_ASSERT_EQ_INT(0, module.length);
+    TEST_ASSERT_EQ_INT(0, strcmp(module.name, ""));
+    TEST_ASSERT_EQ_INT(-1, hal_boot_module(2, &module));
+    TEST_ASSERT_EQ_INT(-1, hal_boot_module(0, NULL));
+
+    hal_memory_region_t region;
+
+    TEST_ASSERT_EQ_INT(0, hal_boot_reserved_region(2, &region));
+    TEST_ASSERT_EQ_INT(addr32(mods), region.base);
+    TEST_ASSERT_EQ_INT(2 * sizeof(multiboot_module_t), region.length);
+    TEST_ASSERT_EQ_INT(0, hal_boot_reserved_region(3, &region));
+    TEST_ASSERT_EQ_INT(0x200000, region.base);
+    TEST_ASSERT_EQ_INT(0x400, region.length);
+    TEST_ASSERT_EQ_INT(0, hal_boot_reserved_region(4, &region));
+    TEST_ASSERT_EQ_INT(addr32(names), region.base);
+    TEST_ASSERT_EQ_INT(16, region.length);
+    TEST_ASSERT_EQ_INT(0, hal_boot_reserved_region(5, &region));
+    TEST_ASSERT_EQ_INT(0x300000, region.base);
+    TEST_ASSERT_EQ_INT(0, hal_boot_reserved_region(6, &region));
+    TEST_ASSERT_EQ_INT(0, region.length);
+    TEST_ASSERT_EQ_INT(-1, hal_boot_reserved_region(7, &region));
+}
+
+/* Without flags bit 3 mods_count is not valid. */
+static void test_hal_modules_flag_clear(void)
+{
+    reset();
+    boot(0, table);
+    mbi->mods_count = 3;
+
+    hal_boot_module_t module;
+
+    TEST_ASSERT_EQ_INT(0, hal_boot_module_count());
+    TEST_ASSERT_EQ_INT(-1, hal_boot_module(0, &module));
+}
+
 int main(void)
 {
     area = mmap(NULL, AREA_SIZE, PROT_READ | PROT_WRITE,
@@ -259,6 +321,8 @@ int main(void)
     TEST_RUN(test_hal_memory_regions_without_map);
     TEST_RUN(test_hal_reserved_regions);
     TEST_RUN(test_hal_reserved_regions_without_map);
+    TEST_RUN(test_hal_modules);
+    TEST_RUN(test_hal_modules_flag_clear);
 
     munmap(area, AREA_SIZE);
 

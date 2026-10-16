@@ -8,6 +8,11 @@
 
 #include "selftest.h"
 
+#include "hal/boot.h"
+#include "hal/mmu.h"
+
+#include "kernel/lib/k_memory.h"
+#include "kernel/lib/k_string.h"
 #include "kernel/m68k/guest.h"
 #include "kernel/printf/printf.h"
 #include "kernel/memory/heap.h"
@@ -169,6 +174,44 @@ static void test_m68k_guest_fline_exception(void)
     SELFTEST_ASSERT(m68k_vm_get_reg(M68K_VM_REG_D0 + 6) == 9);
 }
 
+/* make test-qemu passes -initrd "<file> testmod"; the file holds one line. */
+static void test_boot_module(void)
+{
+    static const char expected[] = "selftest module\n";
+    hal_boot_module_t module;
+    unsigned int found = 0;
+
+    SELFTEST_ASSERT(hal_boot_module_count() >= 1);
+    SELFTEST_ASSERT(hal_boot_module(hal_boot_module_count(), &module) == -1);
+    SELFTEST_ASSERT(hal_boot_module(0, NULL) == -1);
+
+    for (unsigned int i = 0; hal_boot_module(i, &module) == 0; i++)
+    {
+        const char *name = module.name;
+        unsigned int length = 0;
+
+        while (name[length] != '\0')
+            length++;
+
+        /* QEMU gives "<file> <args>"; compare the last word. */
+        if (length < 7 || k_strcmp(name + length - 7, "testmod") != 0)
+            continue;
+
+        found++;
+        SELFTEST_ASSERT(module.length == sizeof(expected) - 1);
+        SELFTEST_ASSERT(k_memcmp((const void *)(uintptr_t)module.base,
+                                 expected, sizeof(expected) - 1) == 0);
+
+        /* Read-only mapping, and its frames must not be handed out. */
+        uintptr_t phys = 0;
+
+        SELFTEST_ASSERT(hal_mmu_get_phys((uintptr_t)module.base, &phys) == 0);
+        SELFTEST_ASSERT(pmm_is_frame_used(module.base & ~0xFFFu) == 1);
+    }
+
+    SELFTEST_ASSERT(found == 1);
+}
+
 void selftest_abort(void)
 {
     selftest_platform_exit(0);
@@ -184,6 +227,7 @@ void selftest_run(void)
     SELFTEST_RUN(test_heap_region_reserved_in_pmm);
     SELFTEST_RUN(test_hal_timer_ticks);
     SELFTEST_RUN(test_hal_cpu_idle);
+    SELFTEST_RUN(test_boot_module);
     SELFTEST_RUN(test_m68k_guest_program);
     SELFTEST_RUN(test_m68k_guest_divide_64);
     SELFTEST_RUN(test_m68k_guest_fline_exception);

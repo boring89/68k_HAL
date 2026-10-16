@@ -16,6 +16,9 @@
  * (Multiboot Specification 0.6.96, 3.3 Boot information format). */
 #define MULTIBOOT_INFO_MEM_MAP (1u << 6)
 
+/* multiboot_info_t.flags bit 3: mods_count / mods_addr are valid. */
+#define MULTIBOOT_INFO_MODS (1u << 3)
+
 /* Memory map entry types. 1 is defined by the 0.6.96 spec; 3-5 follow
  * GRUB's multiboot.h (same values as the BIOS E820 types). */
 #define MULTIBOOT_MEMORY_AVAILABLE 1
@@ -44,6 +47,20 @@ typedef struct
     uint32_t mmap_addr;
 
 } multiboot_info_t;
+
+/*
+ * One boot module (Multiboot Specification 0.6.96, 3.3 Boot modules): the
+ * file occupies [mod_start, mod_end); string is the address of a
+ * NUL-terminated name (the module command line), or 0.
+ */
+typedef struct
+{
+    uint32_t mod_start;
+    uint32_t mod_end;
+    uint32_t string;
+    uint32_t reserved;
+
+} multiboot_module_t;
 
 /*
  * One memory map entry as laid out by the boot loader: fields are

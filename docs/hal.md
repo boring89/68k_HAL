@@ -108,7 +108,8 @@ kernel_main()（kernel/main.c）
 | `hal/timer.h` | `hal_timer_ticks`、`hal_timer_frequency` | `platform/pc/timer/hal_timer.c` | `uint32_t` tick；用 `now - start` 計算間隔 |
 | `hal/mmu.h` | `hal_mmu_map`、`hal_mmu_unmap`、`hal_mmu_get_phys` | `arch/x86/mmu/hal_mmu.c` | flags 為 `HAL_MMU_WRITABLE`、`HAL_MMU_USER`；未知位元回傳 `-1` |
 | `hal/boot.h` | `hal_boot_memory_region(i, &r)` | `platform/pc/boot/hal_boot.c` | 實體記憶體表，型別為 ACPI address range types |
-| | `hal_boot_reserved_region(i, &r)` | | 開機資料本身佔用的記憶體（PMM 必須保留） |
+| | `hal_boot_reserved_region(i, &r)` | | 開機資料本身佔用的記憶體（PMM 必須保留）；順序：Multiboot info、記憶體表、module 表，之後每個 module 依序是內容與名稱字串。`hal_init` 會把這些區域唯讀 identity map，所以 module 在分頁開啟後仍可讀 |
+| | `hal_boot_module_count()`、`hal_boot_module(i, &m)` | | boot loader 載入的檔案（GRUB `module`、QEMU `-initrd "檔案 名稱,檔案 名稱"`）：位址、長度、名稱字串。shell 指令 `modules` 列出；QEMU 給的名稱是「檔案 名稱」整串 |
 | `hal/init.h` | `hal_init_console`、`hal_init_early`、`hal_init` | `platform/pc/hal_init.c` | 見第 3 節 |
 
 ### kernel 的裝置介面（由驅動程式實作）

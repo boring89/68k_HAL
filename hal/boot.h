@@ -45,4 +45,23 @@ int hal_boot_memory_region(unsigned int index, hal_memory_region_t *region);
  */
 int hal_boot_reserved_region(unsigned int index, hal_memory_region_t *region);
 
+/*
+ * Files the boot loader loaded next to the kernel (GRUB "module" lines,
+ * QEMU -initrd). The memory they occupy is reported by
+ * hal_boot_reserved_region, so it is never handed out as free memory, and is
+ * mapped read-only once paging is on.
+ */
+typedef struct
+{
+    uint64_t base;
+    uint64_t length;
+    const char *name; /* NUL-terminated, "" if the loader gave none */
+} hal_boot_module_t;
+
+/* Number of boot modules (0 if the loader gave none). */
+unsigned int hal_boot_module_count(void);
+
+/* Boot module index. Returns 0, or -1 if index is out of range or module is NULL. */
+int hal_boot_module(unsigned int index, hal_boot_module_t *module);
+
 #endif
