@@ -20,7 +20,8 @@ make test-sst   # SingleStepTests 68000 測資（tests/data/sst/，需自行下�
 make clean
 ```
 
-- 需要的套件：見 README.md 的 Building 一節（含 `binutils-m68k-linux-gnu`，組譯 `tests/m68k/*.s`）。
+- 需要的套件：見 README.md 的 Building 一節（含 `binutils-m68k-linux-gnu`，組譯 `tests/m68k/*.s`；`python3` 與 `hfsutils`，產生 `build/images/` 的測試磁碟映像）。
+- `make` 同時產生 `build/kernel.elf`（文字模式）與 `build/kernel-gfx.elf`（Multiboot header 要求 640x480x32 framebuffer；ISO 兩者都放，GRUB 選單兩個項目）。
 - 尚未建立：cross compiler（i686-elf-gcc）。
 - CI：`.github/workflows/test.yml` 在 push 到 main 與 PR 時執行 `make test` 與 `make iso`。
 
@@ -29,6 +30,7 @@ make clean
 - 不依賴硬體的模組（例如 `kernel/lib`、`kernel/terminal/terminal.c`、`kernel/console/sink.c`、`platform/pc/boot/multiboot.c`、`emu/m68k`；完整清單見 Makefile 的 `HOST_LIB_SOURCES`）放在 `tests/host/test_<模組>.c`，使用 `tests/host/test.h` 的巨集。新增可在 host 編譯的模組時，要加入 `HOST_LIB_SOURCES`。
 - 需要硬體或中斷的測試依所屬的層放在 `kernel/test/selftest.c`、`arch/x86/test/selftest_x86.c` 或 `platform/pc/test/selftest_pc.c`，用 `SELFTEST_ASSERT` 檢查、`SELFTEST_RUN` 執行（`kernel/test/selftest.h`）。
 - `make test` 第一步是 `tools/check_boundary.sh`（層之間的 include 規則，見 `docs/hal.md` 第 7 節）。新增規則時要加上 `tests/boundary/<規則>/` fixture。
+- 磁碟映像（`build/images/*.img`）由 `tools/make_apm_image.py`、`tools/make_hfs_image.sh`、`tools/make_disk_image.py` 產生，內容全部自己合成；用法與 hfsutils 的 `~/.hcwd` 注意事項見 `docs/hfs.md`。
 - 圖形模式用 `tools/fb_check.py`（需 grub-mkrescue，不在 `make test` 中）檢查 framebuffer 測試圖樣。
 - 重構時用 `tools/boot_log.py` 比較前後的開機 log 與 VGA 畫面（需要 `python3`，不在 `make test` 中）。
 
@@ -128,6 +130,10 @@ Claude 依照上方工作規則直接實作。
 
 ## 已知問題（尚未修正）
 
+- 鍵盤只有字母、數字、空白、Enter、Backspace、Tab、Shift 與 `;`（`:`）；其他標點鍵沒有對應，shell 打不出 `.`、`-`、`/` 等。
+- 滑鼠事件（`INPUT_EVENT_MOUSE`）進入 input buffer 但主迴圈忽略。
+- HFS 名稱比較只對 ASCII 不分大小寫，查詢是線性掃描（見 `docs/hfs.md`）。
+- ATA 驅動只支援 primary master、LBA28、唯讀、輪詢。
 - 開機時的 identity map 只有前 4 MiB（kernel 結尾約 0x225000）：kernel 超過 4 MiB 會在 `paging_init` panic。heap 已搬到專用虛擬位址，不佔這 4 MiB。
 - heap 不會歸還記憶體：用完會自動擴充（`heap_vm_init`，每次至少 64 KiB，最多到 `HEAP_VIRT_LIMIT`），但擴充後 frame 不會還給 PMM。
 - `emu/m68k`（Musashi）的限制：guest 視為沒有 FPU 的 68030（F-line 指令在 `m68k_vm_instr_hook` 轉成 vector 11 例外，不進入 Musashi 的 FPU）；SingleStepTests 中 address error 的測試全部不同（Musashi 沒有 prefetch queue，決定不補，見 `docs/m68k.md` 第 8 節）；其餘差異見 `docs/m68k.md`。guest RAM 預設 8 MiB（`m68k_guest_set_size` 可改），映射在虛擬位址 `0x10000000`。
