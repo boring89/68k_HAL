@@ -8,6 +8,7 @@
 
 #include "kernel/test/selftest.h"
 
+#include "hal/acpi.h"
 #include "hal/cpu.h"
 #include "hal/irq.h"
 #include "hal/mmu.h"
@@ -35,6 +36,21 @@ static void test_hal_timer_frequency(void)
 {
     /* hal_init starts the PIT at 100 Hz. */
     SELFTEST_ASSERT(hal_timer_frequency() == 100);
+}
+
+/* QEMU (SeaBIOS) provides ACPI tables with at least one processor and a local APIC. */
+static void test_acpi_tables(void)
+{
+    const hal_acpi_info_t *info = hal_acpi_info();
+
+    SELFTEST_ASSERT(info != NULL);
+
+    if (info == NULL)
+        return;
+
+    SELFTEST_ASSERT(info->cpu_count >= 1);
+    SELFTEST_ASSERT(info->lapic_base == 0xFEE00000u);
+    SELFTEST_ASSERT(info->ioapic_count >= 1);
 }
 
 /* The nanosecond clock must agree with the PIT ticks it was calibrated on. */
@@ -221,6 +237,7 @@ void selftest_platform_run(void)
 {
     SELFTEST_RUN(test_hal_timer_frequency);
     SELFTEST_RUN(test_hal_timer_ns);
+    SELFTEST_RUN(test_acpi_tables);
     SELFTEST_RUN(test_hal_irq_register_rejects);
     SELFTEST_RUN(test_pic_boot_mask);
     SELFTEST_RUN(test_ps2_mouse_irq);

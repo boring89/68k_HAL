@@ -11,6 +11,7 @@
 #include "drivers/serial/serial.h"
 #include "drivers/vga/vga.h"
 
+#include "platform/pc/acpi/acpi.h"
 #include "platform/pc/boot/multiboot.h"
 #include "platform/pc/interrupt/pic.h"
 #include "platform/pc/video/framebuffer.h"
@@ -142,6 +143,11 @@ void hal_init(void)
         else
             kernel_log(LOG_ERROR, "Cannot map the framebuffer");
     }
+
+    if (acpi_init() == 0)
+        kernel_log(LOG_INFO, "ACPI tables found");
+    else
+        kernel_log(LOG_WARN, "No ACPI tables");
 
     pic_init();
     kernel_log(LOG_INFO, "PIC initialized");

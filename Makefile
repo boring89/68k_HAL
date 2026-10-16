@@ -159,6 +159,7 @@ HOST_LIB_SOURCES := \
 	kernel/terminal/terminal.c \
 	platform/pc/boot/hal_boot.c \
 	platform/pc/boot/multiboot.c \
+	platform/pc/acpi/acpi_parse.c \
 	platform/pc/rtc/rtc_decode.c \
 	platform/pc/timer/tsc_math.c \
 	$(wildcard emu/m68k/*.c) \

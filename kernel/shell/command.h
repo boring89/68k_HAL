@@ -27,7 +27,8 @@ typedef enum
     COMMAND_LS,
     COMMAND_CAT,
     COMMAND_MAC,
-    COMMAND_CPUINFO
+    COMMAND_CPUINFO,
+    COMMAND_ACPI
 
 } shell_command_id_t;
 

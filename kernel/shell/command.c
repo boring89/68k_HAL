@@ -21,6 +21,7 @@
 #include "kernel/fs/volume.h"
 #include "hal/boot.h"
 #include "hal/clock.h"
+#include "hal/acpi.h"
 #include "hal/cpu.h"
 
 static void cmd_help(
@@ -75,6 +76,9 @@ static void cmd_cat(
     int argc,
     char **argv);
 static void cmd_cpuinfo(
+    int argc,
+    char **argv);
+static void cmd_acpi(
     int argc,
     char **argv);
 static void cmd_mac(
@@ -154,7 +158,11 @@ static shell_command_entry_t commands[] =
         {COMMAND_CPUINFO,
          "cpuinfo",
          "Display the CPU model and features",
-         cmd_cpuinfo}};
+         cmd_cpuinfo},
+        {COMMAND_ACPI,
+         "acpi",
+         "Display processors and interrupt controllers from the ACPI tables",
+         cmd_acpi}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -964,4 +972,45 @@ static void cmd_cpuinfo(
     }
 
     terminal_newline();
+}
+
+static void write_number_line(const char *label, uint32_t value, int hex)
+{
+    char buffer[16];
+
+    if (hex)
+        k_utoa_hex(value, buffer);
+    else
+        k_utoa(value, buffer);
+
+    terminal_write(label);
+    terminal_write_line(buffer);
+}
+
+static void cmd_acpi(
+    int argc,
+    char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    const hal_acpi_info_t *info = hal_acpi_info();
+
+    if (info == NULL)
+    {
+        terminal_write_line("No ACPI tables");
+        return;
+    }
+
+    terminal_write("OEM:            ");
+    terminal_write_line(info->oem_id);
+    write_number_line("ACPI revision:  ", info->revision, 0);
+    write_number_line("Processors:     ", info->cpu_count, 0);
+    write_number_line("Local APIC at:  0x", info->lapic_base, 1);
+
+    for (uint32_t i = 0; i < info->ioapic_count; i++)
+    {
+        write_number_line("I/O APIC id:    ", info->ioapic_id[i], 0);
+        write_number_line("  at:           0x", info->ioapic_base[i], 1);
+    }
 }

@@ -38,7 +38,7 @@ uintptr_t paging_entry_get_phys(paging_entry_t entry)
 
 int paging_flags_from_hal(uint32_t hal_flags, uint32_t *flags)
 {
-    if (hal_flags & ~(HAL_MMU_WRITABLE | HAL_MMU_USER))
+    if (hal_flags & ~(HAL_MMU_WRITABLE | HAL_MMU_USER | HAL_MMU_UNCACHED))
         return -1;
 
     uint32_t result = 0;
@@ -48,6 +48,9 @@ int paging_flags_from_hal(uint32_t hal_flags, uint32_t *flags)
 
     if (hal_flags & HAL_MMU_USER)
         result |= PAGING_USER;
+
+    if (hal_flags & HAL_MMU_UNCACHED)
+        result |= PAGING_WRITE_THROUGH | PAGING_CACHE_DISABLE;
 
     *flags = result;
 

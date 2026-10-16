@@ -30,6 +30,8 @@
 #define PAGING_PRESENT  0x001 /* bit 0: P */
 #define PAGING_WRITABLE 0x002 /* bit 1: R/W */
 #define PAGING_USER     0x004 /* bit 2: U/S */
+#define PAGING_WRITE_THROUGH 0x008 /* bit 3: PWT */
+#define PAGING_CACHE_DISABLE 0x010 /* bit 4: PCD; with PWT = strong uncacheable (SDM Vol.3A 11.3) */
 
 /*
  * One PDE or PTE:

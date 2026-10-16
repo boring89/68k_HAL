@@ -152,12 +152,20 @@ static void test_flags_from_hal(void)
     TEST_ASSERT_EQ_INT(PAGING_WRITABLE | PAGING_USER, flags);
 }
 
+static void test_flags_from_hal_uncached(void)
+{
+    uint32_t flags = 0;
+
+    TEST_ASSERT_EQ_INT(0, paging_flags_from_hal(HAL_MMU_UNCACHED, &flags));
+    TEST_ASSERT_EQ_INT(PAGING_WRITE_THROUGH | PAGING_CACHE_DISABLE, flags);
+}
+
 static void test_flags_from_hal_rejects_unknown(void)
 {
     uint32_t flags = 0xDEAD;
 
     /* 0x4 happens to be PAGING_USER; it must not pass through as is. */
-    TEST_ASSERT_EQ_INT(-1, paging_flags_from_hal(0x4, &flags));
+    TEST_ASSERT_EQ_INT(-1, paging_flags_from_hal(0x8, &flags));
     TEST_ASSERT_EQ_INT(-1, paging_flags_from_hal(HAL_MMU_WRITABLE | 0x80000000u, &flags));
     TEST_ASSERT_EQ_INT(0xDEAD, flags);
 }
@@ -180,6 +188,7 @@ int main(void)
     TEST_RUN(test_table_virt_vga_pte);
     TEST_RUN(test_table_virt_wraps_index);
     TEST_RUN(test_flags_from_hal);
+    TEST_RUN(test_flags_from_hal_uncached);
     TEST_RUN(test_flags_from_hal_rejects_unknown);
 
     return TEST_REPORT("paging_entry");

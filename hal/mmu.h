@@ -19,6 +19,7 @@
 /* Mapping flags. Without HAL_MMU_WRITABLE a page is read-only. */
 #define HAL_MMU_WRITABLE 0x1u
 #define HAL_MMU_USER     0x2u /* reachable from user mode */
+#define HAL_MMU_UNCACHED 0x4u /* device memory: never cached */
 
 /*
  * Map the page at virt to the frame at phys. Returns -1 if either is
