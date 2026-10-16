@@ -160,6 +160,7 @@ HOST_LIB_SOURCES := \
 	platform/pc/boot/hal_boot.c \
 	platform/pc/boot/multiboot.c \
 	platform/pc/rtc/rtc_decode.c \
+	platform/pc/timer/tsc_math.c \
 	$(wildcard emu/m68k/*.c) \
 	$(wildcard emu/mac/*.c)
 

@@ -15,6 +15,7 @@
 #include "platform/pc/interrupt/pic.h"
 #include "platform/pc/video/framebuffer.h"
 #include "platform/pc/timer/pit.h"
+#include "platform/pc/timer/tsc.h"
 
 #include "arch/x86/interrupt/idt.h"
 #include "arch/x86/mmu/paging.h"
@@ -148,6 +149,11 @@ void hal_init(void)
     /* After pic_init: the PIT, the keyboard and the mouse unmask their lines. */
     pit_init(PC_TIMER_FREQUENCY);
     ps2_keyboard_init();
+
+    if (tsc_init() == 0)
+        kernel_printf("TSC: %u kHz\n", tsc_khz());
+    else
+        kernel_log(LOG_WARN, "No usable TSC");
 
     if (ps2_mouse_init() == 0)
         kernel_log(LOG_INFO, "PS/2 mouse initialized");

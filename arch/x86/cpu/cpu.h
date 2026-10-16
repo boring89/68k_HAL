@@ -77,6 +77,17 @@ static inline void cpu_write_cr4(uint32_t value)
     );
 }
 
+/* Time stamp counter (Intel SDM Vol.2B "RDTSC"). Needs HAL_CPU_FEATURE_TSC. */
+static inline uint64_t cpu_rdtsc(void)
+{
+    uint32_t lo;
+    uint32_t hi;
+
+    asm volatile("rdtsc" : "=a"(lo), "=d"(hi));
+
+    return ((uint64_t)hi << 32) | lo;
+}
+
 /* Faulting linear address of the last page fault (Intel SDM Vol.3A 2.5). */
 static inline uint32_t cpu_read_cr2(void)
 {

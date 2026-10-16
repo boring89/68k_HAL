@@ -37,6 +37,22 @@ static void test_hal_timer_frequency(void)
     SELFTEST_ASSERT(hal_timer_frequency() == 100);
 }
 
+/* The nanosecond clock must agree with the PIT ticks it was calibrated on. */
+static void test_hal_timer_ns(void)
+{
+    uint32_t tick0 = hal_timer_ticks();
+    uint64_t ns0 = hal_timer_ns();
+
+    while (hal_timer_ticks() - tick0 < 11)
+        hal_cpu_idle();
+
+    uint64_t elapsed = hal_timer_ns() - ns0;
+
+    /* 10 to 11 ticks = 100..110 ms (the first tick may be partial). */
+    SELFTEST_ASSERT(elapsed >= 90000000u);
+    SELFTEST_ASSERT(elapsed <= 130000000u);
+    SELFTEST_ASSERT(hal_timer_ns() > ns0);
+}
 
 /* hal_init identity maps the Multiboot data for the shell's mmap. */
 static void test_multiboot_data_mapped(void)
@@ -204,6 +220,7 @@ static void test_pic_unmask_keeps_interrupt_flag(void)
 void selftest_platform_run(void)
 {
     SELFTEST_RUN(test_hal_timer_frequency);
+    SELFTEST_RUN(test_hal_timer_ns);
     SELFTEST_RUN(test_hal_irq_register_rejects);
     SELFTEST_RUN(test_pic_boot_mask);
     SELFTEST_RUN(test_ps2_mouse_irq);
