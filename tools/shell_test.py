@@ -21,7 +21,8 @@ import time
 
 KEYS = {
     " ": "spc", "\n": "ret", "/": "slash", ".": "dot", "-": "minus", "_": "shift-minus",
-    "=": "equal", ",": "comma", ":": "shift-semicolon", "\"": "shift-apostrophe",
+    "=": "equal", "+": "shift-equal", "*": "shift-8", "(": "shift-9", ")": "shift-0",
+    ",": "comma", ":": "shift-semicolon", "\"": "shift-apostrophe",
 }
 
 
