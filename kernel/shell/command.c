@@ -15,6 +15,7 @@
 #include "kernel/lib/k_number.h"
 
 #include "kernel/m68k/demo.h"
+#include "kernel/mac/machine.h"
 #include "kernel/memory/memory.h"
 #include "kernel/block/block.h"
 #include "kernel/fs/volume.h"
@@ -70,6 +71,9 @@ static void cmd_ls(
     int argc,
     char **argv);
 static void cmd_cat(
+    int argc,
+    char **argv);
+static void cmd_mac(
     int argc,
     char **argv);
 
@@ -138,7 +142,11 @@ static shell_command_entry_t commands[] =
         {COMMAND_CAT,
          "cat",
          "Show a text file of the HFS volume (cat <path>)",
-         cmd_cat}};
+         cmd_cat},
+        {COMMAND_MAC,
+         "mac",
+         "Run the Macintosh IIci on boot modules mac_rom and mac_disk (Escape stops)",
+         cmd_mac}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -864,4 +872,15 @@ static void cmd_cat(
 
     if (entry.data_length > CAT_MAX_BYTES)
         terminal_write_line("... (truncated)");
+}
+
+
+static void cmd_mac(
+    int argc,
+    char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    mac_machine_run(0);
 }

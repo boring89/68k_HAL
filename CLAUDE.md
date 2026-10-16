@@ -17,6 +17,9 @@ make test       # test-host + test-qemu，修改後必須通過
 make test-host  # host 單元測試（tests/host/，含 ASan/UBSan）
 make test-qemu  # 以 -DKERNEL_SELFTEST 編譯 kernel，在 QEMU 中執行 kernel/test/selftest.c
 make test-sst   # SingleStepTests 68000 測資（tests/data/sst/，需自行下載，不在 make test 中；見 docs/m68k.md）
+make test-rom   # 在 host 上開機使用者的 Mac IIci ROM（變數 MAC_ROM、MAC_DISK；沒有檔案時跳過；不在 make test 中；見 docs/mac.md）
+make test-rom-qemu  # 同一台 Mac 在 kernel（QEMU）裡跑，畫面 CRC 必須與 host 相同（本機專用）
+make mac-screenshot # 圖形模式 QEMU 的畫面存成 build/mac/qemu_screen.ppm（本機專用）
 make clean
 ```
 
@@ -41,8 +44,9 @@ hal/           HAL 介面（只有 .h）：cpu、irq、timer、mmu、boot（含 
 arch/x86/      CPU：cpu（hal_cpu、控制暫存器）、gdt、interrupt（IDT、例外、IRQ stub）、mmu（分頁、hal_mmu）、io（port I/O）、test
 platform/pc/   PC 平台：boot（Multiboot 進入點、hal_boot）、video（framebuffer）、rtc（CMOS 時鐘）、interrupt（8259 PIC、hal_irq）、timer（PIT、hal_timer）、hal_init.c、test
 drivers/       裝置驅動：vga、serial、ps2_keyboard、ps2_mouse、ata（見 docs/storage.md）
-kernel/        與硬體無關的核心：main.c、panic、memory（pmm、heap）、block（區塊裝置、ramdisk）、fs（apm、hfs 唯讀、volume；見 docs/hfs.md）、display、console、terminal、keyboard（keycode、state、keychar）、input、shell、log、printf、lib、m68k（guest RAM 與示範）、test
-emu/m68k/      68k 虛擬機：Musashi 的封裝層（vm）、A-line trap 分派（trap）、Musashi 設定（m68kconf.h）；freestanding/ 是 kernel 建置用的 libc 替身
+kernel/        與硬體無關的核心：main.c、panic、memory（pmm、heap）、block（區塊裝置、ramdisk）、fs（apm、hfs 唯讀、volume；見 docs/hfs.md）、display、console、terminal、keyboard（keycode、state、keychar）、input、shell、log、printf、lib、m68k（guest RAM 與示範）、mac（在 kernel 裡執行 Mac；見 docs/mac.md）、test
+emu/m68k/      68k 虛擬機：Musashi 的封裝層（vm：含可選的 bus 與逐指令 hook）、A-line trap 分派（trap）、Musashi 設定（m68kconf.h）；freestanding/ 是 kernel 建置用的 libc 替身
+emu/mac/       Mac IIci 機器模型（M-P3，見 docs/mac.md）：記憶體配置與模擬 opcode（mac.c）、ROM 修補（rom_patch.c）、VIA（via.c）、RBV/DAC/視訊（video.c）、IWM、SCSI、.Disk 驅動（disk.c、stub.s）；與硬體無關，檔案由使用者提供，不在 repo
 third_party/   第三方原始碼，不修改：musashi（68k CPU 核心，MIT）
 tests/host/    host 單元測試
 docs/          設計文件
@@ -94,7 +98,7 @@ emu/m68k: add CCR flag handling
 - 硬體相關的數值（I/O port、descriptor 位元、68k 指令編碼）要註明出處（Intel SDM、OSDev Wiki、M68000 Programmer's Reference Manual），不確定時明說。
 - 中斷處理程式與主迴圈共用的變數必須宣告 `volatile`。
 - 無法恢復的錯誤使用 `kernel/panic/panic.h` 的 `panic()` / `KASSERT()`。
-- 不要加入任何 Apple ROM、System Software 或其他受版權保護的內容。
+- 不要加入任何 Apple ROM、System Software 或其他受版權保護的內容。使用者的 ROM 與磁碟映像（`~/mac/`）只能讀取，不可複製進 repo、不可 commit、不可進 `make test` 或 CI；需要它們的驗證只放在 `make test-rom` 等本機目標。
 
 ## 開發模式
 
@@ -126,11 +130,14 @@ Claude 依照上方工作規則直接實作。
 - HAL：硬體抽象層的邊界（已完成，見 `docs/hal.md`）
 - `emu/m68k`：以 Musashi 為基礎的 68k 虛擬機（M3，已完成，見 `docs/m68k.md`）。注意：這個元件是由使用者睡覺時的自動排程一次做完的，沒有走協作模式的逐步確認，使用者尚未審核；之後修改時請先帶使用者過一遍 `docs/m68k.md`
 
+- `emu/mac`：Mac IIci 機器模型與 `kernel/mac`（P3，見 `docs/mac.md`）。同樣是由自動排程一次做完的，沒有走協作模式的逐步確認，使用者尚未審核；之後修改時請先帶使用者過一遍 `docs/mac.md`
+
 （之後新增的元件加入此清單）
 
 ## 已知問題（尚未修正）
 
 - 鍵盤：US 配置，無 Ctrl/Alt/方向鍵等字元對應。
+- `emu/mac`：沒有鍵盤與滑鼠（ADB 整個被替身取代）、沒有聲音、沒有序列埠與網路；只支援 ROM `368CADFE`（Mac IIci）；其餘見 `docs/mac.md` 第 10 節。
 - 滑鼠事件（`INPUT_EVENT_MOUSE`）進入 input buffer 但主迴圈忽略。
 - HFS 名稱比較只對 ASCII 不分大小寫，查詢是線性掃描（見 `docs/hfs.md`）。
 - ATA 驅動只支援 primary master、LBA28、唯讀、輪詢。

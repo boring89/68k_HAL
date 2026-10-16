@@ -10,6 +10,10 @@ keycode_t keyboard_scancode_to_keycode(
 {
     switch (scancode)
     {
+        /* Set 1 scancode of Escape (OSDev Wiki "PS/2 Keyboard"). */
+    case 0x01:
+        return KEY_ESC;
+
         /* Numbers */
     case 0x02:
         return KEY_1;

@@ -28,6 +28,7 @@ The long-term vision is simple:
 - Interrupt handling (IDT / PIC)
 - Basic keyboard input
 - Modular HAL architecture
+- 68k virtual machine (Musashi) and a Macintosh IIci machine model that boots a user-supplied ROM and System 7.5.3 disk image to the Finder desktop (experimental, see [docs/mac.md](docs/mac.md))
 
 ### Planned
 
@@ -81,6 +82,25 @@ make run        # boot the ISO in QEMU, serial output on stdio
 make test       # host unit tests + QEMU self tests
 make clean
 ```
+
+### Running a Macintosh (needs your own files)
+
+The repository contains no Apple software. If you own a Macintosh IIci ROM
+image (checksum `368CADFE`, 512 KiB) and a raw HFS disk image with System 7.5.3,
+you can boot them on the host or inside the kernel:
+
+```bash
+make build/host/mac_run_fast
+build/host/mac_run_fast -n 500000000 -d System7_5_3.img -p screen.ppm "Mac IIci.ROM"
+
+# inside the kernel under QEMU (graphics mode); the paths are Makefile variables
+make mac-screenshot MAC_ROM="Mac IIci.ROM" MAC_DISK=System7_5_3.img
+make test-rom MAC_ROM=...        # boots the ROM on the host (skipped without a ROM)
+make test-rom-qemu MAC_ROM=... MAC_DISK=...   # kernel and host must draw the same screen
+```
+
+Details, the list of ROM patches and the known limits (no keyboard or mouse
+yet) are in [docs/mac.md](docs/mac.md).
 
 ---
 

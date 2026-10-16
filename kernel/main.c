@@ -21,6 +21,7 @@
 #include "kernel/keyboard/state.h"
 #include "kernel/keyboard/keychar.h"
 
+#include "kernel/mac/machine.h"
 #include "kernel/memory/memory.h"
 #include "kernel/memory/heap.h"
 #include "kernel/memory/pmm.h"
@@ -85,6 +86,18 @@ void kernel_main(void)
     keyboard_state_init();
 
     hal_cpu_enable_interrupts();
+
+#ifdef KERNEL_MAC_TEST
+    /* make test-rom-qemu: run the Mac for a fixed time and report the screen. */
+    if (mac_machine_run(KERNEL_MAC_TEST_FRAMES) == 0)
+        kernel_printf("mac: screen crc %x after %u frames\n",
+                      mac_machine_screen_crc(),
+                      (unsigned int)KERNEL_MAC_TEST_FRAMES);
+    else
+        kernel_printf("mac: could not run\n");
+    while (1)
+        hal_cpu_idle();
+#endif
 
 #ifdef KERNEL_SELFTEST
     selftest_run();

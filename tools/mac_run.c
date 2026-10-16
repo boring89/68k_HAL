@@ -11,6 +11,8 @@
  *   -n   run at most this many instructions (default 1000000)
  *   -d   attach this disk image (read into memory; never written back)
  *   -x   save guest memory to a file: -x <addr hex> <length hex> <file>
+ *   -F   run this many whole frames (416000 cycles each) and print the screen's CRC-32
+ *   -R   present the disk as write-protected
  *   -p   write the screen as a PPM image at the end
  *   -m   print 16 bytes of guest memory at this address (hex) at the end
  *   -s   after a -b break, run this many more instructions
@@ -83,6 +85,26 @@ static uint8_t *read_file(const char *path, uint32_t *size)
     fclose(f);
     *size = (uint32_t)n;
     return buf;
+}
+
+
+/* Same CRC-32 as kernel/mac/machine.c, over the 32-bit pixels. */
+static uint32_t crc32(const uint32_t *pixels, uint32_t count)
+{
+    uint32_t crc = 0xFFFFFFFFu;
+
+    for (uint32_t i = 0; i < count; i++)
+    {
+        for (int b = 0; b < 4; b++)
+        {
+            crc ^= (pixels[i] >> (8 * b)) & 0xFF;
+            for (int k = 0; k < 8; k++)
+            {
+                crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1)));
+            }
+        }
+    }
+    return ~crc;
 }
 
 
@@ -168,11 +190,13 @@ int main(int argc, char **argv)
     uint32_t tail = 32;
     uint32_t head = 0;
     uint32_t break_pc = 0;
+    uint32_t frames = 0;
     const char *ppm_path = NULL;
     const char *save_path = NULL;
     uint32_t save_addr = 0;
     uint32_t save_len = 0;
     const char *disk_path = NULL;
+    bool disk_read_only = false;
     uint32_t dump[8];
     int ndump = 0;
     uint32_t extra = 0;
@@ -207,6 +231,14 @@ int main(int argc, char **argv)
             save_addr = strtoul(argv[++i], NULL, 16);
             save_len = strtoul(argv[++i], NULL, 16);
             save_path = argv[++i];
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'F' && i + 1 < argc)
+        {
+            frames = strtoul(argv[++i], NULL, 0);
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'R')
+        {
+            disk_read_only = true;
         }
         else if (argv[i][0] == '-' && argv[i][1] == 'p' && i + 1 < argc)
         {
@@ -305,11 +337,28 @@ int main(int argc, char **argv)
         mac.disk.read = disk_read;
         mac.disk.write = disk_write;
         mac.disk.blocks = disk_size / 512;
+        mac.disk.read_only = disk_read_only;
     }
     mac.trace_enabled = true;
     mac.rtc_seconds = 0xD0000000u;     /* a fixed date in 2013 */
     mac_reset(&mac);
 
+    if (frames > 0)
+    {
+        /* Exactly what the kernel does (kernel/mac/machine.c): whole frames. */
+        static uint32_t shot[MAC_SCREEN_W * MAC_SCREEN_H];
+
+        for (uint32_t f = 0; f < frames; f++)
+        {
+            mac_run(&mac, 416000);
+        }
+        if (mac_render(&mac, shot) == 0)
+        {
+            printf("mac: screen crc %x after %u frames\n",
+                   crc32(shot, MAC_SCREEN_W * MAC_SCREEN_H), frames);
+        }
+        max_insns = 0;
+    }
     mac.break_lo = break_pc;
     mac.break_hi = break_hi;
     while (mac.insn_count < max_insns && !m68k_vm_halted() && !mac.break_hit)
