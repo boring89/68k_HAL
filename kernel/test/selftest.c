@@ -291,6 +291,91 @@ static void test_hfs_volume_mounted(void)
     SELFTEST_ASSERT(hfs_lookup(volume, "Nothing", &entry) == -1);
 }
 
+/* Write a sector pattern, read it back, restore the old contents: block_write on a real driver. */
+static void check_write_roundtrip(block_device_t *disk, uint64_t lba, uint32_t count)
+{
+    uint8_t *saved = kmalloc((size_t)count * 512);
+    uint8_t *pattern = kmalloc((size_t)count * 512);
+    uint8_t *back = kmalloc((size_t)count * 512);
+
+    SELFTEST_ASSERT(saved != 0 && pattern != 0 && back != 0);
+
+    if (saved == 0 || pattern == 0 || back == 0)
+        return;
+
+    for (uint32_t i = 0; i < count * 512; i++)
+        pattern[i] = (uint8_t)(0xA5 ^ i ^ (i >> 9));
+
+    SELFTEST_ASSERT(block_read(disk, lba, count, saved) == 0);
+    SELFTEST_ASSERT(block_write(disk, lba, count, pattern) == 0);
+    SELFTEST_ASSERT(block_read(disk, lba, count, back) == 0);
+    SELFTEST_ASSERT(k_memcmp(pattern, back, (size_t)count * 512) == 0);
+    SELFTEST_ASSERT(block_write(disk, lba, count, saved) == 0);
+    SELFTEST_ASSERT(block_read(disk, lba, count, back) == 0);
+    SELFTEST_ASSERT(k_memcmp(saved, back, (size_t)count * 512) == 0);
+
+    kfree(saved);
+    kfree(pattern);
+    kfree(back);
+}
+
+/* The IDE disk can be written too (restoring what it held). */
+static void test_ata_write(void)
+{
+    block_device_t *disk = block_device_find("ata0");
+
+    SELFTEST_ASSERT(disk != 0);
+
+    if (disk == 0)
+        return;
+
+    check_write_roundtrip(disk, 299, 1);
+    check_write_roundtrip(disk, 10, 3);
+}
+
+/* The SATA disk of test-qemu (ich9-ahci): 128 sectors filled with (sector * 7 + byte) & 255. */
+static void test_ahci_disk(void)
+{
+    block_device_t *disk = block_device_find("sata0");
+
+    SELFTEST_ASSERT(disk != 0);
+
+    if (disk == 0)
+        return;
+
+    SELFTEST_ASSERT(disk->block_size == 512);
+    SELFTEST_ASSERT(disk->block_count == 128);
+
+    /* All of it at once: the driver splits that into commands of its own size. */
+    uint8_t *sectors = kmalloc(128 * 512);
+
+    SELFTEST_ASSERT(sectors != 0);
+
+    if (sectors == 0)
+        return;
+
+    SELFTEST_ASSERT(block_read(disk, 0, 128, sectors) == 0);
+
+    int bad = 0;
+
+    for (unsigned int s = 0; s < 128; s++)
+    {
+        for (unsigned int i = 0; i < 512; i++)
+        {
+            if (sectors[s * 512 + i] != (uint8_t)(s * 7 + i))
+                bad++;
+        }
+    }
+
+    SELFTEST_ASSERT(bad == 0);
+    SELFTEST_ASSERT(block_read(disk, 128, 1, sectors) == -1); /* past the end */
+    kfree(sectors);
+
+    check_write_roundtrip(disk, 127, 1);
+    check_write_roundtrip(disk, 20, 5);
+    check_write_roundtrip(disk, 0, 128); /* more than one command */
+}
+
 /* The guest RAM is 8 MiB by default and can be resized. */
 static void test_m68k_guest_ram_size(void)
 {
@@ -612,6 +697,8 @@ void selftest_run(void)
     SELFTEST_RUN(test_block_ramdisk_module);
     SELFTEST_RUN(test_hfs_volume_mounted);
     SELFTEST_RUN(test_ata_disk);
+    SELFTEST_RUN(test_ata_write);
+    SELFTEST_RUN(test_ahci_disk);
     SELFTEST_RUN(test_m68k_guest_ram_size);
     SELFTEST_RUN(test_m68k_guest_program);
     SELFTEST_RUN(test_m68k_guest_divide_64);

@@ -464,6 +464,8 @@ $(INITRD): $(USERLAND_BINS) $(wildcard userland/data/*) $(wildcard userland/expe
 # Kernel built with -DKERNEL_SELFTEST, booted directly by QEMU (no ISO).
 # QEMU exits with 33 on PASS (see kernel/test/selftest.c).
 QEMU_TEST_FLAGS := -display none -serial stdio -no-reboot -smp 4 \
+	-device ich9-ahci,id=ahci -drive id=sata0,file=$(BUILD)/test/ahci_test.img,format=raw,if=none \
+	-device ide-hd,drive=sata0,bus=ahci.0 \
 	-netdev user,id=n0 -device e1000,netdev=n0 \
 	-audiodev wav,id=snd0,path=$(BUILD)/test/sound.wav \
 	-device intel-hda -device hda-output,audiodev=snd0 \
@@ -478,11 +480,18 @@ $(BUILD)/test/module_test.txt: Makefile
 
 # IDE disk for the selftest: 300 sectors (more than the 255 one command
 # reads), byte i of sector s is (s * 13 + i) mod 256.
+# A 128-sector SATA disk for the AHCI test; made again every time because the
+# test writes to it.
+.PHONY: FORCE
+$(BUILD)/test/ahci_test.img: FORCE
+	@mkdir -p $(dir $@)
+	@python3 -I -c "import sys; open(sys.argv[1], 'wb').write(bytes((s * 7 + i) & 255 for s in range(128) for i in range(512)))" $@
+
 $(BUILD)/test/ata_test.img: Makefile
 	@mkdir -p $(dir $@)
 	@python3 -I -c "import sys; open(sys.argv[1], 'wb').write(bytes((s * 13 + i) & 255 for s in range(300) for i in range(512)))" $@
 
-test-qemu: $(BUILD)/test/module_test.txt $(BUILD)/images/disk.img $(BUILD)/test/ata_test.img $(INITRD)
+test-qemu: $(BUILD)/test/module_test.txt $(BUILD)/images/disk.img $(BUILD)/test/ata_test.img $(BUILD)/test/ahci_test.img $(INITRD)
 	$(MAKE) --no-print-directory BUILD=$(BUILD)/test \
 		EXTRA_CFLAGS=-DKERNEL_SELFTEST $(BUILD)/test/kernel.elf
 	@timeout 60 qemu-system-i386 -kernel $(BUILD)/test/kernel.elf \

@@ -48,8 +48,27 @@ GRUB 的 `module` 行（或 QEMU 的 `-initrd "檔案 名稱,檔案 名稱"`）�
 註冊成 `ata0`。`hal_init` 結尾呼叫 `ata_init()`，沒有磁碟時什麼都不會發生。
 QEMU 的 `-cdrom` 掛在 secondary channel，所以不會被誤認。
 
+## 4.5 AHCI（SATA，`drivers/ahci`，Q10）
+
+**AHCI** 是 SATA 磁碟的標準控制器介面（幾乎所有近 15 年的 PC；QEMU 的 `-device ich9-ahci`）。與 ATA PIO 的差別：命令不是「一個一個暫存器寫」，而是在記憶體裡準備好整份命令，控制器自己用 **DMA** 取命令、搬資料。
+
+```
+ 記憶體（hal_dma_alloc）                         控制器（ABAR = PCI BAR 5，一個 port 0x80 位元組的暫存器）
+ ┌ command list（32 個命令標頭）──┐ CLB
+ │  [0] 旗標 | PRDTL | 命令表位址 ├───►  命令表：
+ └────────────────────────────────┘          CFIS（H2D register FIS：0x27、命令、LBA48、扇區數）
+ ┌ received FIS 區 ┐ FB                      PRDT（資料緩衝區的位址與長度）
+ └─────────────────┘
+ 設定 CI 的 bit 0 ──► 控制器執行命令 ──► 完成後清除 CI 的 bit 0（錯誤時 TFD 的 ERR 位元）
+```
+
+步驟（AHCI 1.3.1、OSDev Wiki "AHCI"）：PCI 比對 class 1／subclass 6／prog IF 1；開啟記憶體與 bus master；`GHC.AE` 打開 AHCI 模式；對 `PI` 中每個實作的 port：`SSTS` 說明有裝置（DET = 3、IPM = 1）、`SIG` 是 SATA 磁碟（0x101）；停掉 port（清 `ST` 與 `FRE`，等 `CR`、`FR` 清除）；配置 command list、received-FIS 區、命令表與 64 KiB 的暫存緩衝區（`hal_dma_alloc`）；開 `FRE`、`ST`；`IDENTIFY DEVICE` 取得扇區數（字 100–103，48 位元）；註冊 block 裝置 `sata0`、`sata1`…。
+
+讀寫：`READ DMA EXT`（0x25）、`WRITE DMA EXT`（0x35）、寫完 `FLUSH CACHE EXT`（0xEA）。每個命令最多 128 個扇區（暫存緩衝區大小；驅動自己分批），用輪詢等 `CI` 清除。限制：沒有 ATAPI、沒有 port multiplier、沒有熱插拔、沒有中斷、只用 command slot 0。
+
 ## 5. 測試
 
 - `tests/host/test_block.c`：註冊表、範圍檢查（含 `lba + count` 溢位）、ramdisk。
+- AHCI：QEMU `-device ich9-ahci -drive ...,if=none -device ide-hd,bus=ahci.0` 掛 128 個扇區的 SATA 磁碟（每次測試重新產生）：逐位元組比對、越界、寫入後讀回並還原（含超過一個命令的 128 扇區）；IDE 磁碟也做同樣的寫入測試。
 - QEMU selftest（`make test-qemu`）：`-initrd` 載入測試檔案與 `disk.img`；`-drive ...,if=ide` 掛 300 個扇區的
   IDE 磁碟（超過 255，所以會用兩次命令），逐位元組比對，並檢查最後一個扇區與越界。
