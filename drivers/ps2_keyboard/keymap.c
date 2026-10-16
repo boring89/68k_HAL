@@ -182,6 +182,111 @@ keycode_t keyboard_scancode_to_keycode(
     case 0x36:
         return KEY_RIGHT_SHIFT;
 
+        /* Modifiers and function keys, scan code set 1 */
+
+    case 0x1D:
+        return KEY_LEFT_CTRL;
+
+    case 0x38:
+        return KEY_LEFT_ALT;
+
+    case 0x3A:
+        return KEY_CAPS_LOCK;
+
+    case 0x3B:
+        return KEY_F1;
+
+    case 0x3C:
+        return KEY_F2;
+
+    case 0x3D:
+        return KEY_F3;
+
+    case 0x3E:
+        return KEY_F4;
+
+    case 0x3F:
+        return KEY_F5;
+
+    case 0x40:
+        return KEY_F6;
+
+    case 0x41:
+        return KEY_F7;
+
+    case 0x42:
+        return KEY_F8;
+
+    case 0x43:
+        return KEY_F9;
+
+    case 0x44:
+        return KEY_F10;
+
+    case 0x57:
+        return KEY_F11;
+
+    case 0x58:
+        return KEY_F12;
+
+    default:
+        return KEY_NONE;
+    }
+}
+
+keycode_t keyboard_extended_scancode_to_keycode(uint8_t scancode)
+{
+    switch (scancode)
+    {
+    case 0x1D:
+        return KEY_RIGHT_CTRL;
+
+    case 0x38:
+        return KEY_RIGHT_ALT; /* AltGr */
+
+    case 0x5B:
+        return KEY_LEFT_GUI;
+
+    case 0x5C:
+        return KEY_RIGHT_GUI;
+
+    case 0x48:
+        return KEY_UP;
+
+    case 0x50:
+        return KEY_DOWN;
+
+    case 0x4B:
+        return KEY_LEFT;
+
+    case 0x4D:
+        return KEY_RIGHT;
+
+    case 0x47:
+        return KEY_HOME;
+
+    case 0x4F:
+        return KEY_END;
+
+    case 0x49:
+        return KEY_PAGE_UP;
+
+    case 0x51:
+        return KEY_PAGE_DOWN;
+
+    case 0x52:
+        return KEY_INSERT;
+
+    case 0x53:
+        return KEY_DELETE;
+
+    /* The keypad's Enter and "/" are the main keys' twins. */
+    case 0x1C:
+        return KEY_ENTER;
+
+    case 0x35:
+        return KEY_SLASH;
+
     default:
         return KEY_NONE;
     }

@@ -20,6 +20,20 @@ import sys
 import time
 
 
+def changed_pixels(first, second):
+    """Number of pixels that differ between two PPM screenshots of the same size."""
+    def load(path):
+        data = open(path, "rb").read()
+        header = data.split(b"\n", 3)
+        return header[1], header[3]
+
+    size_a, pixels_a = load(first)
+    size_b, pixels_b = load(second)
+    if size_a != size_b:
+        return 0
+    return sum(1 for i in range(0, len(pixels_a), 3) if pixels_a[i:i + 3] != pixels_b[i:i + 3])
+
+
 def main():
     work = sys.argv[1]
     iso = os.path.join(work, "mac.iso")
@@ -61,6 +75,20 @@ def main():
             shot(os.path.basename(sys.argv[sys.argv.index("--wait-crc") + 1]))
             with open(serial, errors="replace") as f:
                 print([l for l in f.read().splitlines() if l.startswith("mac:")][-2:])
+        elif "--command-n" in sys.argv:
+            # Alt is the Mac's Command key: Alt-N is File > New Folder.
+            time.sleep(30)                      # the desktop is up after about 10 s
+            shot("keys_before.ppm")
+            monitor("sendkey alt-n", 0.5)
+            time.sleep(8)
+            shot("keys_after.ppm")
+            changed = changed_pixels(os.path.join(work, "keys_before.ppm"),
+                                     os.path.join(work, "keys_after.ppm"))
+            print("mac_qemu_input: %d pixels changed after Alt-N" % changed)
+            if changed < 200:
+                print("mac_qemu_input: FAIL: no new folder appeared")
+                sys.exit(1)
+            print("mac_qemu_input: PASS")
         else:
             time.sleep(55)                      # the desktop is up after ~45 s
             shot("input_before.ppm")

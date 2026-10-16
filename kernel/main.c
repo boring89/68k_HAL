@@ -146,7 +146,8 @@ void kernel_main(void)
                             event.data.keyboard.key,
                             state);
 
-                    if (c)
+                    /* Control characters (Ctrl-letters) are for programs, not for the shell line. */
+                    if (c && (c >= 0x20 || c == '\n' || c == '\b' || c == '\t'))
                     {
                         terminal_input_char(c);
                     }

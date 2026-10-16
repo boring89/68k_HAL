@@ -62,6 +62,69 @@ int mac_adb_key_code(keycode_t key)
         case KEY_LEFT_SHIFT:
         case KEY_RIGHT_SHIFT:
             return 0x38;
+
+        /*
+         * Modifiers: Ctrl is Control, Alt is Command (so Alt-N is Command-N, as in
+         * most Mac emulators), the Windows/Super key and AltGr are Option. ADB reports
+         * the right-hand modifiers with the left-hand codes.
+         */
+        case KEY_LEFT_CTRL:
+        case KEY_RIGHT_CTRL:
+            return 0x36;
+        case KEY_LEFT_ALT:
+            return 0x37;
+        case KEY_RIGHT_ALT:
+        case KEY_LEFT_GUI:
+        case KEY_RIGHT_GUI:
+            return 0x3A;
+        case KEY_CAPS_LOCK:
+            return 0x39;
+
+        /* Arrows, navigation block and function keys (Inside Macintosh: Text, Figure 2-10). */
+        case KEY_LEFT:
+            return 0x7B;
+        case KEY_RIGHT:
+            return 0x7C;
+        case KEY_DOWN:
+            return 0x7D;
+        case KEY_UP:
+            return 0x7E;
+        case KEY_HOME:
+            return 0x73;
+        case KEY_END:
+            return 0x77;
+        case KEY_PAGE_UP:
+            return 0x74;
+        case KEY_PAGE_DOWN:
+            return 0x79;
+        case KEY_INSERT:
+            return 0x72;    /* the Help key */
+        case KEY_DELETE:
+            return 0x75;    /* forward delete */
+        case KEY_F1:
+            return 0x7A;
+        case KEY_F2:
+            return 0x78;
+        case KEY_F3:
+            return 0x63;
+        case KEY_F4:
+            return 0x76;
+        case KEY_F5:
+            return 0x60;
+        case KEY_F6:
+            return 0x61;
+        case KEY_F7:
+            return 0x62;
+        case KEY_F8:
+            return 0x64;
+        case KEY_F9:
+            return 0x65;
+        case KEY_F10:
+            return 0x6D;
+        case KEY_F11:
+            return 0x67;
+        case KEY_F12:
+            return 0x6F;
         default:
             return -1;
     }

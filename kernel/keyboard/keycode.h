@@ -75,6 +75,39 @@ typedef enum
     KEY_LEFT_SHIFT,
     KEY_RIGHT_SHIFT,
 
+    KEY_LEFT_CTRL,
+    KEY_RIGHT_CTRL,
+    KEY_LEFT_ALT,
+    KEY_RIGHT_ALT,
+    KEY_LEFT_GUI,  /* the Windows / Super key */
+    KEY_RIGHT_GUI,
+    KEY_CAPS_LOCK,
+
+    KEY_UP,
+    KEY_DOWN,
+    KEY_LEFT,
+    KEY_RIGHT,
+
+    KEY_HOME,
+    KEY_END,
+    KEY_PAGE_UP,
+    KEY_PAGE_DOWN,
+    KEY_INSERT,
+    KEY_DELETE,
+
+    KEY_F1,
+    KEY_F2,
+    KEY_F3,
+    KEY_F4,
+    KEY_F5,
+    KEY_F6,
+    KEY_F7,
+    KEY_F8,
+    KEY_F9,
+    KEY_F10,
+    KEY_F11,
+    KEY_F12,
+
 } keycode_t;
 
 

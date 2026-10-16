@@ -63,11 +63,17 @@ static int bga_probe(const hal_pci_device_t *pci)
     hal_pci_enable(pci, HAL_PCI_COMMAND_IO | HAL_PCI_COMMAND_MEMORY);
     framebuffer_address = (uint32_t)pci->bar[0].base;
 
-    /* Ask for the limits: with GETCAPS set the registers read as the maximum. */
-    write_register(DISPI_ENABLE, DISPI_GETCAPS);
+    /*
+     * Ask for the limits: with GETCAPS added to the enable register, XRES and YRES read
+     * as the maximum. The other bits must stay as they were (a mode GRUB set up is
+     * enabled; writing GETCAPS alone would switch the screen off).
+     */
+    uint16_t enable = read_register(DISPI_ENABLE);
+
+    write_register(DISPI_ENABLE, enable | DISPI_GETCAPS);
     max_width = read_register(DISPI_XRES);
     max_height = read_register(DISPI_YRES);
-    write_register(DISPI_ENABLE, read_register(DISPI_ENABLE) & ~DISPI_GETCAPS);
+    write_register(DISPI_ENABLE, enable);
 
     present = 1;
 

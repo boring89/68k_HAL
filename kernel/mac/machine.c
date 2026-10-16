@@ -206,6 +206,24 @@ static bool handle_input(mac_t *mac)
                 return true;
             }
             code = mac_adb_key_code(event.data.keyboard.key);
+
+            /*
+             * The Mac's Caps Lock key latches: it reports "down" while it is on and
+             * "up" while it is off. A PC key sends press and release every time, so
+             * the press flips the state and the release is dropped.
+             */
+            if (event.data.keyboard.key == KEY_CAPS_LOCK)
+            {
+                static bool caps_on;
+
+                if (event.data.keyboard.pressed)
+                {
+                    caps_on = !caps_on;
+                    mac_key(mac, (uint8_t)code, caps_on);
+                }
+                continue;
+            }
+
             if (code >= 0)
             {
                 mac_key(mac, (uint8_t)code, event.data.keyboard.pressed);

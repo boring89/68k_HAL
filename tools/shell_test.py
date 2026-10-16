@@ -28,6 +28,11 @@ KEYS = {
 
 
 def keys_for(text):
+    # "^D" stands for Ctrl-D (no Enter after it).
+    if text == "^D\n":
+        yield "ctrl-d"
+        return
+
     for ch in text:
         if ch in KEYS:
             yield KEYS[ch]

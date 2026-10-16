@@ -27,11 +27,28 @@ static char line[LINE_MAX];
 static uint32_t line_length;   /* characters typed so far */
 static uint32_t line_ready;    /* the line is complete: read() may take it */
 static uint32_t line_consumed; /* how much of a complete line read() has taken */
+static uint32_t line_eof;      /* Ctrl-D on an empty line: the next read() returns 0 (end of file) */
 
 static void feed_key(char c)
 {
     /* A complete line waits for read(): typing more would edit text already handed out. */
     if (line_ready)
+        return;
+
+    /*
+     * Ctrl-D (4): at the start of a line it is the end of the input; in the middle
+     * it hands over what has been typed, without a newline (as on Unix terminals).
+     */
+    if (c == 4)
+    {
+        line_eof = line_length == 0;
+        line_ready = 1;
+
+        return;
+    }
+
+    /* Other control characters do nothing here. */
+    if (c < 0x20 && c != '\n' && c != '\r' && c != '\t' && c != '\b')
         return;
 
     if (c == '\b' || c == 0x7F)
@@ -112,6 +129,16 @@ static int32_t console_read(vfs_file_t *file, uint64_t pos, void *buffer, uint32
         return 0;
 
     wait_for_line();
+
+    if (line_eof)
+    {
+        line_eof = 0;
+        line_ready = 0;
+        line_length = 0;
+        line_consumed = 0;
+
+        return 0;
+    }
 
     uint32_t available = line_length - line_consumed;
 

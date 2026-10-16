@@ -249,3 +249,18 @@ menuentry "mac" {
 System 7 不會立刻把變動寫到磁碟（HFS 的 catalog 有快取，90 秒後仍沒寫）；要在「特殊 > 關機」時才會 flush。所以 `make test-mac-persist`（本機專用）的腳本是：File > New Folder，之後 Special > Shut Down，再用 hfsutils 檢查映像裡的 `Desktop Folder` 有 `untitled folder`。
 
 **測試用的滑鼠定位**：用相對移動封包要定位到絕對座標很不準（Mac 有滑鼠加速）。`mac_mouse_warp(x, y)` 直接把游標位置寫進低位址記憶體的 `RawMouse`、`MTemp`、`Mouse`，並設 `CrsrNew`，馬上到位。`tools/mac_run -J x,y,按鈕,frame` 與 kernel 的測試腳本都用它；選單項目的座標是用開啟選單的截圖找出來的。其他工具：`-O 檔案`（結束時把磁碟映像寫出）、`-W 檔案.wav`、`-B frame`（呼叫 SysBeep）。
+
+## 13. 鍵盤修飾鍵（Q15）
+
+PC 鍵盤的 `Ctrl`、`Alt`、`Win`／`AltGr`、`Caps Lock`、方向鍵、F1–F12、Home/End/PgUp/PgDn/Insert/Delete 現在都會送進 Mac（`kernel/mac/adbkeys.c`；ADB 虛擬鍵碼見 Inside Macintosh: Text）：
+
+| PC 鍵 | Mac 鍵 | ADB 碼 |
+|---|---|---|
+| Ctrl | Control | 0x36 |
+| Alt | Command（⌘） | 0x37 |
+| Win、AltGr | Option | 0x3A |
+| Caps Lock | Caps Lock（鎖定鍵：按下切換，只在開啟時送「按下」） | 0x39 |
+| 方向鍵 | ← 0x7B、→ 0x7C、↓ 0x7D、↑ 0x7E | |
+| Delete／Insert | 向前刪除 0x75／Help 0x72 | |
+
+所以 `Alt-N` 是 Finder 的「新增檔案夾」。ADB 把右側修飾鍵回報成左側的碼。`make test-mac-keys`（本機）用 QEMU 的 `sendkey alt-n` 驗證桌面出現新資料夾。

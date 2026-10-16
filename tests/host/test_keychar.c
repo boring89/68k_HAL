@@ -45,8 +45,31 @@ static void test_digits_shift(void)
     TEST_ASSERT_EQ_INT('A', ch(KEY_A, true));
 }
 
+static void test_control_and_caps(void)
+{
+    keyboard_state_t ctrl = { .left_ctrl = true };
+    keyboard_state_t caps = { .caps_lock = true };
+    keyboard_state_t caps_shift = { .caps_lock = true, .right_shift = true };
+
+    TEST_ASSERT_EQ_INT(1, keyboard_keycode_to_ascii(KEY_A, &ctrl));
+    TEST_ASSERT_EQ_INT(4, keyboard_keycode_to_ascii(KEY_D, &ctrl));
+    TEST_ASSERT_EQ_INT(26, keyboard_keycode_to_ascii(KEY_Z, &ctrl));
+
+    TEST_ASSERT_EQ_INT('A', keyboard_keycode_to_ascii(KEY_A, &caps));
+    TEST_ASSERT_EQ_INT('a', keyboard_keycode_to_ascii(KEY_A, &caps_shift));
+    TEST_ASSERT_EQ_INT('1', keyboard_keycode_to_ascii(KEY_1, &caps)); /* Caps Lock leaves digits alone */
+
+    /* Arrows, function keys and modifiers have no character. */
+    keyboard_state_t none = {0};
+
+    TEST_ASSERT_EQ_INT(0, keyboard_keycode_to_ascii(KEY_UP, &none));
+    TEST_ASSERT_EQ_INT(0, keyboard_keycode_to_ascii(KEY_F5, &none));
+    TEST_ASSERT_EQ_INT(0, keyboard_keycode_to_ascii(KEY_LEFT_CTRL, &none));
+}
+
 int main(void)
 {
+    TEST_RUN(test_control_and_caps);
     TEST_RUN(test_punctuation);
     TEST_RUN(test_digits_shift);
     return TEST_REPORT("keychar");

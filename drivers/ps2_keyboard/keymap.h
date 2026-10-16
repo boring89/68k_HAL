@@ -12,4 +12,7 @@
 
 keycode_t keyboard_scancode_to_keycode(uint8_t scancode);
 
+/* The same for the keys that send 0xE0 first (arrows, Delete, right Ctrl/Alt...). */
+keycode_t keyboard_extended_scancode_to_keycode(uint8_t scancode);
+
 #endif

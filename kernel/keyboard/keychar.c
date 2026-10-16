@@ -18,10 +18,15 @@ char keyboard_keycode_to_ascii(
     if(key >= KEY_A &&
        key <= KEY_Z)
     {
+        /* Control + letter is the control character (Ctrl-D = 4, Ctrl-C = 3). */
+        if(state->left_ctrl || state->right_ctrl)
+            return (char)(1 + (key - KEY_A));
+
         char c =
             'a' + (key - KEY_A);
 
-        if(shift)
+        /* Caps Lock turns the letters around: with Shift held they are lower case. */
+        if(shift != state->caps_lock)
             c -= 32;
 
         return c;

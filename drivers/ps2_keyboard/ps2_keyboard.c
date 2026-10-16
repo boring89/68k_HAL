@@ -26,9 +26,9 @@ static void ps2_keyboard_handler(void)
 
     if (scancode_process(scancode, &key))
     {
-        keycode_t keycode =
-            keyboard_scancode_to_keycode(
-                key.code);
+        keycode_t keycode = key.extended
+            ? keyboard_extended_scancode_to_keycode(key.code)
+            : keyboard_scancode_to_keycode(key.code);
 
         if (keycode != KEY_NONE)
         {

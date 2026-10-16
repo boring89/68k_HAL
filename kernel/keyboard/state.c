@@ -35,6 +35,28 @@ void keyboard_state_update(
             state.right_shift = pressed;
             break;
 
+        case KEY_LEFT_CTRL:
+            state.left_ctrl = pressed;
+            break;
+
+        case KEY_RIGHT_CTRL:
+            state.right_ctrl = pressed;
+            break;
+
+        case KEY_LEFT_ALT:
+            state.left_alt = pressed;
+            break;
+
+        case KEY_RIGHT_ALT:
+            state.right_alt = pressed;
+            break;
+
+        case KEY_CAPS_LOCK:
+            /* A locking key: each press flips it. */
+            if (pressed)
+                state.caps_lock = !state.caps_lock;
+            break;
+
         default:
             break;
     }

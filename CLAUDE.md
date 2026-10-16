@@ -25,6 +25,8 @@ make sdk        # C SDK（musl 靜態 i386）→ build/sdk；`tools/68khal-cc` �
 make initrd     # userland/ 的範例程式、Lua、tcc 打包成 build/initrd.tar（程式光碟，GRUB module 名稱 initrd）
 make test-shell # 開機 ISO、用 QEMU monitor 打字執行 shell 指令並檢查 serial 輸出（tools/shell_test.py）
 make test-video # 設定 1280x960 並檢查 QEMU screendump
+make test-fb      # GRUB 的 640x480 圖形模式仍顯示測試圖樣（tools/fb_check.py；擋住「驅動啟動時把螢幕關掉」這類退步）
+make test-mac-keys # Alt-N（= Command-N）在 Mac 建立資料夾（本機專用）
 make test-net / test-virtio-net  # TCP（host 的 http.server 經 slirp 10.0.2.2）、socket、DNS；virtio-net 網卡
 make test-mac-sound / test-mac-clock / test-mac-persist  # Mac 的聲音、時鐘、ATA 寫入（本機專用，需要 ROM 與磁碟）
 make clean
@@ -150,8 +152,8 @@ Claude 依照上方工作規則直接實作。
 
 ## 已知問題（尚未修正）
 
-- 鍵盤：US 配置，無 Ctrl/Alt/方向鍵等字元對應。
-- `emu/mac`：鍵盤與滑鼠以封包注入（沒有 Command/Option/Control）、聲音只有 ASC 的 FIFO 模式、沒有序列埠與網路；只支援 ROM `368CADFE`（Mac IIci）；其餘見 `docs/mac.md` 第 10 節。
+- 鍵盤：US 配置；已有 Ctrl（Ctrl-字母 = 控制字元，Ctrl-D = EOF）、Alt、Caps Lock、方向鍵、F1–F12、導覽鍵（`0xE0` 擴充碼），但沒有數字鍵台（keypad）、其他配置、鍵盤 LED、按住重複。
+- `emu/mac`：鍵盤與滑鼠以封包注入（Ctrl = Control、Alt = Command、Win/AltGr = Option）、聲音只有 ASC 的 FIFO 模式、沒有序列埠與網路；只支援 ROM `368CADFE`（Mac IIci）；其餘見 `docs/mac.md` 第 10 節。
 - 滑鼠事件（`INPUT_EVENT_MOUSE`）進入 input buffer 但主迴圈忽略。
 - HFS 名稱比較只對 ASCII 不分大小寫，查詢是線性掃描（見 `docs/hfs.md`）。
 - ATA 驅動只支援 primary master、LBA28、輪詢（可讀寫，寫入後 FLUSH CACHE）。
