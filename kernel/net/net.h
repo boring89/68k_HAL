@@ -89,6 +89,27 @@ void net_udp_close(uint16_t port);
 int net_udp_send(const uint8_t destination_ip[4], uint16_t destination_port,
                  uint16_t source_port, const void *data, size_t length);
 
+/*
+ * TCP for the kernel and for user programs (kernel/net/tcp.h has the
+ * details). net_poll() drives it. The functions below wait: they poll the
+ * network and sleep between polls, so interrupts must be enabled.
+ */
+#include "tcp.h"
+
+tcp_stack_t *net_tcp(void);
+
+/* Open a connection and wait for the handshake. Returns the connection number, or -1 (refused, no answer within timeout_ms, no route). */
+int net_tcp_connect(const uint8_t ip[4], uint16_t port, uint32_t timeout_ms);
+
+/* Send all of the data, waiting for room as needed. Returns 0 or -1 (the connection failed or timeout_ms passed). */
+int net_tcp_send_all(int connection, const void *data, size_t length, uint32_t timeout_ms);
+
+/* Wait until at least one byte arrives and take up to length bytes. Returns the count, TCP_EOF at the end of the stream, or -1 (reset, timeout). */
+int net_tcp_recv(int connection, void *buffer, size_t length, uint32_t timeout_ms);
+
+/* Close (send the FIN), wait a moment for the peer's, and release the connection. */
+void net_tcp_close(int connection);
+
 /* Write "a.b.c.d" into text (at least 16 bytes). */
 void net_format_ip(const uint8_t ip[4], char *text);
 

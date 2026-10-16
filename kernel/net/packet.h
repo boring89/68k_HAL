@@ -36,6 +36,7 @@
 #define NET_IP_HEADER 20
 #define NET_IP_PROTO_ICMP 1
 #define NET_IP_PROTO_UDP 17
+#define NET_IP_PROTO_TCP 6
 
 #define NET_ICMP_ECHO_REPLY 0
 #define NET_ICMP_ECHO_REQUEST 8
@@ -181,5 +182,41 @@ size_t net_dns_build_query(uint8_t *out, size_t capacity, uint16_t id, const cha
  * to the query.
  */
 int net_dns_parse_response(const uint8_t *data, size_t len, uint16_t id, uint8_t address[4]);
+
+/* --- TCP (RFC 793, RFC 7323 for the MSS option) --- */
+
+#define NET_TCP_HEADER 20 /* without options */
+
+#define NET_TCP_FIN 0x01
+#define NET_TCP_SYN 0x02
+#define NET_TCP_RST 0x04
+#define NET_TCP_PSH 0x08
+#define NET_TCP_ACK 0x10
+
+typedef struct
+{
+    uint16_t source_port;
+    uint16_t destination_port;
+    uint32_t sequence;     /* number of the first data byte (or of the SYN/FIN) */
+    uint32_t acknowledge;  /* next byte the sender expects (valid with ACK) */
+    uint8_t flags;         /* NET_TCP_* */
+    uint16_t window;       /* bytes the sender can receive */
+    uint16_t mss;          /* the MSS option of a SYN, 0 if absent */
+    const uint8_t *data;
+    size_t data_length;
+} net_tcp_t;
+
+/*
+ * Write a segment header (with the MSS option if tcp->mss != 0), copy
+ * tcp->data after it and fill in the checksum, which covers the IPv4
+ * pseudo header (RFC 793 3.1). out has room for 24 + data_length bytes.
+ * Returns the length.
+ */
+size_t net_tcp_build(uint8_t *out, const net_tcp_t *tcp, const uint8_t source_ip[4],
+                     const uint8_t destination_ip[4]);
+
+/* Read and check a segment (length and checksum); the data and mss are filled in. Returns 0 or -1. */
+int net_tcp_parse(const uint8_t *data, size_t len, const uint8_t source_ip[4],
+                  const uint8_t destination_ip[4], net_tcp_t *tcp);
 
 #endif

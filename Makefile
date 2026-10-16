@@ -11,7 +11,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -157,6 +157,7 @@ HOST_LIB_SOURCES := \
 	kernel/lib/ring_buffer.c \
 	kernel/memory/heap.c \
 	kernel/net/packet.c \
+	kernel/net/tcp.c \
 	kernel/pci/pci_names.c \
 	kernel/memory/pmm.c \
 	kernel/shell/parser.c \
@@ -451,13 +452,14 @@ build/initrd/bin/tcc: tools/build_tcc.sh $(SDK_LIBC) tools/68khal-cc
 # (what the self test compares their output with), packed as a ustar archive.
 initrd: $(INITRD)
 
-$(INITRD): $(USERLAND_BINS) $(wildcard userland/data/*) $(wildcard userland/expected/*)
-	rm -rf build/initrd/data build/initrd/expected
-	mkdir -p build/initrd/data build/initrd/expected
+$(INITRD): $(USERLAND_BINS) $(wildcard userland/data/*) $(wildcard userland/expected/*) $(wildcard userland/etc/*)
+	rm -rf build/initrd/data build/initrd/expected build/initrd/etc
+	mkdir -p build/initrd/data build/initrd/expected build/initrd/etc
+	cp userland/etc/* build/initrd/etc/
 	cp userland/data/* build/initrd/data/
 	cp userland/expected/* build/initrd/expected/
 	tar --format=ustar --owner=0 --group=0 --numeric-owner --sort=name \
-		-C build/initrd -cf $@ bin data expected usr
+		-C build/initrd -cf $@ bin data etc expected usr
 
 # Kernel built with -DKERNEL_SELFTEST, booted directly by QEMU (no ISO).
 # QEMU exits with 33 on PASS (see kernel/test/selftest.c).
@@ -522,6 +524,22 @@ test-video: iso
 	SHELL_TEST_SCREEN=1280x960 python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
 		"video 1280 960=video: 1280x960 32 bpp"
 
+# TCP end to end: a web server on the host (loopback), the OS fetches a page
+# from it through QEMU's user-mode network, where 10.0.2.2 is the host.
+test-net: iso
+	@rm -rf $(BUILD)/httproot; mkdir -p $(BUILD)/httproot; \
+	printf 'HELLO-FROM-THE-HOST-%s\n' 0123456789abcdef > $(BUILD)/httproot/page.txt; \
+	port=$$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'); \
+	python3 -m http.server $$port --bind 127.0.0.1 --directory $(BUILD)/httproot > $(BUILD)/httproot/server.log 2>&1 & \
+	server=$$!; sleep 1; \
+	QEMU_ARGS="-netdev user,id=n0 -device e1000,netdev=n0" \
+	python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
+		"dhcp=Address: 10.0.2.15" \
+		"http 10.0.2.2 $$port /page.txt=HELLO-FROM-THE-HOST-0123456789abcdef" \
+		"run /bin/httpget 10.0.2.2 $$port /page.txt=status: 200 OK" \
+		"run /bin/dnsquery=localhost is 127.0.0.1"; \
+	status=$$?; kill $$server 2>/dev/null; exit $$status
+
 # The source tree must pass every rule. Each tests/boundary/<rule>/ is a
 # fixture tree that breaks that rule, so the check must report <rule>.
 test-boundary:
@@ -535,4 +553,4 @@ test-boundary:
 	done
 	@echo "boundary check: PASS"
 
-test: test-boundary test-host test-qemu test-shell test-video
+test: test-boundary test-host test-qemu test-shell test-video test-net

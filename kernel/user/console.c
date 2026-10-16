@@ -54,28 +54,33 @@ static void feed_key(char c)
         line_ready = 1;
 }
 
-/* Pull keyboard events and feed the line editor until a line is complete. */
+/* Feed the keyboard events that have arrived to the line editor, until a line is complete. */
+static void process_keys(void)
+{
+    input_event_t event;
+
+    while (!line_ready && input_event_pop(&event) == 0)
+    {
+        if (event.type != INPUT_EVENT_KEYBOARD)
+            continue;
+
+        keyboard_state_update(event.data.keyboard.key, event.data.keyboard.pressed);
+
+        if (!event.data.keyboard.pressed)
+            continue;
+
+        char c = keyboard_keycode_to_ascii(event.data.keyboard.key, keyboard_state_get());
+
+        if (c)
+            feed_key(c);
+    }
+}
+
 static void wait_for_line(void)
 {
     while (!line_ready)
     {
-        input_event_t event;
-
-        while (!line_ready && input_event_pop(&event) == 0)
-        {
-            if (event.type != INPUT_EVENT_KEYBOARD)
-                continue;
-
-            keyboard_state_update(event.data.keyboard.key, event.data.keyboard.pressed);
-
-            if (!event.data.keyboard.pressed)
-                continue;
-
-            char c = keyboard_keycode_to_ascii(event.data.keyboard.key, keyboard_state_get());
-
-            if (c)
-                feed_key(c);
-        }
+        process_keys();
 
         if (!line_ready)
         {
@@ -83,6 +88,15 @@ static void wait_for_line(void)
             hal_cpu_idle();
         }
     }
+}
+
+/* poll(): the console can always be written; it can be read once a line is complete. */
+static uint32_t console_poll(vfs_file_t *file, uint32_t events)
+{
+    (void)file;
+    process_keys();
+
+    return (events & VFS_POLLOUT) | ((events & VFS_POLLIN) && line_ready ? VFS_POLLIN : 0);
 }
 
 static int32_t console_read(vfs_file_t *file, uint64_t pos, void *buffer, uint32_t count)
@@ -170,6 +184,7 @@ static const vfs_file_ops_t console_ops = {
     .read = console_read,
     .write = console_write_bytes,
     .stat = char_device_stat,
+    .poll = console_poll,
 };
 
 static int32_t null_read(vfs_file_t *file, uint64_t pos, void *buffer, uint32_t count)

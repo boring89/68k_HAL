@@ -6,6 +6,7 @@
 #include "net.h"
 
 #include "packet.h"
+#include "tcp.h"
 
 #include "hal/cpu.h"
 #include "hal/timer.h"
@@ -16,6 +17,10 @@
 
 static net_device_t *device;
 static net_config_t config;
+static tcp_stack_t tcp_stack;
+static int tcp_ready;
+
+static void tcp_restart(void);
 
 static const uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 static const uint8_t broadcast_ip[4] = {255, 255, 255, 255};
@@ -94,6 +99,9 @@ void net_poll(void)
 {
     if (device != NULL && device->poll != NULL)
         device->poll(device);
+
+    if (tcp_ready)
+        tcp_tick(&tcp_stack);
 }
 
 const net_config_t *net_config(void)
@@ -108,6 +116,9 @@ void net_configure(const uint8_t ip[4], const uint8_t mask[4], const uint8_t gat
     k_memcpy(config.gateway, gateway, 4);
     k_memcpy(config.dns, dns, 4);
     config.configured = !is_zero_ip(ip);
+
+    if (config.configured)
+        tcp_restart();
 }
 
 /* --- ARP --- */
@@ -411,6 +422,164 @@ int net_ping(const uint8_t ip[4], uint32_t timeout_ms, uint32_t *round_trip_us)
     return 0;
 }
 
+/* --- TCP --- */
+
+static int tcp_send_ip(void *context, const uint8_t destination_ip[4], const uint8_t *segment, size_t length)
+{
+    (void)context;
+
+    return send_ip(destination_ip, NULL, NET_IP_PROTO_TCP, segment, length);
+}
+
+static uint64_t tcp_now_ms(void *context)
+{
+    (void)context;
+
+    return hal_timer_ns() / 1000000u;
+}
+
+/* The TCP stack knows our address from the configuration: (re)start it when that changes. */
+static void tcp_restart(void)
+{
+    tcp_env_t env;
+
+    env.context = NULL;
+    env.send = tcp_send_ip;
+    env.now_ms = tcp_now_ms;
+    k_memcpy(env.local_ip, config.ip, 4);
+    tcp_init(&tcp_stack, &env);
+    tcp_ready = 1;
+}
+
+tcp_stack_t *net_tcp(void)
+{
+    return &tcp_stack;
+}
+
+/* Poll the network and idle until done() says so or timeout_ms passes. Returns 0, or -1 on timeout. */
+static int wait_until(int (*done)(void *context), void *context, uint32_t timeout_ms)
+{
+    uint64_t end = hal_timer_ns() + (uint64_t)timeout_ms * 1000000u;
+
+    for (;;)
+    {
+        net_poll();
+
+        if (done(context))
+            return 0;
+
+        if (hal_timer_ns() >= end)
+            return -1;
+
+        hal_cpu_idle();
+    }
+}
+
+typedef struct
+{
+    int connection;
+    const uint8_t *data;
+    size_t length;
+    size_t sent;
+} tcp_wait_t;
+
+static int connected(void *context)
+{
+    int connection = *(int *)context;
+    tcp_state_t state = tcp_state(&tcp_stack, connection);
+
+    return state != TCP_SYN_SENT && state != TCP_SYN_RECEIVED;
+}
+
+int net_tcp_connect(const uint8_t ip[4], uint16_t port, uint32_t timeout_ms)
+{
+    if (device == NULL || !config.configured || !tcp_ready)
+        return -1;
+
+    int connection = tcp_connect(&tcp_stack, ip, port);
+
+    if (connection < 0)
+        return -1;
+
+    if (wait_until(connected, &connection, timeout_ms) != 0 ||
+        tcp_state(&tcp_stack, connection) != TCP_ESTABLISHED)
+    {
+        tcp_abort(&tcp_stack, connection);
+
+        return -1;
+    }
+
+    return connection;
+}
+
+static int sent_all(void *context)
+{
+    tcp_wait_t *w = context;
+
+    if (w->sent < w->length)
+    {
+        int n = tcp_send(&tcp_stack, w->connection, w->data + w->sent, w->length - w->sent);
+
+        if (n < 0)
+            return 1; /* failed: stop waiting, the caller sees sent < length */
+
+        w->sent += (size_t)n;
+    }
+
+    return w->sent >= w->length;
+}
+
+int net_tcp_send_all(int connection, const void *data, size_t length, uint32_t timeout_ms)
+{
+    tcp_wait_t w = {connection, data, length, 0};
+
+    if (wait_until(sent_all, &w, timeout_ms) != 0)
+        return -1;
+
+    return w.sent == length ? 0 : -1;
+}
+
+typedef struct
+{
+    int connection;
+    void *buffer;
+    size_t length;
+    int result;
+} tcp_recv_wait_t;
+
+static int received(void *context)
+{
+    tcp_recv_wait_t *w = context;
+
+    w->result = tcp_recv(&tcp_stack, w->connection, w->buffer, w->length);
+
+    return w->result != 0;
+}
+
+int net_tcp_recv(int connection, void *buffer, size_t length, uint32_t timeout_ms)
+{
+    tcp_recv_wait_t w = {connection, buffer, length, 0};
+
+    if (wait_until(received, &w, timeout_ms) != 0)
+        return -1;
+
+    return w.result;
+}
+
+static int closed(void *context)
+{
+    tcp_state_t state = tcp_state(&tcp_stack, *(int *)context);
+
+    return state == TCP_CLOSED || state == TCP_TIME_WAIT;
+}
+
+void net_tcp_close(int connection)
+{
+    tcp_close(&tcp_stack, connection);
+    wait_until(closed, &connection, 2000);
+    tcp_abort(&tcp_stack, connection);
+}
+
 /* --- receive --- */
 
 void net_receive(net_device_t *dev, const uint8_t *frame, uint32_t length)
@@ -446,7 +615,12 @@ void net_receive(net_device_t *dev, const uint8_t *frame, uint32_t length)
     if (!for_us)
         return;
 
-    if (ip.protocol == NET_IP_PROTO_ICMP)
+    if (ip.protocol == NET_IP_PROTO_TCP)
+    {
+        if (tcp_ready)
+            tcp_input(&tcp_stack, ip.source, ip.payload, ip.payload_length);
+    }
+    else if (ip.protocol == NET_IP_PROTO_ICMP)
         handle_icmp(&ip, frame + 6);
     else if (ip.protocol == NET_IP_PROTO_UDP)
         handle_udp(&ip);

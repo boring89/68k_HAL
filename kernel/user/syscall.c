@@ -14,6 +14,7 @@
 #include "kernel/lib/k_memory.h"
 #include "kernel/lib/k_string.h"
 #include "kernel/lib/k_time.h"
+#include "kernel/net/net.h"
 #include "kernel/printf/printf.h"
 #include "kernel/vfs/vfs.h"
 
@@ -91,6 +92,13 @@
 #define SYS_clock_nanosleep_time64 407
 #define SYS_mremap 163
 #define SYS_statx 383
+#define SYS_socketcall 102
+#define SYS__newselect 142
+#define SYS_poll 168
+#define SYS_pselect6 308
+#define SYS_ppoll 309
+#define SYS_pselect6_time64 413
+#define SYS_ppoll_time64 414
 #define SYS_getpid 20
 #define SYS_lseek 19
 #define SYS_getrusage 77
@@ -405,7 +413,10 @@ static int32_t sys_fcntl(int fd, uint32_t cmd, uint32_t arg)
     case 3: /* F_GETFL */
         return (int32_t)file->flags;
 
-    case 4: /* F_SETFL */
+    case 4: /* F_SETFL: the flags a descriptor may change; sockets look at O_NONBLOCK */
+        file->flags = (file->flags & ~04000u) | (arg & 04000u);
+        user_socket_set_nonblock(file, (arg & 04000u) != 0);
+
         return 0;
 
     default:
@@ -818,6 +829,178 @@ static int32_t sys_nanosleep(uint32_t address, int wide)
     return 0;
 }
 
+/* --- poll and select --- */
+
+/* Wait: let the network and the time move on, for a while. */
+static void wait_a_little(void)
+{
+    net_poll();
+    hal_cpu_enable_interrupts();
+    hal_cpu_idle();
+}
+
+/*
+ * poll: struct pollfd { int fd; short events; short revents; } (8 bytes).
+ * timeout_ms < 0 waits for ever. Returns the number of descriptors with
+ * something to report.
+ */
+static int32_t sys_poll(uint32_t fds_address, uint32_t count, int32_t timeout_ms)
+{
+    if (count > USER_MAX_FDS * 4)
+        return -K_EINVAL;
+
+    if (!user_range_ok(fds_address, count * 8))
+        return -K_EFAULT;
+
+    uint64_t end = timeout_ms > 0 ? hal_timer_ns() + (uint64_t)timeout_ms * 1000000u : 0;
+
+    for (;;)
+    {
+        int32_t ready = 0;
+
+        for (uint32_t i = 0; i < count; i++)
+        {
+            int32_t *entry = (int32_t *)(uintptr_t)(fds_address + i * 8);
+            int16_t *events = (int16_t *)(entry + 1);
+            int fd = entry[0];
+
+            events[1] = 0;
+
+            if (fd < 0)
+                continue;
+
+            vfs_file_t *file = user_fd_get(fd);
+
+            if (file == NULL)
+            {
+                events[1] = VFS_POLLNVAL;
+                ready++;
+                continue;
+            }
+
+            events[1] = (int16_t)vfs_poll(file, (uint32_t)events[0]);
+
+            if (events[1] != 0)
+                ready++;
+        }
+
+        if (ready > 0 || timeout_ms == 0 || (end != 0 && hal_timer_ns() >= end))
+            return ready;
+
+        wait_a_little();
+    }
+}
+
+/* select: three bit sets of descriptors (n bits each); the sets are changed to the ready ones. */
+static int32_t sys_select(uint32_t n, uint32_t read_set, uint32_t write_set, uint32_t except_set,
+                          int64_t timeout_ms)
+{
+    uint32_t bytes = (n + 7) / 8;
+    uint32_t sets[3] = {read_set, write_set, except_set};
+    uint8_t original[3][128];
+
+    if (n > 1024)
+        return -K_EINVAL;
+
+    for (int k = 0; k < 3; k++)
+    {
+        if (sets[k] == 0)
+            continue;
+
+        if (!user_range_ok(sets[k], bytes))
+            return -K_EFAULT;
+
+        k_memcpy(original[k], (const void *)(uintptr_t)sets[k], bytes);
+    }
+
+    uint64_t end = timeout_ms > 0 ? hal_timer_ns() + (uint64_t)timeout_ms * 1000000u : 0;
+
+    for (;;)
+    {
+        uint8_t result[3][128];
+        int32_t ready = 0;
+
+        k_memset(result, 0, sizeof(result));
+
+        for (uint32_t fd = 0; fd < n; fd++)
+        {
+            uint32_t wanted = 0;
+
+            for (int k = 0; k < 2; k++)
+            {
+                if (sets[k] != 0 && (original[k][fd / 8] >> (fd % 8)) & 1)
+                    wanted |= k == 0 ? VFS_POLLIN : VFS_POLLOUT;
+            }
+
+            if (wanted == 0)
+                continue;
+
+            vfs_file_t *file = user_fd_get((int)fd);
+
+            if (file == NULL)
+                return -K_EBADF;
+
+            uint32_t events = vfs_poll(file, wanted);
+
+            if ((events & VFS_POLLIN) && sets[0] != 0)
+            {
+                result[0][fd / 8] |= (uint8_t)(1u << (fd % 8));
+                ready++;
+            }
+
+            if ((events & VFS_POLLOUT) && sets[1] != 0)
+            {
+                result[1][fd / 8] |= (uint8_t)(1u << (fd % 8));
+                ready++;
+            }
+        }
+
+        if (ready > 0 || timeout_ms == 0 || (end != 0 && hal_timer_ns() >= end))
+        {
+            for (int k = 0; k < 3; k++)
+            {
+                if (sets[k] != 0)
+                    k_memcpy((void *)(uintptr_t)sets[k], result[k], bytes);
+            }
+
+            return ready;
+        }
+
+        wait_a_little();
+    }
+}
+
+/* Timeouts as the different select/poll flavours pass them: -1 = no limit. */
+static int64_t timeval_ms(uint32_t address)
+{
+    int32_t tv[2];
+
+    if (address == 0)
+        return -1;
+
+    if (copy_in(tv, address, 8) != 0)
+        return -1;
+
+    return (int64_t)tv[0] * 1000 + tv[1] / 1000;
+}
+
+static int64_t timespec_ms(uint32_t address, int wide)
+{
+    if (address == 0)
+        return -1;
+
+    if (wide)
+    {
+        int64_t ts[2];
+
+        return copy_in(ts, address, 16) != 0 ? -1 : ts[0] * 1000 + ts[1] / 1000000;
+    }
+
+    int32_t ts[2];
+
+    return copy_in(ts, address, 8) != 0 ? -1 : (int64_t)ts[0] * 1000 + ts[1] / 1000000;
+}
+
 /* --- misc --- */
 
 static int32_t sys_uname(uint32_t address)
@@ -1167,6 +1350,27 @@ int32_t user_syscall(const hal_user_syscall_t *call)
     case SYS_getrlimit:
     case SYS_ugetrlimit:
         return sys_getrlimit(a[0], a[1]);
+
+    case SYS_socketcall:
+        return user_socketcall(a[0], a[1]);
+
+    case SYS_poll:
+        return sys_poll(a[0], a[1], (int32_t)a[2]);
+
+    case SYS_ppoll:
+    case SYS_ppoll_time64:
+    {
+        int64_t ms = timespec_ms(a[2], call->number == SYS_ppoll_time64);
+
+        return sys_poll(a[0], a[1], ms < 0 ? -1 : ms > 0x7FFFFFFF ? 0x7FFFFFFF : (int32_t)ms);
+    }
+
+    case SYS__newselect:
+        return sys_select(a[0], a[1], a[2], a[3], timeval_ms(a[4]));
+
+    case SYS_pselect6:
+    case SYS_pselect6_time64:
+        return sys_select(a[0], a[1], a[2], a[3], timespec_ms(a[4], call->number == SYS_pselect6_time64));
 
     case SYS_getrandom:
         return sys_getrandom(a[0], a[1]);

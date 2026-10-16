@@ -513,3 +513,102 @@ int net_dns_parse_response(const uint8_t *data, size_t len, uint16_t id, uint8_t
 
     return 1;
 }
+
+/* --- TCP --- */
+
+#define TCP_OPT_END 0
+#define TCP_OPT_NOP 1
+#define TCP_OPT_MSS 2
+
+static uint32_t tcp_pseudo_sum(const uint8_t source_ip[4], const uint8_t destination_ip[4],
+                               size_t tcp_length)
+{
+    uint32_t sum = net_checksum_add(source_ip, 4, 0);
+
+    sum = net_checksum_add(destination_ip, 4, sum);
+
+    return sum + NET_IP_PROTO_TCP + (uint32_t)tcp_length;
+}
+
+size_t net_tcp_build(uint8_t *out, const net_tcp_t *tcp, const uint8_t source_ip[4],
+                     const uint8_t destination_ip[4])
+{
+    size_t header = NET_TCP_HEADER + (tcp->mss != 0 ? 4 : 0);
+
+    put16(out, tcp->source_port);
+    put16(out + 2, tcp->destination_port);
+    put32(out + 4, tcp->sequence);
+    put32(out + 8, tcp->acknowledge);
+    out[12] = (uint8_t)((header / 4) << 4); /* data offset in 32-bit words */
+    out[13] = tcp->flags;
+    put16(out + 14, tcp->window);
+    put16(out + 16, 0); /* checksum, below */
+    put16(out + 18, 0); /* urgent pointer */
+
+    if (tcp->mss != 0)
+    {
+        out[20] = TCP_OPT_MSS;
+        out[21] = 4;
+        put16(out + 22, tcp->mss);
+    }
+
+    if (tcp->data_length > 0)
+        k_memcpy(out + header, tcp->data, tcp->data_length);
+
+    size_t length = header + tcp->data_length;
+
+    put16(out + 16, net_checksum_finish(net_checksum_add(
+                        out, length, tcp_pseudo_sum(source_ip, destination_ip, length))));
+
+    return length;
+}
+
+int net_tcp_parse(const uint8_t *data, size_t len, const uint8_t source_ip[4],
+                  const uint8_t destination_ip[4], net_tcp_t *tcp)
+{
+    if (len < NET_TCP_HEADER)
+        return -1;
+
+    size_t header = (size_t)(data[12] >> 4) * 4;
+
+    if (header < NET_TCP_HEADER || header > len)
+        return -1;
+
+    if (net_checksum_finish(net_checksum_add(data, len, tcp_pseudo_sum(source_ip, destination_ip, len))) != 0)
+        return -1;
+
+    tcp->source_port = get16(data);
+    tcp->destination_port = get16(data + 2);
+    tcp->sequence = get32(data + 4);
+    tcp->acknowledge = get32(data + 8);
+    tcp->flags = data[13] & 0x3F;
+    tcp->window = get16(data + 14);
+    tcp->mss = 0;
+    tcp->data = data + header;
+    tcp->data_length = len - header;
+
+    /* Options: only the MSS matters; the rest is skipped by length. */
+    for (size_t i = NET_TCP_HEADER; i < header;)
+    {
+        uint8_t kind = data[i];
+
+        if (kind == TCP_OPT_END)
+            break;
+
+        if (kind == TCP_OPT_NOP)
+        {
+            i++;
+            continue;
+        }
+
+        if (i + 1 >= header || data[i + 1] < 2 || i + data[i + 1] > header)
+            return -1;
+
+        if (kind == TCP_OPT_MSS && data[i + 1] == 4)
+            tcp->mss = get16(data + i + 2);
+
+        i += data[i + 1];
+    }
+
+    return 0;
+}

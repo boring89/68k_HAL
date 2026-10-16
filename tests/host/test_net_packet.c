@@ -305,8 +305,66 @@ static void test_eth(void)
     TEST_ASSERT_EQ_INT(0x06, frame[13]);
 }
 
+static void test_tcp(void)
+{
+    uint8_t packet[200];
+    const uint8_t data[] = "GET / HTTP/1.0\r\n\r\n";
+    net_tcp_t tcp = {49152, 80, 0x11223344u, 0x55667788u, NET_TCP_ACK | NET_TCP_PSH, 8192, 0, data, sizeof(data) - 1};
+    net_tcp_t parsed;
+
+    size_t length = net_tcp_build(packet, &tcp, ip_a, ip_b);
+
+    TEST_ASSERT_EQ_INT(20 + 18, length);
+    TEST_ASSERT_EQ_INT(0, net_tcp_parse(packet, length, ip_a, ip_b, &parsed));
+    TEST_ASSERT_EQ_INT(49152, parsed.source_port);
+    TEST_ASSERT_EQ_INT(80, parsed.destination_port);
+    TEST_ASSERT_EQ_INT(0x11223344u, parsed.sequence);
+    TEST_ASSERT_EQ_INT(0x55667788u, parsed.acknowledge);
+    TEST_ASSERT_EQ_INT(NET_TCP_ACK | NET_TCP_PSH, parsed.flags);
+    TEST_ASSERT_EQ_INT(8192, parsed.window);
+    TEST_ASSERT_EQ_INT(0, parsed.mss);
+    TEST_ASSERT_EQ_INT(18, parsed.data_length);
+    TEST_ASSERT(memcmp(parsed.data, data, 18) == 0);
+
+    /* The pseudo header covers the addresses; a flipped bit is caught. */
+    const uint8_t other[4] = {10, 0, 2, 99};
+
+    TEST_ASSERT_EQ_INT(-1, net_tcp_parse(packet, length, ip_a, other, &parsed));
+    packet[25] ^= 1;
+    TEST_ASSERT_EQ_INT(-1, net_tcp_parse(packet, length, ip_a, ip_b, &parsed));
+    TEST_ASSERT_EQ_INT(-1, net_tcp_parse(packet, 19, ip_a, ip_b, &parsed));
+}
+
+static void test_tcp_mss_option(void)
+{
+    uint8_t packet[40];
+    net_tcp_t syn = {1000, 80, 1, 0, NET_TCP_SYN, 4096, 1460, NULL, 0};
+    net_tcp_t parsed;
+
+    size_t length = net_tcp_build(packet, &syn, ip_a, ip_b);
+
+    TEST_ASSERT_EQ_INT(24, length);
+    TEST_ASSERT_EQ_INT(0x60, packet[12]); /* data offset 6 words */
+    TEST_ASSERT_EQ_INT(0, net_tcp_parse(packet, length, ip_a, ip_b, &parsed));
+    TEST_ASSERT_EQ_INT(1460, parsed.mss);
+    TEST_ASSERT_EQ_INT(0, parsed.data_length);
+
+    /* A bad option length (runs past the header) is rejected: fix the checksum around it. */
+    packet[21] = 9;
+    packet[16] = packet[17] = 0;
+
+    uint16_t sum = net_checksum_finish(net_checksum_add(packet, length,
+                                                         net_checksum_add(ip_b, 4, net_checksum_add(ip_a, 4, 0)) + 6 + length));
+
+    packet[16] = (uint8_t)(sum >> 8);
+    packet[17] = (uint8_t)sum;
+    TEST_ASSERT_EQ_INT(-1, net_tcp_parse(packet, length, ip_a, ip_b, &parsed));
+}
+
 int main(void)
 {
+    TEST_RUN(test_tcp);
+    TEST_RUN(test_tcp_mss_option);
     TEST_RUN(test_checksum);
     TEST_RUN(test_eth);
     TEST_RUN(test_arp);

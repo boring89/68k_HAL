@@ -13,6 +13,7 @@
 
 #include "kernel/lib/k_string.h"
 #include "kernel/lib/k_number.h"
+#include "kernel/lib/k_memory.h"
 
 #include "kernel/m68k/demo.h"
 #include "kernel/mac/machine.h"
@@ -110,6 +111,9 @@ static void cmd_beep(
     int argc,
     char **argv);
 static void cmd_video(
+    int argc,
+    char **argv);
+static void cmd_http(
     int argc,
     char **argv);
 static void cmd_mac(
@@ -225,7 +229,11 @@ static shell_command_entry_t commands[] =
         {COMMAND_VIDEO,
          "video",
          "Show the screen mode, or set one and draw a test pattern (video <width> <height>)",
-         cmd_video}};
+         cmd_video},
+        {COMMAND_HTTP,
+         "http",
+         "Fetch a web page over TCP (http <host> [port [path]])",
+         cmd_http}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -1421,4 +1429,93 @@ static void cmd_video(
     k_utoa(fb.height, number);
     terminal_write(number);
     terminal_write_line(" 32 bpp");
+}
+
+/* GET a page: host is an address or a name; the answer (headers and body) is written to the terminal. */
+static void cmd_http(
+    int argc,
+    char **argv)
+{
+    uint8_t ip[4];
+
+    if (argc < 2)
+    {
+        terminal_write_line("usage: http <host> [port [path]]");
+        return;
+    }
+
+    if (parse_ip(argv[1], ip) != 0)
+    {
+        int status = net_dns_resolve(argv[1], ip, 5000);
+
+        if (status != 0)
+        {
+            terminal_write_line("http: cannot find that name");
+            return;
+        }
+    }
+
+    int port = 80;
+    const char *path = "/";
+
+    if (argc > 2)
+        k_atoi(argv[2], &port);
+
+    if (argc > 3)
+        path = argv[3];
+
+    char request[256];
+    size_t length = 0;
+    const char *parts[] = {"GET ", path, " HTTP/1.0\r\nHost: ", argv[1], "\r\nConnection: close\r\n\r\n"};
+
+    for (unsigned int i = 0; i < sizeof(parts) / sizeof(parts[0]); i++)
+    {
+        size_t n = k_strlen(parts[i]);
+
+        if (length + n >= sizeof(request))
+        {
+            terminal_write_line("http: the request is too long");
+            return;
+        }
+
+        k_memcpy(request + length, parts[i], n);
+        length += n;
+    }
+
+    int connection = net_tcp_connect(ip, (uint16_t)port, 5000);
+
+    if (connection < 0)
+    {
+        terminal_write_line("http: cannot connect");
+        return;
+    }
+
+    if (net_tcp_send_all(connection, request, length, 5000) != 0)
+    {
+        terminal_write_line("http: cannot send");
+        net_tcp_close(connection);
+        return;
+    }
+
+    char buffer[256];
+    size_t shown = 0;
+    int n;
+
+    while ((n = net_tcp_recv(connection, buffer, sizeof(buffer) - 1, 5000)) > 0)
+    {
+        for (int i = 0; i < n && shown < 4000; i++, shown++)
+        {
+            char c = buffer[i];
+
+            if (c != '\r')
+                terminal_put_char(c);
+        }
+    }
+
+    terminal_newline();
+
+    if (n != TCP_EOF)
+        terminal_write_line("http: the connection broke off");
+
+    net_tcp_close(connection);
 }

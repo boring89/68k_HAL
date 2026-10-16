@@ -92,6 +92,12 @@ void user_init(void);
  */
 int32_t user_run(const char *path, const char *const *argv, const char *const *envp);
 
+/* socket.c: the i386 socketcall(call, args) multiplexer (BSD sockets, AF_INET). */
+int32_t user_socketcall(uint32_t call, uint32_t args_address);
+
+/* fcntl(F_SETFL, O_NONBLOCK) on a socket (does nothing for other files). */
+void user_socket_set_nonblock(vfs_file_t *file, int enabled);
+
 /* syscall.c */
 int32_t user_syscall(const hal_user_syscall_t *call);
 

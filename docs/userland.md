@@ -121,6 +121,8 @@ compiled by tcc: fib(20)=6765 1099511627 ok 6.28
 | 行程資訊 | `getpid`、`gettid`、`getppid`、`getuid32` 等、`uname`、`getrlimit`、`ugetrlimit`、`umask` |
 | 執行緒 | `set_thread_area`（TLS，GDT 項目 0x33）、`set_tid_address` |
 | 訊號 | `rt_sigaction`、`rt_sigprocmask`（接受並忽略）；`kill`/`tgkill` 對自己 = 結束程式 |
+| 網路 | `socketcall`（`socket`、`bind`、`connect`、`listen`、`accept`、`send`/`recv`/`sendto`/`recvfrom`/`sendmsg`/`recvmsg`、`shutdown`、`getsockname`/`getpeername`、`setsockopt`/`getsockopt`，見 `docs/net.md` 3.5） |
+| 等待 | `poll`、`ppoll`、`_newselect`、`pselect6`（檔案、console 與 socket） |
 | 其他 | `ioctl`（一律 `ENOTTY`）、`getrandom` |
 
 沒實作的呼叫回傳 `-ENOSYS`，並在 console 印一次：

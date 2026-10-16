@@ -47,14 +47,39 @@ QEMU 預設網卡是 Intel 82540EM（PCI 8086:100E）。資料來源：Intel 825
 - `net.c`：狀態與流程：裝置註冊、ARP 快取（8 項）、收到封包的分派、回應 ping 與 ARP、UDP 監聽、`net_dhcp`（DISCOVER → OFFER → REQUEST → ACK，每 2 秒重試）、`net_ping`、`net_dns_resolve`。
 - shell 指令：`net`（網卡與位址）、`dhcp`、`ping a.b.c.d`、`dns 名字`。
 
+## 3.5 TCP 與 socket（Q9）
+
+比喻：UDP 像寄明信片（可能掉、可能亂序）；TCP 像打電話：先撥號（三次握手），之後兩端都有「一條可靠的位元組流」，掉了的封包由雙方默默補寄。
+
+```
+ 客戶端                          伺服器
+  SYN (seq=x) ───────────────►
+              ◄───────────── SYN+ACK (seq=y, ack=x+1)
+  ACK (ack=y+1) ─────────────►          ← ESTABLISHED
+  資料 (seq=x+1..) ──────────►          ← 收到後回 ACK（ack = 下一個要的位元組）
+  FIN ───────────────────────►          ← 我這邊沒有資料了；對方也 FIN 才完全結束
+```
+
+`kernel/net/tcp.c`（RFC 793）：
+- **狀態機**：CLOSED、LISTEN、SYN_SENT、SYN_RECEIVED、ESTABLISHED、FIN_WAIT_1/2、CLOSING、TIME_WAIT、CLOSE_WAIT、LAST_ACK。
+- **可靠傳輸**：每個連線有 16 KiB 的傳送環與接收環；送出的資料留在傳送環裡直到被 ACK；逾時（1 s 起、每次加倍到 8 s、最多 6 次）就「退回最舊未確認的位元組」全部重送（go-back-N）。
+- **流量控制**：每個封包帶「視窗」（接收環剩多少空間）；對方視窗是 0 時定期送 1 位元組探測。
+- **沒有的**：亂序資料（收到缺口就丟掉、重複 ACK 要對方重送）、壅塞控制、選擇性確認、視窗縮放、緊急資料。TIME_WAIT 只有 2 秒。
+- 純資料與函式：封包用函式指標送出、時間用函式指標取得，所以 `tests/host/test_tcp.c` 把兩個 TCP 堆疊接在一起（可以隨機掉封包、停電話線）測試：握手與關閉、30 萬位元組傳輸、14% 封包遺失仍正確、SYN 重送、被拒絕（RST）、重設、視窗填滿與恢復、逾時。
+
+`net.c` 把 TCP 接到 IP（協定 6），並提供會等待的輔助函式 `net_tcp_connect/send_all/recv/close`。shell 指令 `http <host> [port [path]]` 取得網頁（host 可以是名字，會先用 DNS）。
+
+**給使用者程式的 BSD socket**（`kernel/user/socket.c`）：`socket(AF_INET, SOCK_STREAM | SOCK_DGRAM)`、`bind`、`connect`、`listen`、`accept`、`send/recv/sendto/recvfrom/sendmsg/recvmsg`、`shutdown`、`getsockname/getpeername`、`setsockopt`（只認 `SO_RCVTIMEO`）、`getsockopt`，加上 `poll`、`select`。i386 Linux 把所有 socket 呼叫包成一個系統呼叫 `socketcall(編號, 參數陣列)`（musl 用它）。socket 是一個檔案描述子，所以 `read/write/close/dup/poll` 都能用。`/etc/resolv.conf`（`nameserver 10.0.2.3`）與 `/etc/hosts`（initrd 裡）讓 musl 的 `getaddrinfo` 可以運作。範例：`userland/httpget.c`（TCP）、`userland/dnsquery.c`（UDP 與 `getaddrinfo`）。
+
 ## 4. 測試
 
 - host：`test_net_packet`。
 - `make test-qemu`（QEMU 帶 `-netdev user -device e1000`）：selftest `test_net` 做 DHCP（必須拿到 10.0.2.15、閘道 10.0.2.2、DNS 10.0.2.3）、ping 閘道、DNS 查 `localhost`。
 - `make test-shell`：在開機的 ISO 上輸入 `dhcp`、`ping 10.0.2.2`、`dns localhost` 並檢查輸出。
+- `make test-net`：host 上開一個 `python3 -m http.server`（綁 127.0.0.1），QEMU 內經 slirp 的 10.0.2.2（= host）用 shell 的 `http` 與使用者程式 `httpget`（BSD socket）取得網頁並比對內容；`dnsquery` 測 UDP socket、`poll`、`getaddrinfo`。
 
 ## 5. 限制
 
-- 沒有 TCP、沒有 IP 分片重組、沒有 IPv6、沒有 DHCP 租約更新、ARP 快取不過期。
-- 一次只有一張網卡；使用者程式還不能用 socket（沒有 `socket` 系統呼叫）。
+- TCP 的限制見第 3.5 節；沒有 IP 分片重組、沒有 IPv6、沒有 DHCP 租約更新、ARP 快取不過期。
+- 一次只有一張網卡；socket 只有 IPv4、沒有 `SOCK_RAW`、Unix domain socket 與 `socketpair`；被中斷的阻塞呼叫不會回 `EINTR`（沒有訊號）。
 - 沒有 virtio-net 與其他網卡。

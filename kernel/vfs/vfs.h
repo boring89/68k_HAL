@@ -48,6 +48,14 @@
 #define VFS_DT_DIR 4
 #define VFS_DT_REG 8
 
+/* poll() event bits (Linux asm-generic/poll.h). */
+#define VFS_POLLIN 0x0001u
+#define VFS_POLLPRI 0x0002u
+#define VFS_POLLOUT 0x0004u
+#define VFS_POLLERR 0x0008u
+#define VFS_POLLHUP 0x0010u
+#define VFS_POLLNVAL 0x0020u
+
 #define VFS_NAME_MAX 255
 #define VFS_PATH_MAX 512
 
@@ -82,6 +90,12 @@ typedef struct
     int32_t (*readdir)(vfs_file_t *file, uint32_t index, vfs_dirent_t *entry);
     int32_t (*stat)(vfs_file_t *file, vfs_stat_t *stat);
     int32_t (*truncate)(vfs_file_t *file, uint64_t size);
+    /*
+     * Which of the VFS_POLL* events in events can happen now without waiting
+     * (read: data or end of file; write: room). A file without it is always
+     * ready for reading and writing. May poll the hardware; must not block.
+     */
+    uint32_t (*poll)(vfs_file_t *file, uint32_t events);
     void (*close)(vfs_file_t *file);
 } vfs_file_ops_t;
 
@@ -156,6 +170,9 @@ int32_t vfs_fstat(vfs_file_t *file, vfs_stat_t *stat);
 int32_t vfs_readdir(vfs_file_t *file, vfs_dirent_t *entry);
 
 int32_t vfs_ftruncate(vfs_file_t *file, uint64_t size);
+
+/* The events (VFS_POLL*) of events that are ready now. */
+uint32_t vfs_poll(vfs_file_t *file, uint32_t events);
 
 /* Helper for file systems: allocate a vfs_file_t. NULL if out of memory. */
 vfs_file_t *vfs_file_new(const vfs_file_ops_t *ops, void *priv, uint32_t flags);

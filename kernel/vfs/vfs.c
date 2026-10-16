@@ -398,3 +398,12 @@ int32_t vfs_ftruncate(vfs_file_t *file, uint64_t size)
 
     return file->ops->truncate != NULL ? file->ops->truncate(file, size) : -K_EINVAL;
 }
+
+uint32_t vfs_poll(vfs_file_t *file, uint32_t events)
+{
+    if (file->ops->poll != NULL)
+        return file->ops->poll(file, events);
+
+    /* Plain files and directories never make anybody wait. */
+    return events & (VFS_POLLIN | VFS_POLLOUT);
+}
