@@ -15,6 +15,9 @@ HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 
 .DEFAULT_GOAL := all
 
+# The program disk (see the user programs section); defined early because the iso rule needs it.
+INITRD := build/initrd.tar
+
 # Musashi (third_party/musashi) is unmodified third-party code. m68kmake
 # generates m68kops.c/h from m68k_in.c. The core always includes its FPU code,
 # which needs softfloat. Musashi itself is built without -Werror (its style
@@ -437,8 +440,7 @@ test-sst: $(BUILD)/host/sst_run
 
 SDK_LIBC := build/sdk/sysroot/lib/librt68k.a
 USERLAND_SOURCES := $(wildcard userland/*.c)
-USERLAND_BINS := $(patsubst userland/%.c,build/initrd/bin/%,$(USERLAND_SOURCES)) build/initrd/bin/lua build/initrd/bin/tcc build/initrd/bin/sqlite3
-INITRD := build/initrd.tar
+USERLAND_BINS := $(patsubst userland/%.c,build/initrd/bin/%,$(USERLAND_SOURCES)) build/initrd/bin/lua build/initrd/bin/tcc build/initrd/bin/sqlite3 build/initrd/bin/kilo
 
 # musl and the runtime helpers (downloads musl on the first run).
 sdk: $(SDK_LIBC)
@@ -454,6 +456,11 @@ build/initrd/bin/%: userland/%.c $(SDK_LIBC) tools/68khal-cc
 build/initrd/bin/lua: tools/build_lua.sh $(SDK_LIBC) tools/68khal-cc
 	mkdir -p $(dir $@)
 	tools/build_lua.sh $@
+
+# Kilo, a terminal text editor: needs raw mode, escape sequences and the window size.
+build/initrd/bin/kilo: tools/build_kilo.sh $(SDK_LIBC) tools/68khal-cc
+	mkdir -p $(dir $@)
+	tools/build_kilo.sh $@
 
 # SQLite, a database engine as a bigger test of the SDK (downloads its source on the first run).
 build/initrd/bin/sqlite3: tools/build_sqlite.sh $(SDK_LIBC) tools/68khal-cc
@@ -552,6 +559,10 @@ test-shell: iso
 		"ab{up}c=you typed: abc (3 characters)" \
 		"run /bin/readline=Type something" \
 		"{ctrl-c}=^C" \
+		"run /bin/hello=Hello from user mode!" \
+		"run /bin/kilo /tmp/note.txt=HELP:" \
+		"hello kilo{ctrl-s}=bytes written on disk" \
+		"{ctrl-q}{ctrl-q}{ctrl-q}{ctrl-q}=" \
 		"run /bin/hello=Hello from user mode!"
 
 # GRUB's graphics mode (640x480) must still show the test pattern: nothing the

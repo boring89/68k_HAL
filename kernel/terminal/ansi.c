@@ -329,8 +329,14 @@ static void normal_byte(char c)
         return;
 
     case '\n':
-    case '\b':
         terminal_put_char(c);
+        return;
+
+    case '\b':
+        /* Moves left without erasing (a program that wants a blank prints "\b \b"). */
+        terminal_mirror_raw(c);
+        terminal_get_cursor(&x, &y);
+        terminal_move_cursor(x - 1, y);
         return;
 
     default:

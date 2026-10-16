@@ -148,6 +148,13 @@ def main():
                 return 1
             print("shell_test: ok: %s" % command)
 
+        # SHELL_TEST_DUMP=file.ppm: save a screendump after the last step (to look at by hand).
+        dump_path = os.environ.get("SHELL_TEST_DUMP")
+        if dump_path:
+            time.sleep(0.5)
+            send("screendump " + dump_path)
+            time.sleep(1.0)
+
         # SHELL_TEST_SCREEN=WxH: finally take a screendump and check the test pattern.
         screen = os.environ.get("SHELL_TEST_SCREEN")
         if screen:

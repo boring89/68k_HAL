@@ -64,6 +64,9 @@ tools/68khal-cc -O2 myprog.c -o myprog      # 與 gcc 用法相同，輸出靜�
 | **Lua 5.4.7**（MIT） | lua.org 官方 tarball，SHA-256 驗證 | `tools/build_lua.sh`（`make initrd` 會呼叫） | `run /bin/lua -e print(6*7)` 或 `run /bin/lua /data/test.lua` |
 | **TinyCC 0.9.27**（LGPL-2.1） | download.savannah.gnu.org，SHA-256 驗證 | `tools/build_tcc.sh` | 見下 |
 | **SQLite 3.54.1**（公有領域） | sqlite.org 的 amalgamation，用官網公布的 SHA3-256 驗證 | `tools/build_sqlite.sh`（編譯約 35 秒） | `run /bin/sqlite3 /tmp/db .read /data/test.sql`（輸出與 host 的逐字相同，包含 `PRAGMA integrity_check`、`VACUUM`） |
+| **Kilo**（BSD-2-Clause，antirez） | GitHub 固定 commit 的單一檔案 `kilo.c`，SHA-256 驗證 | `tools/build_kilo.sh` | `run /bin/kilo /tmp/note.txt`：Ctrl-S 存檔、Ctrl-Q 結束、Ctrl-F 搜尋 |
+
+Kilo 是終端機的壓力測試：raw 模式、ESC 序列的畫面更新、視窗大小、方向鍵（見 5.5）。它還挖出兩個問題：`ftruncate64` 沒實作；以及「寫滿整行時要延遲換行」（像 xterm，否則狀態列每行多一個空行）。
 
 SQLite 是很好的「系統呼叫壓力測試」：它用到 `fcntl` 檔案鎖（單一程式，所以鎖一律成功）、`pread/pwrite`、`fsync`、`ftruncate`、`fchmod/fchown`（接受並忽略）、日誌檔的建立與刪除。移植過程發現並修正：程式映像一頁一個 region 會超過 128 個上限（現在相鄰的 region 會合併）；缺 `pwrite64`、檔案鎖與 `fchmod`。
 
@@ -116,7 +119,7 @@ compiled by tcc: fib(20)=6765 1099511627 ok 6.28
 | 類別 | 系統呼叫 |
 |---|---|
 | 結束 | `exit`、`exit_group` |
-| 檔案 | `fdatasync`、`chmod/fchmod/chown32/fchown32`（空操作）、檔案鎖（`fcntl` 的 `F_SETLK` 等，一律成功）、`read`、`write`、`readv`、`writev`、`open`、`openat`（僅絕對路徑）、`close`、`lseek`、`_llseek`、`pread64`、`ftruncate`、`fsync`、`dup`、`dup2`、`fcntl64` |
+| 檔案 | `fdatasync`、`chmod/fchmod/chown32/fchown32`（空操作）、檔案鎖（`fcntl` 的 `F_SETLK` 等，一律成功）、`read`、`write`、`readv`、`writev`、`open`、`openat`（僅絕對路徑）、`close`、`lseek`、`_llseek`、`pread64`、`ftruncate`、`ftruncate64`、`fsync`、`dup`、`dup2`、`fcntl64` |
 | 檔案資訊 | `stat64`、`lstat64`、`fstat64`、`fstatat64`、`statx`、`getdents64`、`access`、`faccessat`、`readlink`（一律 EINVAL） |
 | 目錄 | `mkdir`、`mkdirat`、`unlink`、`unlinkat`、`rmdir`、`rename`、`renameat`、`getcwd` |
 | 記憶體 | `brk`、`mmap2`（匿名與檔案私有，`prot` 有效）、`munmap`、`mremap`（一律搬移）、`mprotect`（真的改頁面權限）、`madvise`（忽略） |

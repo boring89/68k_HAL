@@ -126,6 +126,37 @@ static void test_wraps_at_width(void)
     TEST_ASSERT_EQ_INT(1, fake_cursor_y);
 }
 
+/* A full line waits for the next character before it breaks (so a newline right after it does not leave a blank line). */
+static void test_full_line_breaks_late(void)
+{
+    start();
+
+    terminal_write("abcd");
+
+    TEST_ASSERT_EQ_STR("abcd", row(0));
+    TEST_ASSERT_EQ_INT(3, fake_cursor_x);
+    TEST_ASSERT_EQ_INT(0, fake_cursor_y);
+
+    terminal_write("\nx");
+
+    TEST_ASSERT_EQ_STR("x   ", row(1));
+    TEST_ASSERT_EQ_STR("    ", row(2));
+
+    /* Backspace erases the last character of the full line. */
+    start();
+    terminal_write("abcd\b");
+    TEST_ASSERT_EQ_STR("abc ", row(0));
+    TEST_ASSERT_EQ_INT(3, fake_cursor_x);
+
+    /* A full bottom line scrolls only when more text arrives. */
+    start();
+    terminal_write("\n\nabcd");
+    TEST_ASSERT_EQ_STR("abcd", row(2));
+    terminal_write("e");
+    TEST_ASSERT_EQ_STR("abcd", row(1));
+    TEST_ASSERT_EQ_STR("e   ", row(2));
+}
+
 static void test_scrolls_at_height(void)
 {
     start();
@@ -255,6 +286,7 @@ int main(void)
     TEST_RUN(test_register_rejects);
     TEST_RUN(test_write_and_cursor);
     TEST_RUN(test_wraps_at_width);
+    TEST_RUN(test_full_line_breaks_late);
     TEST_RUN(test_scrolls_at_height);
     TEST_RUN(test_backspace);
     TEST_RUN(test_write_color_restores);

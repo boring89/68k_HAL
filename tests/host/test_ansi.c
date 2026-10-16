@@ -218,6 +218,45 @@ static void test_control_characters(void)
     TEST_ASSERT_EQ_INT(9, cursor_x);
 }
 
+static void test_backspace_only_moves(void)
+{
+    start();
+    put("abc\b\bX");
+
+    TEST_ASSERT_EQ_STR("aXc       ", row(0));
+    TEST_ASSERT_EQ_INT(2, cursor_x);
+
+    put("\b \b");
+    TEST_ASSERT_EQ_STR("a c       ", row(0));
+    TEST_ASSERT_EQ_INT(1, cursor_x);
+
+    /* Not past the left edge. */
+    put("\b\b\b");
+    TEST_ASSERT_EQ_INT(0, cursor_x);
+}
+
+/* A line that fills the width breaks only when the next character (or newline) comes. */
+static void test_deferred_wrap(void)
+{
+    start();
+    put("0123456789\r\nnext");
+
+    TEST_ASSERT_EQ_STR("0123456789", row(0));
+    TEST_ASSERT_EQ_STR("next      ", row(1));
+
+    start();
+    put("0123456789");
+    TEST_ASSERT_EQ_INT(9, cursor_x);
+    TEST_ASSERT_EQ_INT(0, cursor_y);
+    put("x");
+    TEST_ASSERT_EQ_STR("x         ", row(1));
+
+    /* \r after a full line goes to the start of that same line. */
+    start();
+    put("0123456789\rY");
+    TEST_ASSERT_EQ_STR("Y123456789", row(0));
+}
+
 static void test_mirror_gets_everything(void)
 {
     start();
@@ -297,6 +336,8 @@ int main(void)
     TEST_RUN(test_erase);
     TEST_RUN(test_colors);
     TEST_RUN(test_control_characters);
+    TEST_RUN(test_backspace_only_moves);
+    TEST_RUN(test_deferred_wrap);
     TEST_RUN(test_mirror_gets_everything);
     TEST_RUN(test_unknown_and_private);
     TEST_RUN(test_split_sequence_and_limits);

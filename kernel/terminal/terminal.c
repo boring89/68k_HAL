@@ -7,6 +7,7 @@
 
 #include "kernel/display/text_display.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 
 /* NULL on a machine without a display: then every call does nothing. */
@@ -20,6 +21,13 @@ void terminal_set_mirror(void (*function)(char c))
 
 static int cursor_x = 0;
 static int cursor_y = 0;
+
+/*
+ * The last column was written: the cursor stays on it and the line breaks only when
+ * the next character comes (as on xterm), so a line that fills the width exactly does
+ * not get an empty line from its own newline.
+ */
+static bool wrap_pending;
 
 static color_t terminal_fg = COLOR_LIGHT_GREY;
 static color_t terminal_bg = COLOR_BLACK;
@@ -35,6 +43,7 @@ void terminal_init(void)
 
     cursor_x = 0;
     cursor_y = 0;
+    wrap_pending = false;
     terminal_fg = COLOR_LIGHT_GREY;
     terminal_bg = COLOR_BLACK;
 
@@ -51,12 +60,16 @@ void terminal_backspace(void)
     if (mirror != NULL)
         mirror('\b');
 
-    if (display == NULL || cursor_x == 0)
-    {
+    if (display == NULL)
         return;
-    }
 
-    cursor_x--;
+    /* After a full line the cursor is on the last character: erase that one. */
+    if (wrap_pending)
+        wrap_pending = false;
+    else if (cursor_x == 0)
+        return;
+    else
+        cursor_x--;
 
     display->put_cell(
         cursor_x,
@@ -117,6 +130,7 @@ void terminal_move_cursor(int x, int y)
 
     cursor_x = x;
     cursor_y = y;
+    wrap_pending = false;
 
     terminal_update_cursor();
 }
@@ -144,6 +158,7 @@ void terminal_clear(void)
 
     cursor_x = 0;
     cursor_y = 0;
+    wrap_pending = false;
 
     if (display == NULL)
         return;
@@ -188,6 +203,7 @@ static void newline_no_mirror(void)
         return;
 
     cursor_x = 0;
+    wrap_pending = false;
 
     cursor_y++;
 
@@ -246,6 +262,9 @@ void terminal_put_char(char c)
     if (mirror != NULL)
         mirror(c);
 
+    if (wrap_pending)
+        newline_no_mirror();
+
     display->put_cell(
         cursor_x,
         cursor_y,
@@ -253,13 +272,10 @@ void terminal_put_char(char c)
         terminal_fg,
         terminal_bg);
 
-    cursor_x++;
-
-    if (cursor_x >= display->width)
-    {
-        newline_no_mirror();
-        return;
-    }
+    if (cursor_x + 1 >= display->width)
+        wrap_pending = true;
+    else
+        cursor_x++;
 
     terminal_update_cursor();
 }

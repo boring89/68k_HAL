@@ -50,6 +50,7 @@
 #define SYS_readlink 85
 #define SYS_munmap 91
 #define SYS_ftruncate 93
+#define SYS_ftruncate64 194
 #define SYS_fsync 118
 #define SYS_uname 122
 #define SYS_mprotect 125
@@ -1287,6 +1288,14 @@ int32_t user_syscall(const hal_user_syscall_t *call)
         vfs_file_t *file = user_fd_get((int)a[0]);
 
         return file == NULL ? -K_EBADF : vfs_ftruncate(file, a[1]);
+    }
+
+    case SYS_ftruncate64:
+    {
+        /* (fd, length low, length high) */
+        vfs_file_t *file = user_fd_get((int)a[0]);
+
+        return file == NULL ? -K_EBADF : vfs_ftruncate(file, a[1] | ((uint64_t)a[2] << 32));
     }
 
     case SYS_fsync:
