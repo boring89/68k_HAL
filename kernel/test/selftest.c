@@ -9,6 +9,7 @@
 #include "selftest.h"
 
 #include "hal/boot.h"
+#include "hal/clock.h"
 #include "hal/mmu.h"
 
 #include "kernel/lib/k_memory.h"
@@ -212,6 +213,19 @@ static void test_m68k_guest_fline_exception(void)
     SELFTEST_ASSERT(m68k_vm_get_reg(M68K_VM_REG_D0 + 6) == 9);
 }
 
+/* QEMU's RTC starts at the host's time, so the year is at least 2020. */
+static void test_hal_clock(void)
+{
+    hal_datetime_t now;
+
+    SELFTEST_ASSERT(hal_clock_now(NULL) == -1);
+    SELFTEST_ASSERT(hal_clock_now(&now) == 0);
+    SELFTEST_ASSERT(now.year >= 2020 && now.year < 2100);
+    SELFTEST_ASSERT(now.month >= 1 && now.month <= 12);
+    SELFTEST_ASSERT(now.day >= 1 && now.day <= 31);
+    SELFTEST_ASSERT(now.hour < 24 && now.minute < 60 && now.second < 60);
+}
+
 /* make test-qemu passes -initrd "<file> testmod"; the file holds one line. */
 static void test_boot_module(void)
 {
@@ -266,6 +280,7 @@ void selftest_run(void)
     SELFTEST_RUN(test_hal_timer_ticks);
     SELFTEST_RUN(test_hal_cpu_idle);
     SELFTEST_RUN(test_boot_module);
+    SELFTEST_RUN(test_hal_clock);
     SELFTEST_RUN(test_m68k_guest_ram_size);
     SELFTEST_RUN(test_m68k_guest_program);
     SELFTEST_RUN(test_m68k_guest_divide_64);

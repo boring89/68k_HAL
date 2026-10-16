@@ -17,6 +17,7 @@
 #include "kernel/m68k/demo.h"
 #include "kernel/memory/memory.h"
 #include "hal/boot.h"
+#include "hal/clock.h"
 
 static void cmd_help(
     int argc,
@@ -55,6 +56,9 @@ static void cmd_m68k(
     int argc,
     char **argv);
 static void cmd_modules(
+    int argc,
+    char **argv);
+static void cmd_date(
     int argc,
     char **argv);
 
@@ -107,7 +111,11 @@ static shell_command_entry_t commands[] =
         {COMMAND_MODULES,
          "modules",
          "List files loaded by the boot loader",
-         cmd_modules}};
+         cmd_modules},
+        {COMMAND_DATE,
+         "date",
+         "Display the current date and time (UTC)",
+         cmd_date}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -545,4 +553,49 @@ static void cmd_modules(
         terminal_write(buffer);
         terminal_write_line(" bytes");
     }
+}
+
+/* Append value as exactly two decimal digits (0-99). */
+static char *put_two_digits(char *out, unsigned int value)
+{
+    *out++ = (char)('0' + value / 10 % 10);
+    *out++ = (char)('0' + value % 10);
+
+    return out;
+}
+
+static void cmd_date(
+    int argc,
+    char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    hal_datetime_t now;
+
+    if (hal_clock_now(&now) != 0)
+    {
+        terminal_write_line("Clock not available");
+        return;
+    }
+
+    /* YYYY-MM-DD HH:MM:SS UTC */
+    char text[24];
+    char *out = text;
+
+    out = put_two_digits(out, now.year / 100);
+    out = put_two_digits(out, now.year % 100);
+    *out++ = '-';
+    out = put_two_digits(out, now.month);
+    *out++ = '-';
+    out = put_two_digits(out, now.day);
+    *out++ = ' ';
+    out = put_two_digits(out, now.hour);
+    *out++ = ':';
+    out = put_two_digits(out, now.minute);
+    *out++ = ':';
+    out = put_two_digits(out, now.second);
+    k_strcpy(out, " UTC");
+
+    terminal_write_line(text);
 }

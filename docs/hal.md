@@ -112,6 +112,7 @@ kernel_main()（kernel/main.c）
 | | `hal_boot_module_count()`、`hal_boot_module(i, &m)` | | boot loader 載入的檔案（GRUB `module`、QEMU `-initrd "檔案 名稱,檔案 名稱"`）：位址、長度、名稱字串。shell 指令 `modules` 列出；QEMU 給的名稱是「檔案 名稱」整串 |
 | `hal/init.h` | `hal_init_console`、`hal_init_early`、`hal_init` | `platform/pc/hal_init.c` | 見第 3 節 |
 | `hal/framebuffer.h` | `hal_framebuffer_get(&fb)` | `platform/pc/video/hal_framebuffer.c` | 圖形模式的線性 framebuffer（位址、寬高、pitch、32 bpp 0x00RRGGBB）。文字模式回傳 -1。圖形模式要靠 Multiboot header 要求（flags bit 2，640x480x32）。GRUB 對 Multiboot 1 只看 header、不理會 `gfxpayload`（實測），所以同一份 kernel 連結兩次：`kernel.elf`（文字模式）與 `kernel-gfx.elf`（`nasm -d GRAPHICS`，header 要求圖形模式），GRUB 選單有兩個項目。圖形模式時 console 只輸出到 serial，畫面只畫測試圖樣（`kernel/display/fb_pattern.c`）。QEMU `-kernel kernel-gfx.elf` 不提供 framebuffer（會印 `multiboot knows VBE. we don't`，無害），請用 ISO。檢查：`tools/fb_check.py`（開 ISO 的 graphics 項目並比對 screendump） |
+| `hal/clock.h` | `hal_clock_now(&t)` | `platform/pc/rtc/hal_clock.c` | 目前的 UTC 日期時間。讀 CMOS RTC（index 0x70 / data 0x71，OSDev Wiki "CMOS"）：等 update-in-progress 清除、連讀兩次一致才採用；BCD / 二進位、12 / 24 小時、世紀暫存器（0x32，沒有時 70–99 視為 19xx）的轉換在 `rtc_decode.c`（host 可測）。假設 RTC 存的是 UTC（QEMU 預設）。shell 指令 `date` |
 
 ### kernel 的裝置介面（由驅動程式實作）
 

@@ -151,6 +151,7 @@ HOST_LIB_SOURCES := \
 	kernel/terminal/terminal.c \
 	platform/pc/boot/hal_boot.c \
 	platform/pc/boot/multiboot.c \
+	platform/pc/rtc/rtc_decode.c \
 	$(wildcard emu/m68k/*.c)
 
 HOST_LIB_OBJECTS = $(HOST_LIB_SOURCES:%.c=$(BUILD)/host/obj/%.o) $(MUSASHI_OBJECTS)
