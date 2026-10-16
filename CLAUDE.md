@@ -39,7 +39,7 @@ hal/           HAL 介面（只有 .h）：cpu、irq、timer、mmu、boot（含 
 arch/x86/      CPU：cpu（hal_cpu、控制暫存器）、gdt、interrupt（IDT、例外、IRQ stub）、mmu（分頁、hal_mmu）、io（port I/O）、test
 platform/pc/   PC 平台：boot（Multiboot 進入點、hal_boot）、video（framebuffer）、rtc（CMOS 時鐘）、interrupt（8259 PIC、hal_irq）、timer（PIT、hal_timer）、hal_init.c、test
 drivers/       裝置驅動：vga、serial、ps2_keyboard、ps2_mouse
-kernel/        與硬體無關的核心：main.c、panic、memory（pmm、heap）、display、console、terminal、keyboard（keycode、state、keychar）、input、shell、log、printf、lib、m68k（guest RAM 與示範）、test
+kernel/        與硬體無關的核心：main.c、panic、memory（pmm、heap）、block（區塊裝置、ramdisk）、display、console、terminal、keyboard（keycode、state、keychar）、input、shell、log、printf、lib、m68k（guest RAM 與示範）、test
 emu/m68k/      68k 虛擬機：Musashi 的封裝層（vm）、A-line trap 分派（trap）、Musashi 設定（m68kconf.h）；freestanding/ 是 kernel 建置用的 libc 替身
 third_party/   第三方原始碼，不修改：musashi（68k CPU 核心，MIT）
 tests/host/    host 單元測試

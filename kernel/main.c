@@ -13,6 +13,8 @@
 #include "kernel/log/log.h"
 #include "kernel/printf/printf.h"
 
+#include "kernel/block/ramdisk.h"
+
 #include "kernel/input/event_buffer.h"
 
 #include "kernel/keyboard/state.h"
@@ -57,6 +59,9 @@ void kernel_main(void)
 
     /* Needs paging: the heap has its own virtual address range. */
     heap_vm_init();
+
+    /* Boot modules (hal/boot.h) become block devices ram0, ram1, ... */
+    ramdisk_register_boot_modules();
 
     /* Graphics mode has no text output yet: show a test pattern instead. */
     hal_framebuffer_t framebuffer;

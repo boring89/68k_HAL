@@ -16,6 +16,7 @@
 
 #include "kernel/m68k/demo.h"
 #include "kernel/memory/memory.h"
+#include "kernel/block/block.h"
 #include "hal/boot.h"
 #include "hal/clock.h"
 
@@ -59,6 +60,9 @@ static void cmd_modules(
     int argc,
     char **argv);
 static void cmd_date(
+    int argc,
+    char **argv);
+static void cmd_disks(
     int argc,
     char **argv);
 
@@ -115,7 +119,11 @@ static shell_command_entry_t commands[] =
         {COMMAND_DATE,
          "date",
          "Display the current date and time (UTC)",
-         cmd_date}};
+         cmd_date},
+        {COMMAND_DISKS,
+         "disks",
+         "List block devices",
+         cmd_disks}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -598,4 +606,33 @@ static void cmd_date(
     k_strcpy(out, " UTC");
 
     terminal_write_line(text);
+}
+
+static void cmd_disks(
+    int argc,
+    char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    if (block_device_count() == 0)
+    {
+        terminal_write_line("No block devices");
+        return;
+    }
+
+    for (unsigned int i = 0; i < block_device_count(); i++)
+    {
+        const block_device_t *disk = block_device_get(i);
+        char buffer[32];
+
+        terminal_write(disk->name);
+        terminal_write(": ");
+        k_utoa((uint32_t)disk->block_count, buffer);
+        terminal_write(buffer);
+        terminal_write(" x ");
+        k_utoa(disk->block_size, buffer);
+        terminal_write(buffer);
+        terminal_write_line(" bytes");
+    }
 }

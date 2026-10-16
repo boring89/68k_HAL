@@ -12,6 +12,8 @@
 #include "hal/clock.h"
 #include "hal/mmu.h"
 
+#include "kernel/block/block.h"
+#include "kernel/block/ramdisk.h"
 #include "kernel/lib/k_memory.h"
 #include "kernel/lib/k_string.h"
 #include "kernel/m68k/guest.h"
@@ -193,6 +195,29 @@ static void test_m68k_guest_divide_64(void)
     SELFTEST_ASSERT(m68k_vm_get_reg(M68K_VM_REG_D0 + 2) == 2);
 }
 
+/* The boot module became the block device ram0 (kernel_main registered it). */
+static void test_block_ramdisk_module(void)
+{
+    block_device_t *disk = block_device_find("ram0");
+
+    SELFTEST_ASSERT(disk != 0);
+
+    if (disk == 0)
+        return;
+
+    SELFTEST_ASSERT(disk->block_size == 512);
+    SELFTEST_ASSERT(disk->block_count == 2);
+
+    uint8_t blocks[1024];
+
+    SELFTEST_ASSERT(block_read(disk, 0, 2, blocks) == 0);
+    SELFTEST_ASSERT(k_memcmp(blocks, "selftest module\n", 16) == 0);
+    SELFTEST_ASSERT(blocks[16] == 0 && blocks[1023] == 0);
+
+    SELFTEST_ASSERT(block_read(disk, 1, 1, blocks) == 0);
+    SELFTEST_ASSERT(block_read(disk, 2, 1, blocks) == -1);
+}
+
 /* The guest RAM is 8 MiB by default and can be resized. */
 static void test_m68k_guest_ram_size(void)
 {
@@ -268,10 +293,11 @@ static void test_hal_clock(void)
     SELFTEST_ASSERT(now.hour < 24 && now.minute < 60 && now.second < 60);
 }
 
-/* make test-qemu passes -initrd "<file> testmod"; the file holds one line. */
+/* make test-qemu passes -initrd "<file> testmod"; the file is 1 KiB, the first bytes are the text. */
 static void test_boot_module(void)
 {
     static const char expected[] = "selftest module\n";
+    const size_t module_size = 1024;
     hal_boot_module_t module;
     unsigned int found = 0;
 
@@ -292,7 +318,7 @@ static void test_boot_module(void)
             continue;
 
         found++;
-        SELFTEST_ASSERT(module.length == sizeof(expected) - 1);
+        SELFTEST_ASSERT(module.length == module_size);
         SELFTEST_ASSERT(k_memcmp((const void *)(uintptr_t)module.base,
                                  expected, sizeof(expected) - 1) == 0);
 
@@ -324,6 +350,7 @@ void selftest_run(void)
     SELFTEST_RUN(test_hal_cpu_idle);
     SELFTEST_RUN(test_boot_module);
     SELFTEST_RUN(test_hal_clock);
+    SELFTEST_RUN(test_block_ramdisk_module);
     SELFTEST_RUN(test_m68k_guest_ram_size);
     SELFTEST_RUN(test_m68k_guest_program);
     SELFTEST_RUN(test_m68k_guest_divide_64);

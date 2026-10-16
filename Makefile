@@ -138,6 +138,8 @@ HOST_LIB_SOURCES := \
 	drivers/ps2_keyboard/scancode.c \
 	drivers/ps2_mouse/mouse_packet.c \
 	kernel/input/event.c \
+	kernel/block/block.c \
+	kernel/block/ramdisk.c \
 	kernel/console/sink.c \
 	kernel/display/text_display.c \
 	kernel/display/fb_pattern.c \
@@ -206,9 +208,10 @@ QEMU_TEST_FLAGS := -display none -serial stdio -no-reboot \
 
 # Boot module for the selftest: -initrd "<file> <name>". Fixed content, so
 # the selftest can check it (see platform/pc/test/selftest_pc.c).
-$(BUILD)/test/module_test.txt:
+$(BUILD)/test/module_test.txt: Makefile
 	@mkdir -p $(dir $@)
 	@printf 'selftest module\n' > $@
+	@truncate -s 1024 $@
 
 test-qemu: $(BUILD)/test/module_test.txt
 	$(MAKE) --no-print-directory BUILD=$(BUILD)/test \

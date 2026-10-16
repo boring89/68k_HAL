@@ -22,7 +22,8 @@ typedef enum
     COMMAND_MMAP,
     COMMAND_M68K,
     COMMAND_MODULES,
-    COMMAND_DATE
+    COMMAND_DATE,
+    COMMAND_DISKS
 
 } shell_command_id_t;
 
