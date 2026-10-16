@@ -28,14 +28,14 @@ The long-term vision is simple:
 - Interrupt handling (IDT / PIC)
 - Basic keyboard input
 - Modular HAL architecture
-- 68k virtual machine (Musashi) and a Macintosh IIci machine model that boots a user-supplied ROM and System 7.5.3 disk image to the Finder desktop (experimental, see [docs/mac.md](docs/mac.md))
+- 68k virtual machine (Musashi) and a Macintosh IIci machine model that boots a user-supplied ROM and System 7.5.3 disk image to the Finder desktop, with keyboard and mouse (experimental, see [docs/mac.md](docs/mac.md))
 
 ### Planned
 
 - 68k compatibility layer
 - Modern memory management
 - Modern filesystem
-- Graphics subsystem
+- Graphics subsystem (the Mac screen is drawn into the boot framebuffer today)
 - USB support
 - Networking
 - Audio subsystem
@@ -99,8 +99,8 @@ make test-rom MAC_ROM=...        # boots the ROM on the host (skipped without a 
 make test-rom-qemu MAC_ROM=... MAC_DISK=...   # kernel and host must draw the same screen
 ```
 
-Details, the list of ROM patches and the known limits (no keyboard or mouse
-yet) are in [docs/mac.md](docs/mac.md).
+Details, the list of ROM patches and the known limits (no sound, serial or
+network yet) are in [docs/mac.md](docs/mac.md).
 
 ---
 
