@@ -23,10 +23,38 @@ int user_regions_overlaps(const user_regions_t *set, uint32_t start, uint32_t en
 
 int user_regions_add(user_regions_t *set, uint32_t start, uint32_t end)
 {
-    if (start >= end || set->count == USER_MAX_REGIONS)
+    if (start >= end)
         return -1;
 
     if (user_regions_overlaps(set, start, end))
+        return -1;
+
+    /*
+     * Regions that touch the new one are joined with it, so that a program
+     * that grows its heap page by page (or a big image mapped page by page)
+     * still uses one entry.
+     */
+    for (unsigned int i = 0; i < set->count;)
+    {
+        if (set->region[i].end == start)
+        {
+            start = set->region[i].start;
+            set->region[i] = set->region[--set->count];
+            i = 0;
+        }
+        else if (set->region[i].start == end)
+        {
+            end = set->region[i].end;
+            set->region[i] = set->region[--set->count];
+            i = 0;
+        }
+        else
+        {
+            i++;
+        }
+    }
+
+    if (set->count == USER_MAX_REGIONS)
         return -1;
 
     set->region[set->count].start = start;

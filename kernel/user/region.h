@@ -14,7 +14,8 @@
  * this list before the kernel touches it, so a bad pointer gives
  * -EFAULT instead of crashing the kernel.
  *
- * Regions are half-open ranges [start, end) of page-aligned addresses.
+ * Regions are half-open ranges [start, end) of page-aligned addresses. A
+ * region added next to another one is merged with it.
  */
 
 #define USER_MAX_REGIONS 128

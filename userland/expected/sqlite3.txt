@@ -1,0 +1,45 @@
+country  cities   people
+-------  ------  --------
+Japan         2  16600000
+Korea         2  13100000
+Taiwan        2   5300000
+name
+-----
+Busan
+Seoul
+Tokyo
+count(*)  sum(square)  max(n)  min(text)
+--------  -----------  ------  ---------
+    5000  41679167500    5000  00001-1
+ n     square
+----  --------
+   1         1
+ 100     10000
+2500   6250000
+5000  25000000
+inside_transaction
+------------------
+                 0
+after_rollback
+--------------
+          5000
+  name     population  place
+---------  ----------  -----
+Tokyo        13900000      1
+Seoul         9700000      2
+Busan         3400000      3
+Kaohsiung     2700000      4
+Osaka         2700000      4
+Taipei        2600000      6
+ j      u     idiv  fdiv          big
+----  ------  ----  ----  -------------------
+deep  TAIPEI     3   3.5  9223372036854775807
+integrity_check
+---------------
+ok
+page_count
+----------
+        28
+integrity_check
+---------------
+ok

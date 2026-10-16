@@ -99,6 +99,11 @@
 #define SYS_ppoll 309
 #define SYS_pselect6_time64 413
 #define SYS_ppoll_time64 414
+#define SYS_chmod 15
+#define SYS_fchmod 94
+#define SYS_fdatasync 148
+#define SYS_chown32 212
+#define SYS_fchown32 207
 #define SYS_getpid 20
 #define SYS_lseek 19
 #define SYS_getrusage 77
@@ -412,6 +417,22 @@ static int32_t sys_fcntl(int fd, uint32_t cmd, uint32_t arg)
 
     case 3: /* F_GETFL */
         return (int32_t)file->flags;
+
+    /* Locks: with one program running there is nobody to lock against, so every lock succeeds (SQLite needs this). */
+    case 5:  /* F_GETLK */
+    case 12: /* F_GETLK64 */
+    {
+        /* struct flock starts with the lock type: report "not locked" (F_UNLCK = 2). */
+        int16_t unlocked = 2;
+
+        return arg == 0 ? -K_EFAULT : copy_out(arg, &unlocked, 2);
+    }
+
+    case 6:  /* F_SETLK */
+    case 7:  /* F_SETLKW */
+    case 13: /* F_SETLK64 */
+    case 14: /* F_SETLKW64 */
+        return 0;
 
     case 4: /* F_SETFL: the flags a descriptor may change; sockets look at O_NONBLOCK */
         file->flags = (file->flags & ~04000u) | (arg & 04000u);
@@ -1225,7 +1246,35 @@ int32_t user_syscall(const hal_user_syscall_t *call)
     }
 
     case SYS_fsync:
+    case SYS_fdatasync:
         return user_fd_get((int)a[0]) == NULL ? -K_EBADF : 0;
+
+    /* Permissions and owners do not exist on these file systems: accept and ignore. */
+    case SYS_chmod:
+    case SYS_chown32:
+        return sys_access(a[0]);
+
+    case SYS_fchmod:
+    case SYS_fchown32:
+        return user_fd_get((int)a[0]) == NULL ? -K_EBADF : 0;
+
+    case SYS_pwrite64:
+    {
+        /* (fd, buf, count, pos_low, pos_high) */
+        vfs_file_t *file = user_fd_get((int)a[0]);
+
+        if (file == NULL)
+            return -K_EBADF;
+
+        uint64_t saved = file->pos;
+        file->pos = ((uint64_t)a[4] << 32) | a[3];
+
+        int32_t n = sys_write((int)a[0], a[1], a[2]);
+
+        file->pos = saved;
+
+        return n;
+    }
 
     case SYS_readlink:
         return -K_EINVAL; /* nothing is a symbolic link */

@@ -426,7 +426,7 @@ test-sst: $(BUILD)/host/sst_run
 
 SDK_LIBC := build/sdk/sysroot/lib/librt68k.a
 USERLAND_SOURCES := $(wildcard userland/*.c)
-USERLAND_BINS := $(patsubst userland/%.c,build/initrd/bin/%,$(USERLAND_SOURCES)) build/initrd/bin/lua build/initrd/bin/tcc
+USERLAND_BINS := $(patsubst userland/%.c,build/initrd/bin/%,$(USERLAND_SOURCES)) build/initrd/bin/lua build/initrd/bin/tcc build/initrd/bin/sqlite3
 INITRD := build/initrd.tar
 
 # musl and the runtime helpers (downloads musl on the first run).
@@ -443,6 +443,11 @@ build/initrd/bin/%: userland/%.c $(SDK_LIBC) tools/68khal-cc
 build/initrd/bin/lua: tools/build_lua.sh $(SDK_LIBC) tools/68khal-cc
 	mkdir -p $(dir $@)
 	tools/build_lua.sh $@
+
+# SQLite, a database engine as a bigger test of the SDK (downloads its source on the first run).
+build/initrd/bin/sqlite3: tools/build_sqlite.sh $(SDK_LIBC) tools/68khal-cc
+	mkdir -p $(dir $@)
+	tools/build_sqlite.sh $@
 
 # The C compiler (tcc) with the headers and libraries it needs under usr/.
 build/initrd/bin/tcc: tools/build_tcc.sh $(SDK_LIBC) tools/68khal-cc

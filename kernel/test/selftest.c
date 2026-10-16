@@ -512,6 +512,7 @@ static const struct
     {"time", 0, NULL, NULL},
     {"hfs", 0, NULL, NULL},
     {"lua", 0, "/data/test.lua", NULL}, /* the Lua interpreter, a ported program */
+    {"sqlite3", 0, "/tmp/test.db", ".read /data/test.sql"}, /* a database engine */
     {"crash", 139, NULL, NULL},         /* 128 + SIGSEGV */
 };
 
@@ -537,7 +538,7 @@ static void test_user_programs(void)
         k_strcpy(path + 5, name);
 
         const char *args[] = {path, user_tests[i].argument1, user_tests[i].argument2, NULL};
-        static const char *const environment[] = {"PATH=/bin", NULL};
+        static const char *const environment[] = {"PATH=/bin", "HOME=/tmp", NULL};
 
         user_console_capture_start(output, sizeof(output));
 
@@ -639,7 +640,7 @@ static void test_user_compiler(void)
 
     static char output[4096];
     static char expected[4096];
-    static const char *const environment[] = {"PATH=/bin", NULL};
+    static const char *const environment[] = {"PATH=/bin", "HOME=/tmp", NULL};
     const char *compile[] = {"/bin/tcc", "-static", "-o", "/tmp/hello", "/data/tcc_hello.c", NULL};
 
     user_console_capture_start(output, sizeof(output));

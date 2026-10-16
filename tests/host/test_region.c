@@ -17,6 +17,7 @@ static void test_add_and_contains(void)
     TEST_ASSERT_EQ_INT(-1, user_regions_add(&set, 0x2000, 0x4000));
     TEST_ASSERT_EQ_INT(-1, user_regions_add(&set, 0x5000, 0x5000));
     TEST_ASSERT_EQ_INT(0, user_regions_add(&set, 0x3000, 0x4000));
+    TEST_ASSERT_EQ_INT(1, set.count); /* [0x1000,0x3000) and [0x3000,0x4000) became one */
 
     TEST_ASSERT(user_regions_contains(&set, 0x1000, 0x3000));
     TEST_ASSERT(user_regions_contains(&set, 0x2ff0, 0x20)); /* across two regions */
@@ -24,6 +25,28 @@ static void test_add_and_contains(void)
     TEST_ASSERT(!user_regions_contains(&set, 0x3ff0, 0x20));
     TEST_ASSERT(user_regions_contains(&set, 0x9999, 0));    /* empty range */
     TEST_ASSERT(!user_regions_contains(&set, 0xFFFFFFF0u, 0x20)); /* wraps */
+}
+
+static void test_merge(void)
+{
+    user_regions_t set;
+
+    user_regions_clear(&set);
+
+    /* A heap that grows a page at a time stays one region, whatever the order. */
+    for (uint32_t page = 0; page < 300; page++)
+        TEST_ASSERT_EQ_INT(0, user_regions_add(&set, 0x10000 + page * 0x1000, 0x11000 + page * 0x1000));
+
+    TEST_ASSERT_EQ_INT(1, set.count);
+    TEST_ASSERT(user_regions_contains(&set, 0x10000, 300 * 0x1000));
+
+    user_regions_clear(&set);
+    user_regions_add(&set, 0x1000, 0x2000);
+    user_regions_add(&set, 0x3000, 0x4000);
+    TEST_ASSERT_EQ_INT(2, set.count);
+    user_regions_add(&set, 0x2000, 0x3000); /* fills the gap: all three join */
+    TEST_ASSERT_EQ_INT(1, set.count);
+    TEST_ASSERT(user_regions_contains(&set, 0x1000, 0x3000));
 }
 
 static void test_remove(void)
@@ -88,6 +111,7 @@ static void test_epoch(void)
 int main(void)
 {
     TEST_RUN(test_add_and_contains);
+    TEST_RUN(test_merge);
     TEST_RUN(test_remove);
     TEST_RUN(test_full);
     TEST_RUN(test_epoch);
