@@ -13,7 +13,26 @@
 | GRUB（`kernel-gfx.elf`） | Multiboot header 要求 640×480×32，GRUB 用 BIOS 的 VBE 設好，把 framebuffer 位址放在 Multiboot info | 固定 640×480 |
 | 自己設定（**新**） | `hal_framebuffer_set_mode(w, h)` → `drivers/bga` | 任意（QEMU 標準 VGA 上限約 2560×1600） |
 
-兩種方式都可以：文字模式的 `kernel.elf`（沒有 framebuffer）也能用 `video 1280 960` 或 `mac 2` 從 VGA 文字模式直接切到圖形模式（文字終端之後只輸出到 serial）。
+兩種方式都可以：文字模式的 `kernel.elf`（沒有 framebuffer）也能用 `video 1280 960` 或 `mac 2` 從 VGA 文字模式直接切到圖形模式（文字終端之後只輸出到 serial；圖形模式開機的 `kernel-gfx.elf` 有 framebuffer 文字終端，見 1.5）。
+
+## 1.5 圖形模式的文字終端（`kernel/display/fbcon.c`）
+
+沒有 VGA 文字緩衝區的機器（UEFI 開機、或 GRUB 的 graphics 項目）要看到 shell，就得自己把字畫在 framebuffer 上。`fbcon` 實作 `text_display_t`（和 VGA 文字模式同一個介面），所以 terminal、ANSI、使用者程式（kilo）都不用改。
+
+```
+ 一個格子 8x16 像素                      640x480 螢幕
+ 字型 8x8：每列 1 個位元組（bit0 = 最左）   ┌────────────────────────────┐ 色條 16 列
+ 每一列畫兩次 → 8x16                        ├────────────────────────────┤
+ 前景/背景 = VGA 16 色調色盤                 │ HAL> cpuinfo               │ 80 欄 x 29 列
+ 游標 = 格子底部兩列的底線                    │ ...                        │
+                                            └────────────────────────────┘
+```
+
+- 每個格子在記憶體裡也存一份（字元、前景、背景）：捲動時只要「讀影子、重畫」，不用讀 framebuffer（真實硬體上 framebuffer 讀取很慢）。`copy_cell` 就是這樣做的。
+- 字型：IBM PC BIOS 的 8x8 字型（公有領域，由 Daniel Hepper 整理的 font8x8_basic.h，原始出處 Marcel Sondaar／IBM），只有 ASCII 0–127；其他字元顯示為空白。檔案是 `kernel/display/fbcon_font.c`（附出處說明，直接放在 repo 裡，建置不需要下載）。
+- `mac` 結束後（可能換過模式）重新 `fbcon_init` 再 `terminal_init`，畫面接回終端。
+- 限制：每個格子逐像素寫入，捲動一次約 29x80 個格子 x 128 像素（QEMU 上沒問題；真實硬體的 write-combining 之後再說）；沒有 UTF-8、沒有 CP437 的線條字元；`video` 指令（文字模式核心切到圖形）仍然畫整面測試圖樣、之後 shell 看不到（可用 `mac` 或重開機）。
+- 測試：`tests/host/test_fbcon.c`（在記憶體中的假 framebuffer 檢查像素）；`make test-fb`（QEMU：色條、提示字元、打 `cpuinfo` 看輸出）。
 
 ## 2. BGA 驅動（`drivers/bga/bga.c`）
 

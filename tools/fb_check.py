@@ -4,14 +4,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Boot the "graphics" GRUB entry in QEMU and check that the framebuffer shows
-# the test pattern (kernel/display/fb_pattern.c).
+# the colour bars (kernel/display/fb_pattern.c) above the text console
+# (kernel/display/fbcon.c, which shows the shell prompt).
 #
 # Usage: tools/fb_check.py [kernel.elf]   (default: build/kernel-gfx.elf)
 #
 # Needs grub-mkrescue and python3. Not part of `make test`. It builds a
 # temporary ISO whose menu starts the second entry of grub.cfg, boots it with
 # a standard VGA card, saves a QEMU screendump (PPM) and checks the colour
-# bars. Exits 0 on success.
+# bars and that the console drew something. Exits 0 on success.
 
 import os
 import re
@@ -63,6 +64,7 @@ def main():
         serial_path = os.path.join(tmp, "serial.log")
         monitor = os.path.join(tmp, "monitor.sock")
         shot = os.path.join(tmp, "screen.ppm")
+        shot2 = os.path.join(tmp, "screen2.ppm")
         process = subprocess.Popen(
             ["qemu-system-i386", "-cdrom", iso, "-vga", "std",
              "-display", "none", "-no-reboot",
@@ -87,6 +89,13 @@ def main():
                 s.recv(4096)
                 s.sendall(f"screendump {shot}\n".encode())
                 time.sleep(1.0)
+                # Type a command: its output must show up on the screen too.
+                for key in ["c", "p", "u", "i", "n", "f", "o", "ret"]:
+                    s.sendall(f"sendkey {key}\n".encode())
+                    time.sleep(0.1)
+                time.sleep(1.5)
+                s.sendall(f"screendump {shot2}\n".encode())
+                time.sleep(1.0)
         finally:
             process.kill()
             process.wait()
@@ -94,16 +103,27 @@ def main():
         with open(serial_path, errors="replace") as f:
             log = f.read()
         print(log.strip().splitlines()[-3:])
+        if os.environ.get("FB_CHECK_SAVE"):
+            subprocess.run(["cp", shot, os.environ["FB_CHECK_SAVE"]], check=True)
         width, height, pixel = read_ppm(shot)
         print(f"screen {width}x{height}")
         bar = width // 8
         for i, color in enumerate(BAR_COLORS):
-            got = pixel(i * bar + bar // 2, height // 4)
+            got = pixel(i * bar + bar // 2, 4)
             if got != color:
                 sys.exit(f"FAIL: bar {i} is {got}, expected {color}")
-        left, right = pixel(2, height - 5), pixel(width - 3, height - 5)
-        if not (left[0] < 16 and right[0] > 240):
-            sys.exit(f"FAIL: gradient {left} .. {right}")
+        # The console: the shell prompt is the only text on the screen, below the bars.
+        lit = sum(1 for y in range(24, 48) for x in range(0, 64) if pixel(x, y) != (0, 0, 0))
+        if lit < 20:
+            sys.exit(f"FAIL: no text below the bars ({lit} lit pixels)")
+
+        # After typing "cpuinfo" the console shows several lines of text under the prompt.
+        width, height, pixel = read_ppm(shot2)
+        if os.environ.get("FB_CHECK_SAVE"):
+            subprocess.run(["cp", shot2, os.environ["FB_CHECK_SAVE"]], check=True)
+        lit = sum(1 for y in range(64, 200) for x in range(0, 320) if pixel(x, y) != (0, 0, 0))
+        if lit < 300:
+            sys.exit(f"FAIL: the command's output is not on the screen ({lit} lit pixels)")
         print("fb_check: PASS")
 
 

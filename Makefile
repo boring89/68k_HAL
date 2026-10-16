@@ -151,6 +151,8 @@ HOST_LIB_SOURCES := \
 	kernel/display/text_display.c \
 	kernel/display/fb_pattern.c \
 	kernel/display/fb_scale.c \
+	kernel/display/fbcon.c \
+	kernel/display/fbcon_font.c \
 	kernel/fs/apm.c \
 	kernel/fs/hfs/hfs.c \
 	kernel/fs/volume.c \

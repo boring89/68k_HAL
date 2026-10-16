@@ -41,3 +41,20 @@ void fb_draw_test_pattern(const hal_framebuffer_t *fb)
         }
     }
 }
+
+void fb_draw_color_bars(const hal_framebuffer_t *fb, uint32_t height)
+{
+    if (fb == NULL || fb->bpp != 32)
+        return;
+
+    if (height > fb->height)
+        height = fb->height;
+
+    for (uint32_t y = 0; y < height; y++)
+    {
+        uint32_t *row = (uint32_t *)(fb->base + (size_t)y * fb->pitch);
+
+        for (uint32_t x = 0; x < fb->width; x++)
+            row[x] = bar_colors[x * BAR_COUNT / fb->width];
+    }
+}

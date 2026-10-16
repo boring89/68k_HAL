@@ -25,7 +25,7 @@ make sdk        # C SDK（musl 靜態 i386）→ build/sdk；`tools/68khal-cc` �
 make initrd     # userland/ 的範例程式、Lua、tcc 打包成 build/initrd.tar（程式光碟，GRUB module 名稱 initrd）
 make test-shell # 開機 ISO、用 QEMU monitor 打字執行 shell 指令並檢查 serial 輸出（tools/shell_test.py）
 make test-video # 設定 1280x960 並檢查 QEMU screendump
-make test-fb      # GRUB 的 640x480 圖形模式仍顯示測試圖樣（tools/fb_check.py；擋住「驅動啟動時把螢幕關掉」這類退步）
+make test-fb      # GRUB 的 640x480 圖形模式：色條、framebuffer 文字終端、打指令看輸出（tools/fb_check.py；擋住「驅動啟動時把螢幕關掉」這類退步）
 make test-mac-keys # Alt-N（= Command-N）在 Mac 建立資料夾（本機專用）
 make test-net / test-virtio-net  # TCP（host 的 http.server 經 slirp 10.0.2.2）、socket、DNS；virtio-net 網卡
 make test-mac-sound / test-mac-clock / test-mac-persist  # Mac 的聲音、時鐘、ATA 寫入（本機專用，需要 ROM 與磁碟）
@@ -43,7 +43,7 @@ make clean
 - 需要硬體或中斷的測試依所屬的層放在 `kernel/test/selftest.c`、`arch/x86/test/selftest_x86.c` 或 `platform/pc/test/selftest_pc.c`，用 `SELFTEST_ASSERT` 檢查、`SELFTEST_RUN` 執行（`kernel/test/selftest.h`）。
 - `make test` 第一步是 `tools/check_boundary.sh`（層之間的 include 規則，見 `docs/hal.md` 第 7 節）。新增規則時要加上 `tests/boundary/<規則>/` fixture。
 - 磁碟映像（`build/images/*.img`）由 `tools/make_apm_image.py`、`tools/make_hfs_image.sh`、`tools/make_disk_image.py` 產生，內容全部自己合成；用法與 hfsutils 的 `~/.hcwd` 注意事項見 `docs/hfs.md`。
-- 圖形模式用 `tools/fb_check.py`（需 grub-mkrescue，不在 `make test` 中）檢查 framebuffer 測試圖樣。
+- 圖形模式用 `tools/fb_check.py`（需 grub-mkrescue，不在 `make test` 中）檢查 framebuffer（色條與文字終端）。
 - 需要 QEMU 額外裝置的驗證（`-smp 4`、e1000、HDA、BGA）直接加在 `QEMU_TEST_FLAGS` 或 `test-shell`／`test-video`。shell 的輸出會鏡射到 serial（`terminal_set_mirror`），所以 `tools/shell_test.py` 能檢查任何指令。
 - 使用者程式的測試：`userland/*.c` 與 `userland/expected/*.txt`（預期輸出：在 host 上用 `unshare -Ur chroot` 執行同一個檔案得到）；`kernel/test/selftest.c` 的 `user_tests` 在 OS 內執行並比對。
 - 重構時用 `tools/boot_log.py` 比較前後的開機 log 與 VGA 畫面（需要 `python3`，不在 `make test` 中）。
@@ -55,7 +55,7 @@ hal/           HAL 介面（只有 .h）：cpu、irq、timer、mmu、boot（含 
 arch/x86/      CPU：cpu（hal_cpu、CPUID、控制暫存器）、gdt（含 TSS）、interrupt（IDT、例外、IRQ stub）、mmu（分頁、hal_mmu）、io（port I/O）、user（ring 3、int 0x80）、test
 platform/pc/   PC 平台：boot（Multiboot 進入點、hal_boot）、video（framebuffer、BGA 模式設定）、rtc（CMOS 時鐘）、interrupt（8259 PIC、hal_irq）、timer（PIT、TSC、hal_timer）、acpi、smp（INIT-SIPI-SIPI）、pci（列舉、驅動清單）、dma、vmap（0xE0000000 視窗）、hal_init.c、test
 drivers/       裝置驅動：vga、serial、ps2_keyboard、ps2_mouse、ata（讀寫，見 docs/storage.md）、ahci（SATA）、e1000 與 virtio_net（網卡）、hda（Intel HD Audio）、bga（Bochs VBE 顯示）、usb_host（列舉 USB 控制器）
-kernel/        與硬體無關的核心：main.c、panic、memory（pmm、heap）、block（區塊裝置、ramdisk）、fs（apm、hfs 唯讀、volume；見 docs/hfs.md）、display（含 fb_scale）、console、terminal（含 mirror、ANSI 解析器 ansi）、keyboard（keycode、state、keychar、keyseq 按鍵序列）、input、shell、log、printf、lib、m68k（guest RAM 與示範）、mac（在 kernel 裡執行 Mac；見 docs/mac.md）、user（ELF 載入器、系統呼叫、console；見 docs/userland.md）、vfs（ramfs、tarfs、hfsfs、devfs 的 console；見 docs/userland.md）、net（packet 純函式、tcp、net 堆疊；見 docs/net.md）、usb（控制器註冊表；見 docs/usb.md）、sound（見 docs/sound.md）、pci（名稱表；見 docs/pci.md）、test
+kernel/        與硬體無關的核心：main.c、panic、memory（pmm、heap）、block（區塊裝置、ramdisk）、fs（apm、hfs 唯讀、volume；見 docs/hfs.md）、display（含 fb_scale、fbcon 圖形模式文字終端）、console、terminal（含 mirror、ANSI 解析器 ansi）、keyboard（keycode、state、keychar、keyseq 按鍵序列）、input、shell、log、printf、lib、m68k（guest RAM 與示範）、mac（在 kernel 裡執行 Mac；見 docs/mac.md）、user（ELF 載入器、系統呼叫、console；見 docs/userland.md）、vfs（ramfs、tarfs、hfsfs、devfs 的 console；見 docs/userland.md）、net（packet 純函式、tcp、net 堆疊；見 docs/net.md）、usb（控制器註冊表；見 docs/usb.md）、sound（見 docs/sound.md）、pci（名稱表；見 docs/pci.md）、test
 emu/m68k/      68k 虛擬機：Musashi 的封裝層（vm：含可選的 bus 與逐指令 hook）、A-line trap 分派（trap）、Musashi 設定（m68kconf.h）；freestanding/ 是 kernel 建置用的 libc 替身
 emu/mac/       Mac IIci 機器模型（M-P3，見 docs/mac.md）：記憶體配置與模擬 opcode（mac.c）、ROM 修補（rom_patch.c）、VIA（via.c）、RBV/DAC/視訊（video.c）、IWM、SCSI、.Disk 驅動（disk.c、stub.s）；與硬體無關，檔案由使用者提供，不在 repo
 third_party/   第三方原始碼，不修改：musashi（68k CPU 核心，MIT）；downloads/ 是下載的 musl、Lua、TinyCC、Haiku（gitignore）

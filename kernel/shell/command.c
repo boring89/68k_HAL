@@ -27,6 +27,7 @@
 #include "hal/cpu.h"
 #include "hal/pci.h"
 #include "hal/framebuffer.h"
+#include "kernel/display/fbcon.h"
 #include "kernel/display/fb_pattern.h"
 #include "kernel/net/net.h"
 #include "kernel/sound/sound.h"
@@ -987,6 +988,12 @@ static void cmd_mac(
 
     mac_machine_set_scale((uint32_t)scale);
     mac_machine_run(0);
+
+    /* The Mac drew on the whole screen, maybe in another mode: draw the console again. */
+    hal_framebuffer_t fb;
+
+    if (fbcon_display() != NULL && hal_framebuffer_get(&fb) == 0 && fbcon_init(&fb, 0) == 0)
+        terminal_init();
 }
 
 static void cmd_cpuinfo(

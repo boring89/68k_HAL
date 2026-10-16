@@ -29,6 +29,8 @@
 #include "kernel/memory/pmm.h"
 
 #include "kernel/display/fb_pattern.h"
+#include "kernel/display/fbcon.h"
+#include "kernel/display/text_display.h"
 #include "kernel/panic/panic.h"
 
 #include "hal/cpu.h"
@@ -41,6 +43,9 @@
 #endif
 
 #include <stdint.h>
+
+/* Height of the colour bars above the graphics console. */
+#define FB_BARS_HEIGHT 16
 
 void kernel_main(void)
 {
@@ -74,13 +79,23 @@ void kernel_main(void)
     /* The file tree ("/", /tmp, /dev) and the mode switch for user programs. */
     user_init();
 
-    /* Graphics mode has no text output yet: show a test pattern instead. */
+    /* Graphics mode: draw the text console on the framebuffer, under a strip of colour bars. */
     hal_framebuffer_t framebuffer;
 
     if (hal_framebuffer_get(&framebuffer) == 0)
     {
         kernel_printf("Framebuffer: %ux%u\n", framebuffer.width, framebuffer.height);
-        fb_draw_test_pattern(&framebuffer);
+
+        if (text_display_get() == NULL && fbcon_init(&framebuffer, FB_BARS_HEIGHT) == 0 &&
+            text_display_register(fbcon_display()) == 0)
+        {
+            console_init();
+            fb_draw_color_bars(&framebuffer, FB_BARS_HEIGHT);
+        }
+        else
+        {
+            fb_draw_test_pattern(&framebuffer);
+        }
     }
 
     input_event_buffer_init();
