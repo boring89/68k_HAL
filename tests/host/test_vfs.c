@@ -46,7 +46,13 @@ static void test_normalize(void)
 
     char out[VFS_PATH_MAX];
 
-    TEST_ASSERT_EQ_INT(-K_ENOENT, vfs_normalize("relative", out));
+    TEST_ASSERT_EQ_INT(-K_ENOENT, vfs_normalize("", out));
+    TEST_ASSERT_EQ_INT(-K_ENOENT, vfs_normalize(NULL, out));
+
+    /* The current directory is "/" at first. */
+    normalized("relative", "/relative");
+    normalized("a/../b/./c", "/b/c");
+    normalized("..", "/");
 
     char longname[400];
 
@@ -54,6 +60,47 @@ static void test_normalize(void)
     longname[0] = '/';
     longname[sizeof(longname) - 1] = '\0';
     TEST_ASSERT_EQ_INT(-K_ENAMETOOLONG, vfs_normalize(longname, out));
+}
+
+static void test_cwd(void)
+{
+    setup();
+    vfs_mount("/", ramfs_create());
+
+    vfs_file_t *file;
+
+    TEST_ASSERT_EQ_STR("/", vfs_getcwd());
+    TEST_ASSERT_EQ_INT(0, vfs_mkdir("/work", 0755));
+    TEST_ASSERT_EQ_INT(0, vfs_mkdir("/work/sub", 0755));
+    TEST_ASSERT_EQ_INT(0, vfs_open("/work/sub/f.txt", VFS_O_WRONLY | VFS_O_CREAT, 0644, &file));
+    vfs_file_close(file);
+
+    TEST_ASSERT_EQ_INT(0, vfs_chdir("work"));
+    TEST_ASSERT_EQ_STR("/work", vfs_getcwd());
+    normalized("sub/f.txt", "/work/sub/f.txt");
+    normalized("../x", "/x");
+    normalized("/abs", "/abs");
+
+    /* Relative paths find files from there. */
+    vfs_stat_t stat;
+
+    TEST_ASSERT_EQ_INT(0, vfs_stat("sub/f.txt", &stat));
+    TEST_ASSERT_EQ_INT(0, vfs_open("sub/f.txt", VFS_O_RDONLY, 0, &file));
+    vfs_file_close(file);
+
+    TEST_ASSERT_EQ_INT(0, vfs_chdir("sub/.."));
+    TEST_ASSERT_EQ_STR("/work", vfs_getcwd());
+    TEST_ASSERT_EQ_INT(0, vfs_chdir("/"));
+    TEST_ASSERT_EQ_STR("/", vfs_getcwd());
+
+    /* A file or a missing directory is refused, and the directory stays. */
+    TEST_ASSERT_EQ_INT(0, vfs_chdir("/work"));
+    TEST_ASSERT_EQ_INT(-K_ENOTDIR, vfs_chdir("sub/f.txt"));
+    TEST_ASSERT_EQ_INT(-K_ENOENT, vfs_chdir("nothing"));
+    TEST_ASSERT_EQ_STR("/work", vfs_getcwd());
+
+    vfs_reset();
+    TEST_ASSERT_EQ_STR("/", vfs_getcwd());
 }
 
 static void test_ramfs_files(void)
@@ -331,6 +378,7 @@ static void test_mount_priority(void)
 int main(void)
 {
     TEST_RUN(test_normalize);
+    TEST_RUN(test_cwd);
     TEST_RUN(test_ramfs_files);
     TEST_RUN(test_ramfs_directories);
     TEST_RUN(test_tarfs);

@@ -91,7 +91,7 @@ compiled by tcc: fib(20)=6765 1099511627 ok 6.28
 /hfs     Mac 磁碟的 HFS volume（唯讀；資料叉；Mac 文字檔用 CR 換行）
 ```
 
-- 沒有「目前目錄」：路徑一律從 `/` 開始（`getcwd` 回 `/`）；相對路徑會失敗。
+- 有「目前目錄」（見 5.7）：相對路徑從那裡開始；全系統只有一個（shell 與它執行的程式共用，程式結束後還原）。`openat` 的 `dirfd` 被忽略（只有 `AT_FDCWD` 正確）。
 - `/` 的目錄列表不會顯示 `/tmp`、`/dev`、`/hfs`（掛載點），但直接開它們沒問題。
 - stdin（fd 0）是鍵盤，一次一行，有回顯與 Backspace；沒有 Ctrl-D（EOF）。stdout/stderr 同時出現在螢幕與序列埠。
 
@@ -121,7 +121,7 @@ compiled by tcc: fib(20)=6765 1099511627 ok 6.28
 | 結束 | `exit`、`exit_group` |
 | 檔案 | `fdatasync`、`chmod/fchmod/chown32/fchown32`（空操作）、檔案鎖（`fcntl` 的 `F_SETLK` 等，一律成功）、`read`、`write`、`readv`、`writev`、`open`、`openat`（僅絕對路徑）、`close`、`lseek`、`_llseek`、`pread64`、`ftruncate`、`ftruncate64`、`fsync`、`dup`、`dup2`、`fcntl64` |
 | 檔案資訊 | `stat64`、`lstat64`、`fstat64`、`fstatat64`、`statx`、`getdents64`、`access`、`faccessat`、`readlink`（一律 EINVAL） |
-| 目錄 | `mkdir`、`mkdirat`、`unlink`、`unlinkat`、`rmdir`、`rename`、`renameat`、`getcwd` |
+| 目錄 | `mkdir`、`mkdirat`、`unlink`、`unlinkat`、`rmdir`、`rename`、`renameat`、`getcwd`、`chdir` |
 | 記憶體 | `brk`、`mmap2`（匿名與檔案私有，`prot` 有效）、`munmap`、`mremap`（一律搬移）、`mprotect`（真的改頁面權限）、`madvise`（忽略） |
 | 時間 | `clock_gettime`、`clock_gettime64`、`gettimeofday`、`time`、`nanosleep`、`clock_nanosleep(_time64)` |
 | 行程資訊 | `getpid`、`gettid`、`getppid`、`getuid32` 等、`uname`、`getrlimit`、`ugetrlimit`、`umask` |
@@ -183,6 +183,17 @@ px[y * (fix.line_length / 4) + x] = 0x00RRGGBB;
 `read` 一次給整數個事件（緩衝區至少 16 位元組）；沒有事件時等待，`O_NONBLOCK` 回 `EAGAIN`；`poll`/`select` 可用。打開時丟掉之前累積的事件。注意：鍵盤事件同時只有一個消費者：讀 `event0` 的程式在跑的時候，console 的行編輯收不到按鍵。
 
 範例：`userland/evtest.c`（印出事件，Q 結束）、`userland/fbdemo.c`（在 `/dev/fb0` 畫方塊，Q 結束）。
+
+### 5.7 目前目錄與工具箱 `box`
+
+**目前目錄**（`kernel/vfs/vfs.c`）：`vfs_getcwd()`／`vfs_chdir()`。不是以 `/` 開頭的路徑，在 `vfs_normalize` 前面接上目前目錄再整理（`.`、`..`、重複的斜線）。shell 有 `cd [路徑]` 和 `pwd`；程式用 `chdir`／`getcwd`。`user_run` 執行前記下目前目錄、結束後還原，所以程式裡的 `chdir` 不會把 shell 帶走。
+
+**工具箱 `/bin/box`**（`userland/box.c`，自己寫的，GPL-3.0）：BusyBox 的做法，一個程式裝很多小指令，依啟動時 `argv[0]` 的名字決定用哪一個：`cat cp mv rm [-rf] mkdir [-p] rmdir touch ls [-al] pwd echo wc [-lwc] head tail [-n] grep [-ivnc]（固定字串）sort [-rn] uniq tee [-a] hexdump [-C] seq sleep uname [-a] date env basename dirname stat clear true false`。用法：
+
+- shell 打不認得的指令時，會試 `/bin/box`（以指令名當 `argv[0]`）；box 沒有這個指令就回 127，shell 才說 `Unknown command`。所以直接打 `cp a b`、`mkdir x`、`grep foo file`、`wc -l file` 就行；
+- `box ls /tmp`、`run /bin/box ls /tmp`、`box --list`（列出指令）。
+
+shell 內建的 `ls`、`cat`、`echo`、`date` 是舊的（`ls`／`cat` 讀 HFS 磁碟），內建優先；要用 box 的版本請打 `box ls …`。系統限制：只有 `/tmp` 可以建立檔案，沒有權限、連結、擁有者（所以沒有 `chmod`、`ln`、`chown`）。
 
 ### 遇到 ENOSYS 時怎麼補
 

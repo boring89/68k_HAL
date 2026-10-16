@@ -33,6 +33,7 @@
 #define SYS_open 5
 #define SYS_close 6
 #define SYS_unlink 10
+#define SYS_chdir 12
 #define SYS_time 13
 #define SYS_access 33
 #define SYS_kill 37
@@ -527,12 +528,23 @@ static int32_t sys_access(uint32_t path_address)
 
 static int32_t sys_getcwd(uint32_t address, uint32_t size)
 {
-    if (size < 2)
+    const char *cwd = vfs_getcwd();
+    uint32_t length = (uint32_t)k_strlen(cwd) + 1; /* including the NUL */
+
+    if (size < length)
         return -K_ERANGE;
 
-    int32_t status = copy_out(address, "/", 2);
+    int32_t status = copy_out(address, cwd, length);
 
-    return status != 0 ? status : 2; /* the length including the NUL */
+    return status != 0 ? status : (int32_t)length;
+}
+
+static int32_t sys_chdir(uint32_t path_address)
+{
+    char path[VFS_PATH_MAX];
+    int32_t status = get_path(path, path_address);
+
+    return status != 0 ? status : vfs_chdir(path);
 }
 
 /* --- memory --- */
@@ -781,9 +793,6 @@ static int32_t sys_statx(int dirfd, uint32_t path_address, uint32_t flags, uint3
     }
     else
     {
-        if (path[0] != '/')
-            return -K_ENOSYS;
-
         status = vfs_stat(path, &st);
     }
 
@@ -1307,6 +1316,9 @@ int32_t user_syscall(const hal_user_syscall_t *call)
 
     case SYS_getcwd:
         return sys_getcwd(a[0], a[1]);
+
+    case SYS_chdir:
+        return sys_chdir(a[0]);
 
     case SYS_ftruncate:
     {

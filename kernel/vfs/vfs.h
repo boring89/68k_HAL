@@ -143,11 +143,19 @@ int32_t vfs_mount(const char *path, vfs_fs_t *fs);
 void vfs_reset(void);
 
 /*
- * Turn path (relative to cwd, which is "/") into a normalised absolute
- * one in out (VFS_PATH_MAX bytes): no ".", "..", doubled or trailing
- * slashes. Returns 0 or -errno.
+ * Turn path (relative paths are relative to the current directory) into a
+ * normalised absolute one in out (VFS_PATH_MAX bytes): no ".", "..",
+ * doubled or trailing slashes. Returns 0 or -errno (-ENOENT for an empty path).
  */
 int32_t vfs_normalize(const char *path, char *out);
+
+/*
+ * The current directory, "/" at first: one for the whole system (the shell and
+ * the program it runs share it; the program loader restores it afterwards).
+ * vfs_chdir needs an existing directory: 0 or -errno.
+ */
+const char *vfs_getcwd(void);
+int32_t vfs_chdir(const char *path);
 
 /* Open a file or directory. Returns 0 and a file with refcount 1, or -errno. */
 int32_t vfs_open(const char *path, uint32_t flags, uint32_t mode, vfs_file_t **file);

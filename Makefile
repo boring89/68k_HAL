@@ -563,6 +563,16 @@ test-shell: iso
 		"run /bin/readline=Type something" \
 		"{ctrl-c}=^C" \
 		"run /bin/hello=Hello from user mode!" \
+		"cd /nonexistent=no such directory" \
+		"cd /tmp=" \
+		"pwd=/tmp" \
+		"mkdir box=" \
+		"cp /data/message.txt box/m.txt=" \
+		"touch box/empty.txt=" \
+		"box ls box=m.txt" \
+		"box cat box/m.txt=Second line." \
+		"wc -l box/m.txt=m.txt" \
+		"nosuchcommand=Unknown command: nosuchcommand" \
 		"run /bin/evtest=reading events" \
 		"{mouse_move 7 3}=rel 0 7" \
 		"a{up}q=key 103 1" \

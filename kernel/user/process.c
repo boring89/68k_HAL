@@ -490,8 +490,14 @@ int32_t user_run(const char *path, const char *const *argv, const char *const *e
 
     user_console_reset();
 
+    /* A program that changes directory does not move the shell. */
+    char saved_cwd[VFS_PATH_MAX];
+
+    k_strcpy(saved_cwd, vfs_getcwd());
+
     int exit_status = hal_user_run(image.entry, sp);
 
+    vfs_chdir(saved_cwd);
     user_console_reset();
     cleanup();
     fbdev_program_ended();

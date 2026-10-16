@@ -21,6 +21,8 @@
 #include "kernel/block/block.h"
 #include "kernel/fs/volume.h"
 #include "kernel/user/process.h"
+#include "kernel/vfs/vfs.h"
+#include "kernel/lib/k_errno.h"
 #include "hal/boot.h"
 #include "hal/clock.h"
 #include "hal/acpi.h"
@@ -122,6 +124,12 @@ static void cmd_usb(
     int argc,
     char **argv);
 static void cmd_mac(
+    int argc,
+    char **argv);
+static void cmd_cd(
+    int argc,
+    char **argv);
+static void cmd_pwd(
     int argc,
     char **argv);
 
@@ -242,7 +250,15 @@ static shell_command_entry_t commands[] =
         {COMMAND_USB,
          "usb",
          "List the USB host controllers",
-         cmd_usb}};
+         cmd_usb},
+        {COMMAND_CD,
+         "cd",
+         "Change the current directory of the file tree (cd [path]; no path = /)",
+         cmd_cd},
+        {COMMAND_PWD,
+         "pwd",
+         "Show the current directory of the file tree",
+         cmd_pwd}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -616,6 +632,36 @@ static void cmd_mmap(
     }
 }
 
+static const char *const *shell_environment(void)
+{
+    static const char *const environment[] = {
+        "PATH=/bin", "HOME=/tmp", "TERM=vt100", NULL};
+
+    return environment;
+}
+
+/* After a program ran: say why it did not, or how it ended if not with 0. */
+static void report_status(const char *name, int32_t status)
+{
+    char number[16];
+
+    if (status < 0)
+    {
+        terminal_write(name);
+        terminal_write(": cannot run (error ");
+        k_utoa((unsigned int)-status, number);
+        terminal_write(number);
+        terminal_write_line(")");
+    }
+    else if (status != 0)
+    {
+        terminal_write("[exit ");
+        k_utoa((unsigned int)status, number);
+        terminal_write(number);
+        terminal_write_line("]");
+    }
+}
+
 void shell_dispatch(shell_command_t *cmd)
 {
     if (cmd->argc == 0)
@@ -630,6 +676,31 @@ void shell_dispatch(shell_command_t *cmd)
             commands[i].handler(
                 cmd->argc,
                 cmd->argv);
+
+            return;
+        }
+    }
+
+    /*
+     * Not built in: the toolbox (userland/box.c, /bin/box) may have it as an applet. It picks the
+     * applet by the name it is started as, and exits with 127 if it has none of that name.
+     */
+    vfs_stat_t stat;
+
+    if (vfs_stat("/bin/box", &stat) == 0)
+    {
+        const char *args[SHELL_MAX_ARGS + 1];
+
+        for (int i = 0; i < cmd->argc; i++)
+            args[i] = cmd->argv[i];
+
+        args[cmd->argc] = NULL;
+
+        int32_t status = user_run("/bin/box", args, shell_environment());
+
+        if (status != 127)
+        {
+            report_status(cmd->argv[0], status);
 
             return;
         }
@@ -1128,27 +1199,31 @@ static void cmd_run(
 
     args[argc - 1] = NULL;
 
-    static const char *const environment[] = {
-        "PATH=/bin", "HOME=/tmp", "TERM=vt100", NULL};
+    report_status(argv[1], user_run(argv[1], args, shell_environment()));
+}
 
-    int32_t status = user_run(argv[1], args, environment);
-    char number[16];
+static void cmd_cd(
+    int argc,
+    char **argv)
+{
+    int32_t status = vfs_chdir(argc > 1 ? argv[1] : "/");
 
-    if (status < 0)
+    if (status != 0)
     {
-        terminal_write(argv[1]);
-        terminal_write(": cannot run (error ");
-        k_utoa((unsigned int)-status, number);
-        terminal_write(number);
-        terminal_write_line(")");
+        terminal_write("cd: ");
+        terminal_write(argc > 1 ? argv[1] : "/");
+        terminal_write_line(status == -K_ENOTDIR ? ": not a directory" : ": no such directory");
     }
-    else if (status != 0)
-    {
-        terminal_write("[exit ");
-        k_utoa((unsigned int)status, number);
-        terminal_write(number);
-        terminal_write_line("]");
-    }
+}
+
+static void cmd_pwd(
+    int argc,
+    char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    terminal_write_line(vfs_getcwd());
 }
 
 static void write_hex_padded(uint32_t value, int digits)

@@ -6,6 +6,7 @@
 #include "vfs.h"
 
 #include "kernel/lib/k_errno.h"
+#include "kernel/lib/k_memory.h"
 #include "kernel/lib/k_string.h"
 #include "kernel/memory/heap.h"
 
@@ -21,16 +22,19 @@ typedef struct
 static mount_t mounts[MAX_MOUNTS];
 static int mount_count;
 
+/* The current directory: what a path that does not start with "/" is relative to. Always normalised. */
+static char cwd[VFS_PATH_MAX] = "/";
+
 void vfs_reset(void)
 {
     mount_count = 0;
+    cwd[0] = '/';
+    cwd[1] = '\0';
 }
 
-int32_t vfs_normalize(const char *path, char *out)
+/* Normalise an absolute path (see vfs_normalize). */
+static int32_t normalize_absolute(const char *path, char *out)
 {
-    if (path == NULL || path[0] != '/')
-        return -K_ENOENT; /* every path is absolute: there is no cwd to speak of */
-
     size_t length = 0;
 
     out[0] = '\0';
@@ -84,6 +88,56 @@ int32_t vfs_normalize(const char *path, char *out)
         out[0] = '/';
         out[1] = '\0';
     }
+
+    return 0;
+}
+
+int32_t vfs_normalize(const char *path, char *out)
+{
+    if (path == NULL || path[0] == '\0')
+        return -K_ENOENT;
+
+    if (path[0] == '/')
+        return normalize_absolute(path, out);
+
+    /* Relative: in front of it goes the current directory. */
+    char joined[2 * VFS_PATH_MAX];
+    size_t cwd_length = k_strlen(cwd);
+    size_t path_length = k_strlen(path);
+
+    if (cwd_length + 1 + path_length >= sizeof(joined))
+        return -K_ENAMETOOLONG;
+
+    k_memcpy(joined, cwd, cwd_length);
+    joined[cwd_length] = '/';
+    k_memcpy(joined + cwd_length + 1, path, path_length + 1);
+
+    return normalize_absolute(joined, out);
+}
+
+const char *vfs_getcwd(void)
+{
+    return cwd;
+}
+
+int32_t vfs_chdir(const char *path)
+{
+    char normal[VFS_PATH_MAX];
+    vfs_stat_t stat;
+    int32_t status = vfs_normalize(path, normal);
+
+    if (status != 0)
+        return status;
+
+    status = vfs_stat(normal, &stat);
+
+    if (status != 0)
+        return status;
+
+    if ((stat.mode & VFS_S_IFMT) != VFS_S_IFDIR)
+        return -K_ENOTDIR;
+
+    k_strcpy(cwd, normal);
 
     return 0;
 }
