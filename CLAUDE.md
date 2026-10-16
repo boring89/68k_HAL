@@ -22,7 +22,7 @@ make test-rom-qemu  # 同一台 Mac 在 kernel（QEMU）裡跑，畫面 CRC 必�
 make mac-screenshot # 圖形模式 QEMU 的畫面存成 build/mac/qemu_screen.ppm（本機專用）
 make run-mac     # 在 QEMU 視窗中互動執行 Mac（輸入 mac + Enter；本機專用）
 make sdk        # C SDK（musl 靜態 i386）→ build/sdk；`tools/68khal-cc` 是 gcc 的包裝；見 docs/userland.md
-make initrd     # userland/ 的範例程式、Lua、tcc 打包成 build/initrd.tar（程式光碟，GRUB module 名稱 initrd）
+make initrd     # userland/ 的範例程式、Lua、tcc、SQLite、Kilo 與 box 工具箱打包成 build/initrd.tar（程式光碟，GRUB module 名稱 initrd）
 make test-shell # 開機 ISO、用 QEMU monitor 打字執行 shell 指令並檢查 serial 輸出（tools/shell_test.py）
 make test-video # 設定 1280x960 並檢查 QEMU screendump
 make test-fb      # GRUB 的 640x480 圖形模式：色條、framebuffer 文字終端、打指令看輸出（tools/fb_check.py；擋住「驅動啟動時把螢幕關掉」這類退步）
@@ -157,7 +157,7 @@ Claude 依照上方工作規則直接實作。
 - 滑鼠事件（`INPUT_EVENT_MOUSE`）進入 input buffer 但主迴圈忽略。
 - HFS 名稱比較只對 ASCII 不分大小寫，查詢是線性掃描（見 `docs/hfs.md`）。
 - ATA 驅動只支援 primary master、LBA28、輪詢（可讀寫，寫入後 FLUSH CACHE）。
-- 使用者程式：一次只能跑一個（沒有多工、fork/execve、執行緒、訊號）；沒有 NX（可讀即可執行）；堆疊固定 2 MiB。見 `docs/userland.md` 第 7 節。
+- 使用者程式：一次只能跑一個（沒有多工、fork/execve、執行緒、訊號）；shell 的管線是依序執行（以 /tmp 的暫存檔傳資料）；終端機沒有 UTF-8；Ctrl-C 只在程式讀鍵盤時有效；沒有 NX（可讀即可執行）；堆疊固定 2 MiB。見 `docs/userland.md` 第 7 節。
 - 網路：TCP 沒有亂序重組、壅塞控制、選擇性確認；沒有 IP 分片、IPv6；一次只用一張網卡；HDA 只有輸出；BGA 只有 32 bpp；AHCI 只用輪詢與一個命令槽；USB 只能列出控制器（見 `docs/usb.md`）；所有中斷仍由 8259 處理，其他處理器只回報後 `hlt`（沒有 APIC 中斷與 per-CPU 資料）。
 - `vmap`（`0xE0000000`–`0xF0000000`）與 `hal_dma_free` 的虛擬位址不重用。
 - QEMU 的 HDA 透過 CORB/RIRB 只回應第一個命令，驅動改用立即命令暫存器（原因未查明，見 `docs/sound.md`）。
