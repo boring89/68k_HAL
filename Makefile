@@ -11,7 +11,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: test-video test-mac-sound sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: test-video test-mac-sound test-mac-persist sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -292,6 +292,34 @@ test-mac-sound:
 	until grep -q "mac: screen crc\|mac: could not run" $$out || [ $$n -ge 900 ]; do sleep 1; n=$$((n + 1)); done; \
 	kill -INT $$pid 2>/dev/null; sleep 1; kill $$pid 2>/dev/null; wait $$pid 2>/dev/null; \
 	python3 -I tools/check_wav.py $(BUILD)/mac/beep.wav 440
+
+# Writing to the ATA drive: the Mac runs from a COPY of MAC_DISK as an IDE drive
+# (no mac_disk module), makes a folder in the Finder and shuts down (the
+# system then writes its changes), and the folder must be on the image
+# afterwards. Needs hfsutils to look into the image. Local only.
+test-mac-persist:
+	@if [ ! -f "$(MAC_ROM)" ] || [ ! -f "$(MAC_DISK)" ]; then \
+		echo "test-mac-persist: SKIP (no ROM or disk; set MAC_ROM and MAC_DISK)"; exit 0; fi; \
+	mkdir -p $(BUILD)/mac; \
+	$(MAKE) --no-print-directory BUILD=$(BUILD)/mac/kernel-persist \
+		EXTRA_CFLAGS="-DKERNEL_MAC_TEST -DKERNEL_MAC_TEST_FRAMES=2600 -DKERNEL_MAC_TEST_FOLDER" \
+		$(BUILD)/mac/kernel-persist/kernel.elf || exit 1; \
+	cp "$(MAC_ROM)" $(BUILD)/mac/rom.bin; \
+	cp "$(MAC_DISK)" $(BUILD)/mac/persist.img; \
+	accel=""; [ -w /dev/kvm ] && accel="-enable-kvm"; \
+	out=$(BUILD)/mac/qemu_persist.out; \
+	qemu-system-i386 $$accel -m 128 -display none -serial stdio \
+		-drive file=$(BUILD)/mac/persist.img,format=raw,if=ide,index=0,media=disk \
+		-kernel $(BUILD)/mac/kernel-persist/kernel.elf \
+		-initrd "$(BUILD)/mac/rom.bin mac_rom" > $$out 2>&1 & \
+	pid=$$!; n=0; \
+	until grep -q "mac: screen crc\|mac: could not run" $$out || [ $$n -ge 900 ]; do sleep 1; n=$$((n + 1)); done; \
+	kill $$pid 2>/dev/null; wait $$pid 2>/dev/null; \
+	if (export HOME=$(abspath $(BUILD)/mac/hfshome); mkdir -p $$HOME; \
+		hmount $(BUILD)/mac/persist.img > /dev/null 2>&1 && \
+		hls -la ":Desktop Folder" | grep -q "untitled folder"); then \
+		echo "test-mac-persist: PASS (the new folder is on the disk)"; \
+	else echo "test-mac-persist: FAIL (no new folder on the disk)"; exit 1; fi
 
 # A screenshot of the Mac running in the kernel under QEMU (GRUB graphics
 # mode, 640x480): build/mac/qemu_screen.ppm. MAC_SHOT_FRAMES frames (about

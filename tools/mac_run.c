@@ -235,12 +235,13 @@ int main(int argc, char **argv)
     uint32_t head = 0;
     uint32_t break_pc = 0;
     uint32_t frames = 0;
-    struct { int x, y, b; uint32_t frame; } mouse[32];
+    struct { int x, y, b; uint32_t frame; bool jump; } mouse[32];
     int nmouse = 0;
     struct { int code, down; uint32_t frame; } keys[32];
     int nkeys = 0;
     const char *ppm_path = NULL;
     const char *wav_path = NULL;
+    const char *disk_out_path = NULL;
     int64_t beep_frame = -1;
     const char *save_path = NULL;
     uint32_t save_addr = 0;
@@ -294,6 +295,19 @@ int main(int argc, char **argv)
                 sscanf(argv[++i], "%d,%d,%d,%u", &mouse[nmouse].x,
                        &mouse[nmouse].y, &mouse[nmouse].b,
                        &mouse[nmouse].frame);
+                mouse[nmouse].jump = false;
+                nmouse++;
+            }
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'J' && i + 1 < argc)
+        {
+            /* -J x,y,button,frame: put the pointer at screen position (x, y) at that frame */
+            if (nmouse < 32)
+            {
+                sscanf(argv[++i], "%d,%d,%d,%u", &mouse[nmouse].x,
+                       &mouse[nmouse].y, &mouse[nmouse].b,
+                       &mouse[nmouse].frame);
+                mouse[nmouse].jump = true;
                 nmouse++;
             }
         }
@@ -314,6 +328,11 @@ int main(int argc, char **argv)
         else if (argv[i][0] == '-' && argv[i][1] == 'W' && i + 1 < argc)
         {
             wav_path = argv[++i];
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'O' && i + 1 < argc)
+        {
+            /* -O file: write the disk image (with what the Mac changed) to that file at the end */
+            disk_out_path = argv[++i];
         }
         else if (argv[i][0] == '-' && argv[i][1] == 'B' && i + 1 < argc)
         {
@@ -441,7 +460,15 @@ int main(int argc, char **argv)
             {
                 if (mouse[m].frame == f)
                 {
-                    mac_mouse_move(&mac, mouse[m].x, mouse[m].y, mouse[m].b != 0);
+                    if (mouse[m].jump)
+                    {
+                        mac_mouse_warp(&mac, mouse[m].x, mouse[m].y);
+                        mac_mouse_move(&mac, 0, 0, mouse[m].b != 0);
+                    }
+                    else
+                    {
+                        mac_mouse_move(&mac, mouse[m].x, mouse[m].y, mouse[m].b != 0);
+                    }
                 }
             }
             if (beep_frame >= 0 && f == (uint32_t)beep_frame)
@@ -449,6 +476,16 @@ int main(int argc, char **argv)
                 mac_sysbeep(&mac);
             }
             mac_run(&mac, 416000);
+        }
+        if (disk_out_path != NULL && disk_image != NULL)
+        {
+            FILE *df = fopen(disk_out_path, "wb");
+
+            if (df != NULL)
+            {
+                fwrite(disk_image, 1, disk_size, df);
+                fclose(df);
+            }
         }
         if (wav_path != NULL)
         {

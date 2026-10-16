@@ -28,6 +28,15 @@ typedef struct
      */
     int (*read)(block_device_t *device, uint64_t lba, uint32_t count,
                 void *buffer);
+
+    /*
+     * Write count blocks from buffer starting at block lba, and return only
+     * when the data is on the medium (not just in the drive's cache). NULL for
+     * a read-only device. The range has been checked by block_write. Returns
+     * 0, or -1 on an I/O error.
+     */
+    int (*write)(block_device_t *device, uint64_t lba, uint32_t count,
+                 const void *buffer);
 } block_ops_t;
 
 struct block_device
@@ -64,6 +73,10 @@ int block_read(block_device_t *device, uint64_t lba, uint32_t count,
                void *buffer);
 
 /* Forget all devices (for tests). */
+/* Like block_read for writing; -1 if the device is read-only. */
+int block_write(block_device_t *device, uint64_t lba, uint32_t count,
+                const void *buffer);
+
 void block_reset(void);
 
 #endif

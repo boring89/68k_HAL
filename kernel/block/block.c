@@ -62,6 +62,18 @@ int block_read(block_device_t *device, uint64_t lba, uint32_t count,
     return device->ops->read(device, lba, count, buffer);
 }
 
+int block_write(block_device_t *device, uint64_t lba, uint32_t count,
+                const void *buffer)
+{
+    if (device == NULL || buffer == NULL || count == 0 || device->ops->write == NULL)
+        return -1;
+
+    if (lba >= device->block_count || count > device->block_count - lba)
+        return -1;
+
+    return device->ops->write(device, lba, count, buffer);
+}
+
 void block_reset(void)
 {
     device_total = 0;

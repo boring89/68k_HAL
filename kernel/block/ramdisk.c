@@ -31,7 +31,7 @@ static int ramdisk_read(block_device_t *device, uint64_t lba, uint32_t count,
     return 0;
 }
 
-static const block_ops_t ramdisk_ops = {ramdisk_read};
+static const block_ops_t ramdisk_ops = {ramdisk_read, NULL};
 
 int ramdisk_register(const char *name, const void *data, size_t size)
 {

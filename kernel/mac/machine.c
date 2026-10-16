@@ -9,7 +9,12 @@
 #include "emu/mac/mac.h"
 #include "emu/m68k/vm.h"
 #include "hal/boot.h"
+#include "hal/clock.h"
+#include "hal/cpu.h"
 #include "hal/framebuffer.h"
+#include "hal/timer.h"
+#include "kernel/lib/k_time.h"
+#include "kernel/block/block.h"
 #include "kernel/display/fb_scale.h"
 #include "kernel/sound/sound.h"
 #include "kernel/input/event_buffer.h"
@@ -238,6 +243,28 @@ static bool handle_input(mac_t *mac)
 
 
 /*
+ * A disk on a block device (the ATA drive): reads and writes go straight to
+ * it, so what the Mac changes is still there after a reboot. The Mac works in
+ * 512-byte blocks like the drive.
+ */
+static int drive_read(void *ctx, uint32_t offset, void *buf, uint32_t len)
+{
+    if (offset % BLOCK_SIZE != 0 || len % BLOCK_SIZE != 0)
+        return -1;
+
+    return block_read(ctx, offset / BLOCK_SIZE, len / BLOCK_SIZE, buf);
+}
+
+static int drive_write(void *ctx, uint32_t offset, const void *buf, uint32_t len)
+{
+    if (offset % BLOCK_SIZE != 0 || len % BLOCK_SIZE != 0)
+        return -1;
+
+    return block_write(ctx, offset / BLOCK_SIZE, len / BLOCK_SIZE, buf);
+}
+
+
+/*
  * Sound. The model plays unsigned 8-bit mono samples (a few at a time, as the
  * emulated time passes); they are collected for one frame, converted to the
  * 48 kHz stereo the sound card takes and queued. If the card cannot take them
@@ -275,6 +302,77 @@ static void audio_flush(int16_t *out)
     sound_write(out, frames);
 }
 
+/* Seconds from 1 Jan 1904 (the Mac epoch) to 1 Jan 1970 (the Unix epoch). */
+#define MAC_EPOCH_OFFSET 2082844800u
+
+/* The Mac's clock for an interactive run: the real time (UTC), or 0 if the machine has no clock. */
+static uint32_t current_mac_time(void)
+{
+    hal_datetime_t now;
+
+    if (hal_clock_now(&now) != 0)
+        return 0;
+
+    int64_t unix_time = k_epoch_from_civil(now.year, now.month, now.day, now.hour, now.minute, now.second);
+
+    return (uint32_t)(unix_time + MAC_EPOCH_OFFSET);
+}
+
+/* One frame is MAC_FRAME_CYCLES of a 25 MHz CPU; this is how long that takes in real time. */
+#define FRAME_NS ((uint64_t)MAC_FRAME_CYCLES * 1000000000u / MAC_CPU_HZ)
+
+/*
+ * Real-time pacing: the Mac's time should pass like ours, or its clock and
+ * every sound would run too fast. Wait until frame number 'frame' (counted from
+ * the start) is due. A host too slow to keep up just runs flat out; after a long
+ * stall (e.g. a long disk access) the schedule starts over instead of racing to
+ * catch up.
+ */
+static void pace(uint64_t *start, uint32_t frame)
+{
+    uint64_t due = *start + (uint64_t)frame * FRAME_NS;
+    uint64_t now = hal_timer_ns();
+
+    if (now > due + 100000000u)
+    {
+        *start = now - (uint64_t)frame * FRAME_NS;
+
+        return;
+    }
+
+    while (now < due)
+    {
+        /* hlt wakes at the next timer tick (10 ms): only sleep if that cannot overshoot. */
+        if (due - now > 12000000u)
+            hal_cpu_idle();
+
+        now = hal_timer_ns();
+    }
+}
+
+#ifdef KERNEL_MAC_TEST_FOLDER
+/*
+ * make test-mac-persist: a scripted visit to the Finder's menus. File > New
+ * Folder at frame 1500, Special > Shut Down at 2000 (which makes the system
+ * write its changes to the disk). The positions were found with
+ * tools/mac_run -J and screenshots of the open menus (640x480 screen).
+ */
+static const struct
+{
+    uint32_t frame;
+    int x;
+    int y;
+    bool down;
+} test_script[] = {
+    {1500, 52, 9, true},    /* press on "File" */
+    {1520, 67, 27, true},   /* drag to "New Folder" */
+    {1540, 67, 27, false},  /* release: choose it */
+    {2000, 209, 9, true},   /* press on "Special" */
+    {2020, 250, 139, true}, /* drag to "Shut Down" */
+    {2040, 250, 139, false},
+};
+#endif
+
 int mac_machine_run(uint32_t frames)
 {
     hal_boot_module_t rom_module;
@@ -308,10 +406,13 @@ int mac_machine_run(uint32_t frames)
         kernel_printf("%s\n", "mac: out of memory");
         goto out;
     }
-    if (find_module(MAC_MODULE_ROM, &rom_module) == NULL ||
-        find_module(MAC_MODULE_DISK, &disk_module) == NULL)
+    /* The disk: the boot module mac_disk (changes stay in memory), or else the ATA drive (changes are written). */
+    bool disk_in_memory = find_module(MAC_MODULE_DISK, &disk_module) != NULL;
+    block_device_t *drive = disk_in_memory ? NULL : block_device_find("ata0");
+
+    if (find_module(MAC_MODULE_ROM, &rom_module) == NULL || (!disk_in_memory && drive == NULL))
     {
-        kernel_printf("%s\n", "mac: needs the boot modules mac_rom and mac_disk");
+        kernel_printf("%s\n", "mac: needs the boot module mac_rom and a disk (module mac_disk or an ATA drive)");
         goto out;
     }
     if (rom_module.length != ROM_SIZE)
@@ -329,15 +430,19 @@ int mac_machine_run(uint32_t frames)
     }
 
     k_memset(ov, 0, sizeof *ov);
-    ov->image = (const uint8_t *)(uintptr_t)disk_module.base;
-    ov->blocks = (uint32_t)(disk_module.length / BLOCK_SIZE);
-    ov->slot = kmalloc((size_t)ov->blocks * sizeof(uint16_t));
-    if (ov->slot == NULL)
+
+    if (disk_in_memory)
     {
-        kernel_printf("%s\n", "mac: out of memory");
-        goto out;
+        ov->image = (const uint8_t *)(uintptr_t)disk_module.base;
+        ov->blocks = (uint32_t)(disk_module.length / BLOCK_SIZE);
+        ov->slot = kmalloc((size_t)ov->blocks * sizeof(uint16_t));
+        if (ov->slot == NULL)
+        {
+            kernel_printf("%s\n", "mac: out of memory");
+            goto out;
+        }
+        k_memset(ov->slot, 0, (size_t)ov->blocks * sizeof(uint16_t));
     }
-    k_memset(ov->slot, 0, (size_t)ov->blocks * sizeof(uint16_t));
 
     if (m68k_guest_set_size(RAM_SIZE) != 0 || m68k_guest_init() != 0)
     {
@@ -355,10 +460,25 @@ int mac_machine_run(uint32_t frames)
     mac->vram_size = VRAM_SIZE;
     mac->vram_base = VRAM_BASE;
     mac->rtc_seconds = RTC_START;
-    mac->disk.read = overlay_read;
-    mac->disk.write = overlay_write;
-    mac->disk.ctx = ov;
-    mac->disk.blocks = ov->blocks;
+
+    /* An interactive run keeps real time; the tests keep a fixed date so that they are repeatable. */
+    if (frames == 0 && current_mac_time() != 0)
+        mac->rtc_seconds = current_mac_time();
+    if (disk_in_memory)
+    {
+        mac->disk.read = overlay_read;
+        mac->disk.write = overlay_write;
+        mac->disk.ctx = ov;
+        mac->disk.blocks = ov->blocks;
+    }
+    else
+    {
+        mac->disk.read = drive_read;
+        mac->disk.write = drive_write;
+        mac->disk.ctx = drive;
+        mac->disk.blocks = drive->block_count > 0xFFFFFFFFu ? 0xFFFFFFFFu : (uint32_t)drive->block_count;
+        mac->disk.read_only = drive->ops->write == NULL;
+    }
     if (audio_out != NULL)
     {
         sound_resampler_reset(&audio_resampler);
@@ -369,8 +489,20 @@ int mac_machine_run(uint32_t frames)
 
     kernel_printf("%s\n", have_screen ? "mac: running (` stops)"
                                       : "mac: running without a screen");
+    uint64_t paced_start = hal_timer_ns();
+
     for (uint32_t frame = 1; frames == 0 || frame <= frames; frame++)
     {
+#ifdef KERNEL_MAC_TEST_FOLDER
+        for (unsigned int i = 0; i < sizeof(test_script) / sizeof(test_script[0]); i++)
+        {
+            if (test_script[i].frame == frame)
+            {
+                mac_mouse_warp(mac, test_script[i].x, test_script[i].y);
+                mac_mouse_move(mac, 0, 0, test_script[i].down);
+            }
+        }
+#endif
 #ifdef KERNEL_MAC_TEST_BEEP
         /* make test-mac-sound: let the system beep once. */
         if (frame == KERNEL_MAC_TEST_BEEP)
@@ -389,6 +521,16 @@ int mac_machine_run(uint32_t frames)
         if (handle_input(mac) && frames == 0)
         {
             break;
+        }
+
+        if (frames == 0)
+        {
+            pace(&paced_start, frame);
+
+            /* A report every 600 frames (10 s): how the Mac's time compares with ours. */
+            if (frame % 600 == 0)
+                kernel_printf("mac: %u frames, %u ms\n", frame,
+                              (unsigned int)((hal_timer_ns() - paced_start) / 1000000u));
         }
     }
     if (mac_render(mac, pixels) == 0)

@@ -166,7 +166,8 @@ typedef struct
     uint8_t xpram[256];         /* parameter RAM kept by the clock chip */
     uint32_t clk_log[1024];      /* first clock chip commands: cmd << 8 | data, bit 31 = read */
     uint32_t clk_log_len;
-    uint32_t rtc_seconds;       /* seconds since 1 Jan 1904, set by the host */
+    uint32_t rtc_seconds;       /* seconds since 1 Jan 1904: set by the host at the start, then counted by the model */
+    uint32_t second_ticks;      /* 60 Hz ticks since rtc_seconds last advanced */
 
     /* mac_sysbeep: the CPU state to restore when the injected call returns. */
     bool call_active, call_returned;
@@ -325,7 +326,18 @@ void mac_bus_write(mac_t *mac, uint32_t addr, int size, uint32_t value);
  * the button are sent even without motion). mac_key: an ADB key code (0-0x7F,
  * "Inside Macintosh: Devices", ADB keyboard) and whether it goes down.
  */
+void mac_mouse_warp(mac_t *mac, int x, int y);
 void mac_mouse_move(mac_t *mac, int dx, int dy, bool button);
+
+/*
+ * Put the pointer at screen position (x, y) at once, without the mouse
+ * acceleration that makes absolute positioning with relative moves
+ * unreliable: the cursor position in the system's low memory (RawMouse,
+ * MTemp, Mouse; Inside Macintosh: Toolbox Essentials / Mac OS Technote
+ * "Moving the cursor") is set and the cursor task told to redraw (CrsrNew).
+ * For scripted tests; the button state is sent with mac_mouse_move(0, 0).
+ */
+void mac_mouse_warp(mac_t *mac, int x, int y);
 void mac_key(mac_t *mac, uint8_t adb_code, bool down);
 
 /* True once the ROM's ADB Manager has a handler for 'device'; queued input

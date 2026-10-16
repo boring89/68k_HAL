@@ -727,6 +727,7 @@ int mac_reset(mac_t *mac)
     mac->via1.in_b = 0xFF;
     mac->via_rem = 0;
     mac->frame_cycles = 0;
+    mac->second_ticks = 0;
     k_memset(&mac->iwm, 0, sizeof mac->iwm);
     k_memset(&mac->scsi, 0, sizeof mac->scsi);
     k_memset(&mac->rbv, 0, sizeof mac->rbv);
@@ -767,6 +768,18 @@ static void advance_devices(mac_t *mac, int used)
         mac->frame_cycles -= CPU_HZ / TICK_HZ;
         mac_via_set_flag(&mac->via1, VIA_INT_CA1);
         mac_rbv_vblank(&mac->rbv);
+
+        /*
+         * The clock chip's one-second interrupt (VIA1 CA2, "Guide to the
+         * Macintosh Family Hardware"): the system counts its Time global
+         * with it, and the seconds registers move on.
+         */
+        if (++mac->second_ticks >= TICK_HZ)
+        {
+            mac->second_ticks = 0;
+            mac->rtc_seconds++;
+            mac_via_set_flag(&mac->via1, VIA_INT_CA2);
+        }
     }
     m68k_vm_set_irq(mac_rbv_irq(&mac->rbv) ? IRQ_LEVEL_RBV
                     : mac_via_irq(&mac->via1) ? IRQ_LEVEL_VIA1 : 0);
@@ -889,6 +902,25 @@ void mac_mouse_move(mac_t *mac, int dx, int dy, bool button)
         dy -= sy;
         first = false;
     }
+}
+
+
+/* Low memory globals for the cursor: RawMouse, MTemp, Mouse (v in the high word) and the "new position" flag CrsrNew. */
+#define LM_RAWMOUSE 0x82C
+#define LM_MTEMP 0x828
+#define LM_MOUSE 0x830
+#define LM_CRSRNEW 0x8CE
+
+void mac_mouse_warp(mac_t *mac, int x, int y)
+{
+    uint32_t point = ((uint32_t)(y & 0xFFFF) << 16) | (uint32_t)(x & 0xFFFF);
+
+    mac_bus_write(mac, LM_RAWMOUSE, 4, point);
+    mac_bus_write(mac, LM_MTEMP, 4, point);
+    mac_bus_write(mac, LM_MOUSE, 4, point);
+    mac_bus_write(mac, LM_CRSRNEW, 1, 1);
+    mac->mouse_x = x;
+    mac->mouse_y = y;
 }
 
 

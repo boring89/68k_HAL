@@ -35,6 +35,8 @@
 
 #define ATA_DRIVE_MASTER_LBA 0xE0 /* bits 7,5 set, LBA mode, master */
 #define ATA_CMD_READ_SECTORS 0x20
+#define ATA_CMD_WRITE_SECTORS 0x30
+#define ATA_CMD_FLUSH_CACHE 0xE7
 #define ATA_CMD_IDENTIFY 0xEC
 
 #define ATA_SECTOR_SIZE 512
@@ -121,7 +123,61 @@ static int ata_read(block_device_t *device, uint64_t lba, uint32_t count,
     return 0;
 }
 
-static const block_ops_t ata_ops = {ata_read};
+/*
+ * WRITE SECTORS (0x30, PIO): as reading, but after the command the host
+ * waits for DRQ and then sends each sector's 256 words. FLUSH CACHE (0xE7)
+ * at the end makes the drive write its cache to the medium before this
+ * returns (ATA/ATAPI-6, 6.4 and 6.17).
+ */
+static int ata_write(block_device_t *device, uint64_t lba, uint32_t count,
+                     const void *buffer)
+{
+    (void)device;
+
+    const uint16_t *words = buffer;
+
+    while (count > 0)
+    {
+        uint32_t batch = count > 255 ? 255 : count;
+
+        if (ata_wait(0) != 0)
+            return -1;
+
+        outb(ATA_REG_DRIVE, ATA_DRIVE_MASTER_LBA | ((lba >> 24) & 0x0F));
+        outb(ATA_REG_SECTOR_COUNT, (uint8_t)batch);
+        outb(ATA_REG_LBA_LOW, (uint8_t)lba);
+        outb(ATA_REG_LBA_MID, (uint8_t)(lba >> 8));
+        outb(ATA_REG_LBA_HIGH, (uint8_t)(lba >> 16));
+        outb(ATA_REG_COMMAND, ATA_CMD_WRITE_SECTORS);
+
+        for (uint32_t sector = 0; sector < batch; sector++)
+        {
+            ata_delay();
+
+            if (ata_wait(1) != 0)
+                return -1;
+
+            for (int i = 0; i < ATA_SECTOR_SIZE / 2; i++)
+                outw(ATA_REG_DATA, *words++);
+        }
+
+        /* The drive is busy writing the last sector; wait for it. */
+        ata_delay();
+
+        if (ata_wait(0) != 0)
+            return -1;
+
+        lba += batch;
+        count -= batch;
+    }
+
+    outb(ATA_REG_COMMAND, ATA_CMD_FLUSH_CACHE);
+    ata_delay();
+
+    return ata_wait(0);
+}
+
+static const block_ops_t ata_ops = {ata_read, ata_write};
 
 int ata_init(void)
 {

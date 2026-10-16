@@ -235,3 +235,17 @@ menuentry "mac" {
 - host：`tests/host/test_mac_asc.c`（FIFO 播放、旗標、中斷、RBV 的聲音中斷）。
 - `mac_run -B <frame> -W out.wav`：在執行中的系統裡呼叫 `SysBeep`（`mac_sysbeep()`：存下 CPU 狀態，在 stub 視窗跑 `move.w #3,-(sp); _SysBeep`，回來再還原），並把晶片播出的聲音存成 WAV。結果：0.32 秒、約 439 Hz 的嗶聲（振幅 ±28 / 128，音量偏小，System 自己決定）。
 - `make test-mac-sound`（本機專用，需要 ROM 與磁碟）：在 QEMU 的 kernel 裡跑 Mac，第 1200 個 frame 呼叫 `mac_sysbeep`，QEMU 把 HDA 輸出錄成 WAV，`tools/check_wav.py` 確認有約 440 Hz 的聲音。
+
+## 12. 時間、磁碟寫入與測試工具（P6 Q7）
+
+**一秒中斷與時鐘**：模型現在每數 60 個 60 Hz tick 就讓 `rtc_seconds` 加 1，並在 VIA1 的 CA2（時鐘晶片的「每秒中斷」，Guide to the Macintosh Family Hardware）設旗標。System 的 `Time` 全域變數靠這個中斷前進，所以選單列的時鐘會走（以前時鐘是凍結的）。
+
+**實時節流**（`kernel/mac/machine.c` 的 `pace`）：互動執行（`mac` 指令，不是測試）時，每個 frame（416000 個 CPU 週期 = 16.64 ms 的 Mac 時間）結束後等到實際時間也過了 16.64 ms 才跑下一個 frame；所以 Mac 的 60 Hz、一秒中斷、聲音速度都和真實時間一致（實測 600 frames = 9984 ms）。主機太慢時就全速跑、不追趕；停頓超過 100 ms 就重新對時。互動執行也用真實的 UTC 時間當 Mac 的起始時間（Mac 的紀元是 1904-01-01，與 Unix 紀元差 2082844800 秒）；測試仍用固定日期，結果可重複。每 600 個 frame 在 serial 印 `mac: 600 frames, 9984 ms`。
+
+**ATA 寫入**：`block_write` 與 ATA 驅動的 WRITE SECTORS（PIO）＋FLUSH CACHE。`mac` 指令的磁碟選擇：
+- 有 boot module `mac_disk`：記憶體覆蓋層（改動只留在記憶體，原本的行為）。
+- 沒有 `mac_disk` 但有 ATA 磁碟（`ata0`）：Mac 直接讀寫它，改動會留下。QEMU 用 `-drive file=複本.img,format=raw,if=ide`。**只用複本**，不要把你的原始磁碟映像掛進去。
+
+System 7 不會立刻把變動寫到磁碟（HFS 的 catalog 有快取，90 秒後仍沒寫）；要在「特殊 > 關機」時才會 flush。所以 `make test-mac-persist`（本機專用）的腳本是：File > New Folder，之後 Special > Shut Down，再用 hfsutils 檢查映像裡的 `Desktop Folder` 有 `untitled folder`。
+
+**測試用的滑鼠定位**：用相對移動封包要定位到絕對座標很不準（Mac 有滑鼠加速）。`mac_mouse_warp(x, y)` 直接把游標位置寫進低位址記憶體的 `RawMouse`、`MTemp`、`Mouse`，並設 `CrsrNew`，馬上到位。`tools/mac_run -J x,y,按鈕,frame` 與 kernel 的測試腳本都用它；選單項目的座標是用開啟選單的截圖找出來的。其他工具：`-O 檔案`（結束時把磁碟映像寫出）、`-W 檔案.wav`、`-B frame`（呼叫 SysBeep）。
