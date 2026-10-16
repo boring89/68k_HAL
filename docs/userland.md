@@ -199,6 +199,10 @@ shell 內建的 `ls`、`cat`、`echo`、`date` 是舊的（`ls`／`cat` 讀 HFS 
 
 `kernel/terminal/input.c`：← → Home End Delete Backspace、Ctrl-A/E/U/K/W、↑ ↓ 歷史（16 行）、Tab 補全（第一個字：內建指令與 `/bin` 的程式；其他字：目前目錄的檔案，含斜線的路徑在該目錄找；`kernel/shell/complete.c`）、Ctrl-C 放棄這一行、Ctrl-L 清畫面。原理：編輯器記得「這一行第一個字元在螢幕上的線性位置」（列 × 寬 + 欄），每次修改就從改動處往後重畫，並處理換行與畫面捲動（捲動後那一行整體上移，用實際游標位置校正）。序列埠只看到鍵入的字（重畫時暫停鏡射）。沒有顯示器時只支援在行尾輸入與 Backspace。測試：`tests/host/test_input.c`、`test_shell_complete.c`、`make test-shell`。
 
+### 5.9 重導向與管線（一個一個跑的管線）
+
+shell 行裡的 `|`、`<`、`>`、`>>`（各自要用空白隔開）：`seq 20 | grep 1 | wc -l`、`seq 3 > /tmp/n.txt`、`wc -l < /tmp/n.txt`、`echo more >> /tmp/n.txt`。因為一次只能跑一個程式，管線是**依序**執行：前一段的標準輸出寫到 `/tmp/.pipe<n>`，下一段從那個檔案讀（`user_run_redirect`；結束後刪除）。對不需要即時互動的過濾器（grep、sort、wc、head…）結果相同；但前一段要先跑完才開始下一段（無限輸出的程式如 `yes | head` 不行），也不能互動。只有程式參與，內建指令不行（行裡有運算子時 `echo`、`cat` 等用 `/bin` 的版本）；最多 4 段。真正的管線需要 `fork`/`pipe`/多工（見 P6_PLAN 的「待決定」）。
+
 ### 遇到 ENOSYS 時怎麼補
 
 1. 用編號查 `syscall_32.tbl`（或 `man 2 <名稱>`）知道它叫什麼、參數是什麼。

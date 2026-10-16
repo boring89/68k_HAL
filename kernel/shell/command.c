@@ -5,6 +5,7 @@
 
 #include "command.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include "kernel/terminal/terminal.h"
@@ -662,10 +663,150 @@ static void report_status(const char *name, int32_t status)
     }
 }
 
+/* The program a command name stands for: a path as it is, any other name in /bin. */
+static bool find_program(const char *name, char *path)
+{
+    vfs_stat_t stat;
+
+    if (name[0] == '/')
+        k_strcpy(path, name);
+    else if (k_strlen(name) + 5 < VFS_PATH_MAX)
+    {
+        k_strcpy(path, "/bin/");
+        k_strcpy(path + 5, name);
+    }
+    else
+        return false;
+
+    return vfs_stat(path, &stat) == 0 && (stat.mode & VFS_S_IFMT) == VFS_S_IFREG;
+}
+
+#define PIPELINE_MAX 4
+
+typedef struct
+{
+    const char *argv[SHELL_MAX_ARGS + 1];
+    int argc;
+    const char *input;  /* < file */
+    const char *output; /* > file or >> file */
+    bool append;
+} pipeline_stage_t;
+
+/*
+ * A line with "|", "<", ">" or ">>" (each as a word of its own). There is only one program at a time,
+ * so the stages run one after the other: each writes its output to a file in /tmp
+ * (/tmp/.pipe<n>) that the next one reads. Only programs take part, not built-in commands.
+ */
+static void run_pipeline(shell_command_t *cmd)
+{
+    pipeline_stage_t stages[PIPELINE_MAX];
+    int count = 1;
+
+    k_memset(stages, 0, sizeof(stages));
+
+    for (int i = 0; i < cmd->argc; i++)
+    {
+        pipeline_stage_t *stage = &stages[count - 1];
+        const char *word = cmd->argv[i];
+
+        if (k_strcmp(word, "|") == 0)
+        {
+            if (stage->argc == 0 || count == PIPELINE_MAX)
+            {
+                terminal_write_line("shell: bad pipeline");
+
+                return;
+            }
+
+            count++;
+        }
+        else if (k_strcmp(word, "<") == 0 || k_strcmp(word, ">") == 0 || k_strcmp(word, ">>") == 0)
+        {
+            if (i + 1 >= cmd->argc)
+            {
+                terminal_write_line("shell: missing file name");
+
+                return;
+            }
+
+            if (word[0] == '<')
+                stage->input = cmd->argv[++i];
+            else
+            {
+                stage->append = word[1] == '>';
+                stage->output = cmd->argv[++i];
+            }
+        }
+        else
+        {
+            stage->argv[stage->argc++] = word;
+        }
+    }
+
+    for (int i = 0; i < count; i++)
+    {
+        if (stages[i].argc == 0)
+        {
+            terminal_write_line("shell: missing command");
+
+            return;
+        }
+    }
+
+    char paths[PIPELINE_MAX][VFS_PATH_MAX];
+    char pipes[PIPELINE_MAX][16];
+
+    for (int i = 0; i < count; i++)
+    {
+        if (!find_program(stages[i].argv[0], paths[i]))
+        {
+            terminal_write(stages[i].argv[0]);
+            terminal_write_line(": not a program");
+
+            return;
+        }
+
+        k_strcpy(pipes[i], "/tmp/.pipe0");
+        pipes[i][10] = (char)('0' + i);
+    }
+
+    for (int i = 0; i < count; i++)
+    {
+        pipeline_stage_t *stage = &stages[i];
+        const char *input = stage->input != NULL ? stage->input : (i > 0 ? pipes[i - 1] : NULL);
+        const char *output = stage->output != NULL ? stage->output : (i < count - 1 ? pipes[i] : NULL);
+
+        stage->argv[stage->argc] = NULL;
+
+        int32_t status = user_run_redirect(paths[i], stage->argv, shell_environment(), input, output,
+                                           stage->output != NULL && stage->append);
+
+        report_status(stage->argv[0], status);
+
+        /* A stage that could not run (or failed to open its files) ends the line. */
+        if (status < 0)
+            break;
+    }
+
+    for (int i = 0; i < count - 1; i++)
+        vfs_unlink(pipes[i]);
+}
+
 void shell_dispatch(shell_command_t *cmd)
 {
     if (cmd->argc == 0)
         return;
+
+    for (int i = 0; i < cmd->argc; i++)
+    {
+        if (k_strcmp(cmd->argv[i], "|") == 0 || k_strcmp(cmd->argv[i], "<") == 0 ||
+            k_strcmp(cmd->argv[i], ">") == 0 || k_strcmp(cmd->argv[i], ">>") == 0)
+        {
+            run_pipeline(cmd);
+
+            return;
+        }
+    }
 
     for (int i = 0; i < COMMAND_TABLE_SIZE; i++)
     {
@@ -686,19 +827,8 @@ void shell_dispatch(shell_command_t *cmd)
      * for in /bin (where the toolbox's commands are, as links to /bin/box: userland/box.c).
      */
     char path[VFS_PATH_MAX];
-    vfs_stat_t stat;
 
-    if (cmd->argv[0][0] == '/')
-        k_strcpy(path, cmd->argv[0]);
-    else if (k_strlen(cmd->argv[0]) + 5 < sizeof(path))
-    {
-        k_strcpy(path, "/bin/");
-        k_strcpy(path + 5, cmd->argv[0]);
-    }
-    else
-        path[0] = '\0';
-
-    if (path[0] != '\0' && vfs_stat(path, &stat) == 0 && (stat.mode & VFS_S_IFMT) == VFS_S_IFREG)
+    if (find_program(cmd->argv[0], path))
     {
         const char *args[SHELL_MAX_ARGS + 1];
 

@@ -107,6 +107,14 @@ void user_init(void);
  */
 int32_t user_run(const char *path, const char *const *argv, const char *const *envp);
 
+/*
+ * Like user_run, with standard input read from the file stdin_path and standard output written to
+ * stdout_path (created, then truncated or, with append, added to); NULL = the console. A file that
+ * cannot be opened is the error returned (-errno) and the program does not run.
+ */
+int32_t user_run_redirect(const char *path, const char *const *argv, const char *const *envp,
+                          const char *stdin_path, const char *stdout_path, int append);
+
 /* socket.c: the i386 socketcall(call, args) multiplexer (BSD sockets, AF_INET). */
 int32_t user_socketcall(uint32_t call, uint32_t args_address);
 

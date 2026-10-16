@@ -24,6 +24,7 @@ KEYS = {
     " ": "spc", "\n": "ret", "/": "slash", ".": "dot", "-": "minus", "_": "shift-minus",
     "=": "equal", "+": "shift-equal", "*": "shift-8", "(": "shift-9", ")": "shift-0",
     ",": "comma", ":": "shift-semicolon", "\"": "shift-apostrophe",
+    "|": "shift-backslash", "<": "shift-comma", ">": "shift-dot",
 }
 
 

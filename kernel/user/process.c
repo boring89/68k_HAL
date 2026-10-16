@@ -435,6 +435,12 @@ static int32_t build_stack(const elf_image_t *image, const char *const *argv,
 
 int32_t user_run(const char *path, const char *const *argv, const char *const *envp)
 {
+    return user_run_redirect(path, argv, envp, NULL, NULL, 0);
+}
+
+int32_t user_run_redirect(const char *path, const char *const *argv, const char *const *envp,
+                          const char *stdin_path, const char *stdout_path, int append)
+{
     if (user_process.running)
         return -K_EBUSY;
 
@@ -470,9 +476,19 @@ int32_t user_run(const char *path, const char *const *argv, const char *const *e
     if (status == 0)
         status = build_stack(&image, argv, envp, &sp);
 
-    vfs_file_t *in = console_file_open(VFS_O_RDONLY);
-    vfs_file_t *out = console_file_open(VFS_O_WRONLY);
+    vfs_file_t *in = NULL;
+    vfs_file_t *out = NULL;
     vfs_file_t *err = console_file_open(VFS_O_WRONLY);
+
+    if (status == 0 && stdin_path != NULL)
+        status = vfs_open(stdin_path, VFS_O_RDONLY, 0, &in);
+    else
+        in = console_file_open(VFS_O_RDONLY);
+
+    if (status == 0 && stdout_path != NULL)
+        status = vfs_open(stdout_path, VFS_O_WRONLY | VFS_O_CREAT | (append ? VFS_O_APPEND : VFS_O_TRUNC), 0644, &out);
+    else if (status == 0)
+        out = console_file_open(VFS_O_WRONLY);
 
     if (status == 0 && (in == NULL || out == NULL || err == NULL))
         status = -K_ENOMEM;

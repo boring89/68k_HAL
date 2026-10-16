@@ -580,6 +580,11 @@ test-shell: iso
 		"box cat box/m.txt=Second line." \
 		"wc -l box/m.txt=m.txt" \
 		"nosuchcommand=Unknown command: nosuchcommand" \
+		"seq 20 | grep 1 | wc -l=11" \
+		"seq 3 > nums.txt=" \
+		"echo more >> nums.txt=" \
+		"wc -l < nums.txt=4" \
+		"cat < nums.txt=more" \
 		"run /bin/helo{left}l=Hello from user mode!" \
 		"{up}=Hello from user mode!" \
 		"run /bin/hell{tab}=Hello from user mode!" \
