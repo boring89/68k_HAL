@@ -20,6 +20,17 @@ static net_config_t config;
 static tcp_stack_t tcp_stack;
 static int tcp_ready;
 
+/*
+ * net_receive runs inside a driver's receive loop: anything it triggers (a
+ * reply, a TCP acknowledgement) must not wait for the network, or the
+ * driver would be re-entered half way through a frame. So while a frame is
+ * being handled, ARP lookups only send the request and give up (the peer's
+ * retransmission finds the address cached); and the TCP timers do not run
+ * from inside themselves.
+ */
+static int receiving;
+static int in_tcp_tick;
+
 static void tcp_restart(void);
 
 static const uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
@@ -100,8 +111,12 @@ void net_poll(void)
     if (device != NULL && device->poll != NULL)
         device->poll(device);
 
-    if (tcp_ready)
+    if (tcp_ready && !in_tcp_tick)
+    {
+        in_tcp_tick = 1;
         tcp_tick(&tcp_stack);
+        in_tcp_tick = 0;
+    }
 }
 
 const net_config_t *net_config(void)
@@ -234,6 +249,9 @@ static int resolve_mac(const uint8_t ip[4], uint8_t mac[6])
         }
 
         send_arp(NET_ARP_REQUEST, broadcast_mac, next_hop);
+
+        if (receiving || in_tcp_tick)
+            return -1;
 
         uint64_t end = hal_timer_ns() + 500000000u;
 
@@ -582,10 +600,8 @@ void net_tcp_close(int connection)
 
 /* --- receive --- */
 
-void net_receive(net_device_t *dev, const uint8_t *frame, uint32_t length)
+static void receive_frame(const uint8_t *frame, uint32_t length)
 {
-    (void)dev;
-
     if (length < NET_ETH_HEADER)
         return;
 
@@ -615,6 +631,10 @@ void net_receive(net_device_t *dev, const uint8_t *frame, uint32_t length)
     if (!for_us)
         return;
 
+    /* The sender's MAC address belongs with its IP address: remember it, so that the answer needs no ARP. */
+    if (!is_zero_ip(ip.source) && !same_ip(ip.source, broadcast_ip))
+        arp_learn(ip.source, frame + 6);
+
     if (ip.protocol == NET_IP_PROTO_TCP)
     {
         if (tcp_ready)
@@ -624,6 +644,15 @@ void net_receive(net_device_t *dev, const uint8_t *frame, uint32_t length)
         handle_icmp(&ip, frame + 6);
     else if (ip.protocol == NET_IP_PROTO_UDP)
         handle_udp(&ip);
+}
+
+void net_receive(net_device_t *dev, const uint8_t *frame, uint32_t length)
+{
+    (void)dev;
+
+    receiving++;
+    receive_frame(frame, length);
+    receiving--;
 }
 
 /* --- DHCP client --- */

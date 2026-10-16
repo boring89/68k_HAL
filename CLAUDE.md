@@ -25,6 +25,7 @@ make sdk        # C SDK（musl 靜態 i386）→ build/sdk；`tools/68khal-cc` �
 make initrd     # userland/ 的範例程式、Lua、tcc 打包成 build/initrd.tar（程式光碟，GRUB module 名稱 initrd）
 make test-shell # 開機 ISO、用 QEMU monitor 打字執行 shell 指令並檢查 serial 輸出（tools/shell_test.py）
 make test-video # 設定 1280x960 並檢查 QEMU screendump
+make test-net / test-virtio-net  # TCP（host 的 http.server 經 slirp 10.0.2.2）、socket、DNS；virtio-net 網卡
 make test-mac-sound / test-mac-clock / test-mac-persist  # Mac 的聲音、時鐘、ATA 寫入（本機專用，需要 ROM 與磁碟）
 make clean
 ```
@@ -51,8 +52,8 @@ make clean
 hal/           HAL 介面（只有 .h）：cpu、irq、timer、mmu、boot（含 module）、framebuffer、clock、init、acpi、pci、dma、usermode
 arch/x86/      CPU：cpu（hal_cpu、CPUID、控制暫存器）、gdt（含 TSS）、interrupt（IDT、例外、IRQ stub）、mmu（分頁、hal_mmu）、io（port I/O）、user（ring 3、int 0x80）、test
 platform/pc/   PC 平台：boot（Multiboot 進入點、hal_boot）、video（framebuffer、BGA 模式設定）、rtc（CMOS 時鐘）、interrupt（8259 PIC、hal_irq）、timer（PIT、TSC、hal_timer）、acpi、smp（INIT-SIPI-SIPI）、pci（列舉、驅動清單）、dma、vmap（0xE0000000 視窗）、hal_init.c、test
-drivers/       裝置驅動：vga、serial、ps2_keyboard、ps2_mouse、ata（讀寫，見 docs/storage.md）、e1000（網卡）、hda（Intel HD Audio）、bga（Bochs VBE 顯示）
-kernel/        與硬體無關的核心：main.c、panic、memory（pmm、heap）、block（區塊裝置、ramdisk）、fs（apm、hfs 唯讀、volume；見 docs/hfs.md）、display（含 fb_scale）、console、terminal（含 mirror）、keyboard（keycode、state、keychar）、input、shell、log、printf、lib、m68k（guest RAM 與示範）、mac（在 kernel 裡執行 Mac；見 docs/mac.md）、user（ELF 載入器、系統呼叫、console；見 docs/userland.md）、vfs（ramfs、tarfs、hfsfs、devfs 的 console；見 docs/userland.md）、net（packet 純函式、net 堆疊；見 docs/net.md）、sound（見 docs/sound.md）、pci（名稱表；見 docs/pci.md）、test
+drivers/       裝置驅動：vga、serial、ps2_keyboard、ps2_mouse、ata（讀寫，見 docs/storage.md）、ahci（SATA）、e1000 與 virtio_net（網卡）、hda（Intel HD Audio）、bga（Bochs VBE 顯示）、usb_host（列舉 USB 控制器）
+kernel/        與硬體無關的核心：main.c、panic、memory（pmm、heap）、block（區塊裝置、ramdisk）、fs（apm、hfs 唯讀、volume；見 docs/hfs.md）、display（含 fb_scale）、console、terminal（含 mirror）、keyboard（keycode、state、keychar）、input、shell、log、printf、lib、m68k（guest RAM 與示範）、mac（在 kernel 裡執行 Mac；見 docs/mac.md）、user（ELF 載入器、系統呼叫、console；見 docs/userland.md）、vfs（ramfs、tarfs、hfsfs、devfs 的 console；見 docs/userland.md）、net（packet 純函式、tcp、net 堆疊；見 docs/net.md）、usb（控制器註冊表；見 docs/usb.md）、sound（見 docs/sound.md）、pci（名稱表；見 docs/pci.md）、test
 emu/m68k/      68k 虛擬機：Musashi 的封裝層（vm：含可選的 bus 與逐指令 hook）、A-line trap 分派（trap）、Musashi 設定（m68kconf.h）；freestanding/ 是 kernel 建置用的 libc 替身
 emu/mac/       Mac IIci 機器模型（M-P3，見 docs/mac.md）：記憶體配置與模擬 opcode（mac.c）、ROM 修補（rom_patch.c）、VIA（via.c）、RBV/DAC/視訊（video.c）、IWM、SCSI、.Disk 驅動（disk.c、stub.s）；與硬體無關，檔案由使用者提供，不在 repo
 third_party/   第三方原始碼，不修改：musashi（68k CPU 核心，MIT）；downloads/ 是下載的 musl、Lua、TinyCC、Haiku（gitignore）
@@ -155,7 +156,7 @@ Claude 依照上方工作規則直接實作。
 - HFS 名稱比較只對 ASCII 不分大小寫，查詢是線性掃描（見 `docs/hfs.md`）。
 - ATA 驅動只支援 primary master、LBA28、輪詢（可讀寫，寫入後 FLUSH CACHE）。
 - 使用者程式：一次只能跑一個（沒有多工、fork/execve、socket、執行緒、訊號）；所有使用者頁面 RWX；堆疊固定 2 MiB。見 `docs/userland.md` 第 7 節。
-- 網路：沒有 TCP、IP 分片、IPv6；HDA 只有輸出；BGA 只有 32 bpp；所有中斷仍由 8259 處理，其他處理器只回報後 `hlt`（沒有 APIC 中斷與 per-CPU 資料）。
+- 網路：TCP 沒有亂序重組、壅塞控制、選擇性確認；沒有 IP 分片、IPv6；一次只用一張網卡；HDA 只有輸出；BGA 只有 32 bpp；AHCI 只用輪詢與一個命令槽；USB 只能列出控制器（見 `docs/usb.md`）；所有中斷仍由 8259 處理，其他處理器只回報後 `hlt`（沒有 APIC 中斷與 per-CPU 資料）。
 - `vmap`（`0xE0000000`–`0xF0000000`）與 `hal_dma_free` 的虛擬位址不重用。
 - QEMU 的 HDA 透過 CORB/RIRB 只回應第一個命令，驅動改用立即命令暫存器（原因未查明，見 `docs/sound.md`）。
 - 開機時的 identity map 只有前 4 MiB（kernel 結尾約 0x225000）：kernel 超過 4 MiB 會在 `paging_init` panic。heap 已搬到專用虛擬位址，不佔這 4 MiB。

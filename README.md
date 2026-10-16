@@ -30,10 +30,11 @@ The long-term vision is simple:
 - Modular HAL architecture
 - 68k virtual machine (Musashi) and a Macintosh IIci machine model that boots a user-supplied ROM and System 7.5.3 disk image to the Finder desktop, with keyboard, mouse, sound (Apple Sound Chip), a real-time clock, an optionally 2x enlarged screen and writes to an ATA disk (experimental, see [docs/mac.md](docs/mac.md))
 - CPU: CPUID, x87/SSE, TSC nanosecond clock, ACPI tables, starting the other processors ([docs/cpu.md](docs/cpu.md))
-- Ring 3 user mode running static Linux i386 programs, with a C SDK (musl) so that C programs can be ported; Lua and the Tiny C Compiler already run, and the OS can compile C itself ([docs/userland.md](docs/userland.md))
+- Ring 3 user mode running static Linux i386 programs, with a C SDK (musl) so that C programs can be ported; Lua, SQLite and the Tiny C Compiler already run, and the OS can compile C itself ([docs/userland.md](docs/userland.md))
 - Virtual file tree (initrd, RAM disk `/tmp`, `/dev`, the Mac disk's HFS volume at `/hfs`)
 - PCI bus, driver framework and DMA memory ([docs/pci.md](docs/pci.md))
-- Networking: Intel e1000 driver, ARP, IPv4, ICMP, UDP, DHCP, DNS ([docs/net.md](docs/net.md))
+- Networking: Intel e1000 and virtio-net drivers, ARP, IPv4, ICMP, UDP, TCP, DHCP, DNS, BSD sockets for programs ([docs/net.md](docs/net.md))
+- Storage: ATA (read/write) and AHCI/SATA drivers ([docs/storage.md](docs/storage.md)); USB host controllers are listed ([docs/usb.md](docs/usb.md))
 - Audio: Intel HD Audio driver and a streaming sound interface ([docs/sound.md](docs/sound.md))
 - Graphics: Bochs/QEMU VGA mode setting at any resolution ([docs/gpu.md](docs/gpu.md))
 
@@ -42,7 +43,7 @@ The long-term vision is simple:
 - 68k compatibility layer
 - Modern memory management (multitasking, per-process address spaces)
 - Modern filesystem (writable, on disk)
-- TCP, USB, more drivers (virtio, AHCI, native GPUs)
+- USB devices (keyboard, mass storage), native GPUs
 - Interrupts through the APIC and using the other processors
 
 ---

@@ -516,7 +516,7 @@ test-qemu: $(BUILD)/test/module_test.txt $(BUILD)/images/disk.img $(BUILD)/test/
 # Boot the ISO (GRUB, with the initrd module), type shell commands and
 # check what the programs print on the serial port (tools/shell_test.py).
 test-shell: iso
-	QEMU_ARGS="-netdev user,id=n0 -device e1000,netdev=n0" \
+	QEMU_ARGS="-netdev user,id=n0 -device e1000,netdev=n0 -device qemu-xhci" \
 	python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
 		"lspci=Host bridge" \
 		"usb=xHCI" \
