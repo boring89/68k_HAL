@@ -57,6 +57,25 @@ tools/68khal-cc -O2 myprog.c -o myprog      # 與 gcc 用法相同，輸出靜�
 
 想要檔案資料：放進 `userland/data/`，執行時在 `/data/…`。
 
+## 2.5 已移植的軟體（證明 SDK 夠用）
+
+| 程式 | 來源 | 怎麼建 | 試試看 |
+|---|---|---|---|
+| **Lua 5.4.7**（MIT） | lua.org 官方 tarball，SHA-256 驗證 | `tools/build_lua.sh`（`make initrd` 會呼叫） | `run /bin/lua -e print(6*7)` 或 `run /bin/lua /data/test.lua` |
+| **TinyCC 0.9.27**（LGPL-2.1） | download.savannah.gnu.org，SHA-256 驗證 | `tools/build_tcc.sh` | 見下 |
+
+原始碼放在 `third_party/downloads/`（被 `.gitignore` 排除，不進 repo）。
+
+**在 OS 裡編譯 C 程式**：tcc 是用 SDK 編成 i386 靜態程式，initrd 帶著它需要的標頭與函式庫（`/usr/include`、`/usr/lib`）。
+
+```
+HAL> run /bin/tcc -static -o /tmp/h /data/tcc_hello.c
+HAL> run /tmp/h
+compiled by tcc: fib(20)=6765 1099511627 ok 6.28
+```
+
+重點：一定要加 `-static`（沒有動態連結器）；輸出放 `/tmp`（唯一可寫）；`run` 可以執行任何 VFS 上的 ELF。想編自己的程式，可以放進 `userland/data/` 再 `make initrd`。tcc 的程式碼產生品質不如 gcc，但足夠做小工具與實驗。
+
 ## 3. 檔案樹
 
 ```

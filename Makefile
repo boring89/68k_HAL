@@ -350,7 +350,7 @@ test-sst: $(BUILD)/host/sst_run
 
 SDK_LIBC := build/sdk/sysroot/lib/librt68k.a
 USERLAND_SOURCES := $(wildcard userland/*.c)
-USERLAND_BINS := $(patsubst userland/%.c,build/initrd/bin/%,$(USERLAND_SOURCES)) build/initrd/bin/lua
+USERLAND_BINS := $(patsubst userland/%.c,build/initrd/bin/%,$(USERLAND_SOURCES)) build/initrd/bin/lua build/initrd/bin/tcc
 INITRD := build/initrd.tar
 
 # musl and the runtime helpers (downloads musl on the first run).
@@ -368,6 +368,10 @@ build/initrd/bin/lua: tools/build_lua.sh $(SDK_LIBC) tools/68khal-cc
 	mkdir -p $(dir $@)
 	tools/build_lua.sh $@
 
+# The C compiler (tcc) with the headers and libraries it needs under usr/.
+build/initrd/bin/tcc: tools/build_tcc.sh $(SDK_LIBC) tools/68khal-cc
+	tools/build_tcc.sh build/initrd
+
 # The program disk: bin/ (programs), data/ (files they read) and expected/
 # (what the self test compares their output with), packed as a ustar archive.
 initrd: $(INITRD)
@@ -378,7 +382,7 @@ $(INITRD): $(USERLAND_BINS) $(wildcard userland/data/*) $(wildcard userland/expe
 	cp userland/data/* build/initrd/data/
 	cp userland/expected/* build/initrd/expected/
 	tar --format=ustar --owner=0 --group=0 --numeric-owner --sort=name \
-		-C build/initrd -cf $@ bin data expected
+		-C build/initrd -cf $@ bin data expected usr
 
 # Kernel built with -DKERNEL_SELFTEST, booted directly by QEMU (no ISO).
 # QEMU exits with 33 on PASS (see kernel/test/selftest.c).
@@ -420,6 +424,8 @@ test-shell: iso
 		"run /bin/args a b=argv[2]: b" \
 		"run /bin/crash=before" \
 		"run /bin/lua -e print(6*7)=42" \
+		"run /bin/tcc -static -o /tmp/h /data/tcc_hello.c=" \
+		"run /tmp/h=compiled by tcc: fib(20)=6765" \
 		"run /bin/readline=Type something" \
 		"hello world=you typed: hello world (11 characters)"
 

@@ -53,6 +53,7 @@ u64 __udivmoddi4(u64 n, u64 d, u64 *rem)
     return udivmod(n, d, rem);
 }
 
+#ifndef RT_ONLY_DIVMOD4 /* tcc's own libtcc1 has these four */
 u64 __udivdi3(u64 n, u64 d)
 {
     return udivmod(n, d, 0);
@@ -83,6 +84,8 @@ s64 __moddi3(s64 n, s64 d)
 
     return n < 0 ? -(s64)r : (s64)r;
 }
+
+#endif /* RT_ONLY_DIVMOD4 */
 
 s64 __divmoddi4(s64 n, s64 d, s64 *rem)
 {

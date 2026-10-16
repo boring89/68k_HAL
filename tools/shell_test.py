@@ -94,7 +94,11 @@ def main():
             mark = len(output())
             for key in keys_for(command + "\n"):
                 send("sendkey " + key)
-            if not wait_for(expected, 30, mark):
+            if expected == "":
+                # Nothing to wait for on the serial port (the command prints
+                # nothing): give it time before the next one is typed.
+                time.sleep(5)
+            elif not wait_for(expected, 30, mark):
                 print("shell_test: FAIL: '%s' did not print '%s'" % (command, expected))
                 print(output()[mark:][-600:])
                 return 1

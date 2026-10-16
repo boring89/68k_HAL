@@ -486,6 +486,53 @@ static void test_user_programs(void)
     }
 }
 
+/* The C compiler runs inside the OS: compile a program to /tmp, then run it. */
+static void test_user_compiler(void)
+{
+    vfs_stat_t stat;
+
+    if (vfs_stat("/bin/tcc", &stat) != 0)
+        return;
+
+    static char output[4096];
+    static char expected[4096];
+    static const char *const environment[] = {"PATH=/bin", NULL};
+    const char *compile[] = {"/bin/tcc", "-static", "-o", "/tmp/hello", "/data/tcc_hello.c", NULL};
+
+    user_console_capture_start(output, sizeof(output));
+
+    int32_t status = user_run("/bin/tcc", compile, environment);
+
+    user_console_capture_stop();
+    SELFTEST_ASSERT(status == 0);
+
+    if (status != 0)
+        kernel_printf("  tcc: exit %d\n%s\n", (int)status, output);
+
+    const char *run[] = {"/tmp/hello", "x", NULL};
+
+    user_console_capture_start(output, sizeof(output));
+    status = user_run("/tmp/hello", run, environment);
+    user_console_capture_stop();
+
+    vfs_file_t *file;
+    int32_t length = 0;
+
+    if (vfs_open("/expected/tcc.txt", VFS_O_RDONLY, 0, &file) == 0)
+    {
+        length = vfs_read(file, expected, sizeof(expected) - 1);
+        vfs_file_close(file);
+    }
+
+    expected[length > 0 ? length : 0] = '\0';
+
+    SELFTEST_ASSERT(status == 2);
+    SELFTEST_ASSERT(k_strcmp(output, expected) == 0);
+
+    if (k_strcmp(output, expected) != 0)
+        kernel_printf("  compiled program: exit %d\n%s", (int)status, output);
+}
+
 void selftest_abort(void)
 {
     selftest_platform_exit(0);
@@ -512,6 +559,7 @@ void selftest_run(void)
     SELFTEST_RUN(test_m68k_guest_divide_64);
     SELFTEST_RUN(test_m68k_guest_fline_exception);
     SELFTEST_RUN(test_user_programs);
+    SELFTEST_RUN(test_user_compiler);
 
     selftest_arch_run();
     selftest_platform_run();

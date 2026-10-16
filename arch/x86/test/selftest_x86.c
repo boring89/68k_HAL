@@ -23,6 +23,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* A virtual address nothing maps: past the heap and user program ranges. */
+#define TEST_UNMAPPED_VIRT 0x60000000u
+
 /* Any variable in the kernel image, for the identity map tests. */
 static int kernel_variable;
 
@@ -102,7 +105,12 @@ static void test_paging_identity_map(void)
     uintptr_t local = (uintptr_t)&kernel_variable;
 
     SELFTEST_ASSERT(paging_entry_is_present(directory[0]));
-    SELFTEST_ASSERT(!paging_entry_is_present(directory[1]));
+
+    /*
+     * Nothing else is identity mapped except the boot data (a big boot
+     * module can reach beyond 4 MiB), so a far away directory entry is empty.
+     */
+    SELFTEST_ASSERT(!paging_entry_is_present(directory[paging_dir_index(TEST_UNMAPPED_VIRT)]));
 
     /* Page 0 is left unmapped to catch null pointers. */
     SELFTEST_ASSERT(!paging_entry_is_present(table[0]));
@@ -149,8 +157,8 @@ static void test_paging_get_phys_unmapped(void)
     SELFTEST_ASSERT(paging_get_phys(0, &phys) == -1);
     SELFTEST_ASSERT(paging_get_phys(0xFFF, &phys) == -1);
 
-    /* Above 4 MiB: PDE not present, so the table is never touched. */
-    SELFTEST_ASSERT(paging_get_phys(PAGING_IDENTITY_END, &phys) == -1);
+    /* Far above the identity map: PDE not present, so the table is never touched. */
+    SELFTEST_ASSERT(paging_get_phys(TEST_UNMAPPED_VIRT, &phys) == -1);
     SELFTEST_ASSERT(paging_get_phys(0xC0000000, &phys) == -1);
 
     /* *phys is left unchanged on failure. */
@@ -175,7 +183,7 @@ static void test_paging_get_phys_recursive(void)
 /* Virtual pages for the paging_map tests: unused, outside the identity map. */
 #define TEST_MAP_VIRT_A 0x40000000u /* directory entry 256 */
 #define TEST_MAP_VIRT_B 0x40001000u /* same page table as A */
-#define TEST_MAP_VIRT_NEW_TABLE PAGING_IDENTITY_END /* directory entry 1 */
+#define TEST_MAP_VIRT_NEW_TABLE TEST_UNMAPPED_VIRT /* directory entry 384, never used */
 
 static void test_paging_map_alias(void)
 {
