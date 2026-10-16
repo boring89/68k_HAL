@@ -128,6 +128,7 @@ HOST_LIB_SOURCES := \
 	drivers/ps2_keyboard/scancode.c \
 	kernel/console/sink.c \
 	kernel/display/text_display.c \
+	kernel/display/fb_pattern.c \
 	kernel/lib/k_string.c \
 	kernel/lib/k_number.c \
 	kernel/lib/k_memory.c \

@@ -22,9 +22,11 @@
 #include "kernel/memory/heap.h"
 #include "kernel/memory/pmm.h"
 
+#include "kernel/display/fb_pattern.h"
 #include "kernel/panic/panic.h"
 
 #include "hal/cpu.h"
+#include "hal/framebuffer.h"
 #include "hal/init.h"
 #include "hal/timer.h"
 
@@ -62,6 +64,15 @@ void kernel_main(void)
 
     kernel_log(LOG_INFO, "Kernel Booting...");
     hal_init();
+
+    /* Graphics mode has no text output yet: show a test pattern instead. */
+    hal_framebuffer_t framebuffer;
+
+    if (hal_framebuffer_get(&framebuffer) == 0)
+    {
+        kernel_printf("Framebuffer: %ux%u\n", framebuffer.width, framebuffer.height);
+        fb_draw_test_pattern(&framebuffer);
+    }
 
     input_event_buffer_init();
 

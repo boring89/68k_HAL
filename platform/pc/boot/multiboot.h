@@ -6,6 +6,7 @@
 #ifndef PLATFORM_PC_BOOT_MULTIBOOT_H
 #define PLATFORM_PC_BOOT_MULTIBOOT_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /* EAX at kernel entry when a Multiboot loader started the kernel
@@ -18,6 +19,12 @@
 
 /* multiboot_info_t.flags bit 3: mods_count / mods_addr are valid. */
 #define MULTIBOOT_INFO_MODS (1u << 3)
+
+/* multiboot_info_t.flags bit 12: the framebuffer_* fields are valid. */
+#define MULTIBOOT_INFO_FRAMEBUFFER (1u << 12)
+
+/* framebuffer_type values: 1 = direct RGB colour (3.3 Boot information). */
+#define MULTIBOOT_FRAMEBUFFER_RGB 1
 
 /* Memory map entry types. 1 is defined by the 0.6.96 spec; 3-5 follow
  * GRUB's multiboot.h (same values as the BIOS E820 types). */
@@ -46,7 +53,37 @@ typedef struct
     uint32_t mmap_length;
     uint32_t mmap_addr;
 
+    uint32_t drives_length;
+    uint32_t drives_addr;
+    uint32_t config_table;
+    uint32_t boot_loader_name;
+    uint32_t apm_table;
+
+    uint32_t vbe_control_info;
+    uint32_t vbe_mode_info;
+    uint16_t vbe_mode;
+    uint16_t vbe_interface_seg;
+    uint16_t vbe_interface_off;
+    uint16_t vbe_interface_len;
+
+    uint64_t framebuffer_addr;
+    uint32_t framebuffer_pitch;
+    uint32_t framebuffer_width;
+    uint32_t framebuffer_height;
+    uint8_t framebuffer_bpp;
+    uint8_t framebuffer_type;
+    uint8_t color_info[6];
+
 } multiboot_info_t;
+
+/* Field offsets from Multiboot Specification 0.6.96, 3.3 Boot information
+ * format. */
+_Static_assert(__builtin_offsetof(multiboot_info_t, mmap_addr) == 48,
+               "multiboot_info_t must match the Multiboot layout");
+_Static_assert(__builtin_offsetof(multiboot_info_t, framebuffer_addr) == 88,
+               "multiboot_info_t must match the Multiboot layout");
+_Static_assert(__builtin_offsetof(multiboot_info_t, framebuffer_bpp) == 108,
+               "multiboot_info_t must match the Multiboot layout");
 
 /*
  * One boot module (Multiboot Specification 0.6.96, 3.3 Boot modules): the
@@ -83,6 +120,13 @@ _Static_assert(sizeof(multiboot_mmap_entry_t) == 24,
 void multiboot_init(uint32_t address);
 
 const multiboot_info_t *multiboot_get_info(void);
+
+/*
+ * True if the boot loader set up a graphics framebuffer we can use: flags
+ * bit 12, direct RGB colour, 32 bpp, a non-empty mode, rows at least as
+ * wide as the pixels, and an address below 4 GiB.
+ */
+bool multiboot_framebuffer_usable(void);
 
 /* First memory map entry, or NULL if flags bit 6 is clear or the map is empty. */
 const multiboot_mmap_entry_t *multiboot_mmap_first(void);

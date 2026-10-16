@@ -11,6 +11,7 @@
 
 #include "platform/pc/boot/multiboot.h"
 #include "platform/pc/interrupt/pic.h"
+#include "platform/pc/video/framebuffer.h"
 #include "platform/pc/timer/pit.h"
 
 #include "arch/x86/interrupt/idt.h"
@@ -48,7 +49,16 @@ void pc_entry(uint32_t magic, uint32_t info)
 
 void hal_init_console(void)
 {
-    text_display_register(&vga_text_display);
+    /*
+     * In a graphics mode there is no VGA text buffer, so the console only
+     * goes to serial. Multiboot is parsed here already (and again, with
+     * logging, in hal_init_early) to find out which mode we are in.
+     */
+    if (boot_magic == MULTIBOOT_BOOTLOADER_MAGIC)
+        multiboot_init(boot_info);
+
+    if (boot_magic != MULTIBOOT_BOOTLOADER_MAGIC || !pc_framebuffer_detect())
+        text_display_register(&vga_text_display);
 
     serial_init();
     console_register_sink(&serial_console_sink);
@@ -119,6 +129,14 @@ void hal_init(void)
     paging_init();
     map_boot_data();
     kernel_log(LOG_INFO, "Paging enabled");
+
+    if (pc_framebuffer_detect())
+    {
+        if (pc_framebuffer_map() == 0)
+            kernel_log(LOG_INFO, "Framebuffer mapped");
+        else
+            kernel_log(LOG_ERROR, "Cannot map the framebuffer");
+    }
 
     pic_init();
     kernel_log(LOG_INFO, "PIC initialized");

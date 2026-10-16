@@ -36,6 +36,22 @@ const multiboot_info_t *multiboot_get_info(void)
     return multiboot_info;
 }
 
+bool multiboot_framebuffer_usable(void)
+{
+    const multiboot_info_t *mbi = multiboot_info;
+
+    if (mbi == NULL || !(mbi->flags & MULTIBOOT_INFO_FRAMEBUFFER))
+        return false;
+
+    if (mbi->framebuffer_type != MULTIBOOT_FRAMEBUFFER_RGB ||
+        mbi->framebuffer_bpp != 32)
+        return false;
+
+    return mbi->framebuffer_addr != 0 && (mbi->framebuffer_addr >> 32) == 0 &&
+           mbi->framebuffer_width != 0 && mbi->framebuffer_height != 0 &&
+           mbi->framebuffer_pitch / 4 >= mbi->framebuffer_width;
+}
+
 /* Return the entry at address if it lies completely inside the map. */
 static const multiboot_mmap_entry_t *multiboot_mmap_at(uintptr_t address)
 {

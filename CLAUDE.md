@@ -29,14 +29,15 @@ make clean
 - 不依賴硬體的模組（例如 `kernel/lib`、`kernel/terminal/terminal.c`、`kernel/console/sink.c`、`platform/pc/boot/multiboot.c`、`emu/m68k`；完整清單見 Makefile 的 `HOST_LIB_SOURCES`）放在 `tests/host/test_<模組>.c`，使用 `tests/host/test.h` 的巨集。新增可在 host 編譯的模組時，要加入 `HOST_LIB_SOURCES`。
 - 需要硬體或中斷的測試依所屬的層放在 `kernel/test/selftest.c`、`arch/x86/test/selftest_x86.c` 或 `platform/pc/test/selftest_pc.c`，用 `SELFTEST_ASSERT` 檢查、`SELFTEST_RUN` 執行（`kernel/test/selftest.h`）。
 - `make test` 第一步是 `tools/check_boundary.sh`（層之間的 include 規則，見 `docs/hal.md` 第 7 節）。新增規則時要加上 `tests/boundary/<規則>/` fixture。
+- 圖形模式用 `tools/fb_check.py`（需 grub-mkrescue，不在 `make test` 中）檢查 framebuffer 測試圖樣。
 - 重構時用 `tools/boot_log.py` 比較前後的開機 log 與 VGA 畫面（需要 `python3`，不在 `make test` 中）。
 
 ## 目錄結構
 
 ```
-hal/           HAL 介面（只有 .h）：cpu、irq、timer、mmu、boot、init
+hal/           HAL 介面（只有 .h）：cpu、irq、timer、mmu、boot（含 module）、framebuffer、init
 arch/x86/      CPU：cpu（hal_cpu、控制暫存器）、gdt、interrupt（IDT、例外、IRQ stub）、mmu（分頁、hal_mmu）、io（port I/O）、test
-platform/pc/   PC 平台：boot（Multiboot 進入點、hal_boot）、interrupt（8259 PIC、hal_irq）、timer（PIT、hal_timer）、hal_init.c、test
+platform/pc/   PC 平台：boot（Multiboot 進入點、hal_boot）、video（framebuffer）、interrupt（8259 PIC、hal_irq）、timer（PIT、hal_timer）、hal_init.c、test
 drivers/       裝置驅動：vga、serial、ps2_keyboard
 kernel/        與硬體無關的核心：main.c、panic、memory（pmm、heap）、display、console、terminal、keyboard（keycode、state、keychar）、input、shell、log、printf、lib、m68k（guest RAM 與示範）、test
 emu/m68k/      68k 虛擬機：Musashi 的封裝層（vm）、A-line trap 分派（trap）、Musashi 設定（m68kconf.h）；freestanding/ 是 kernel 建置用的 libc 替身

@@ -299,6 +299,42 @@ static void test_hal_modules_flag_clear(void)
     TEST_ASSERT_EQ_INT(-1, hal_boot_module(0, &module));
 }
 
+static void test_framebuffer_usable(void)
+{
+    reset();
+    mbi->flags = MULTIBOOT_INFO_FRAMEBUFFER;
+    mbi->framebuffer_addr = 0xFD000000u;
+    mbi->framebuffer_pitch = 2560;
+    mbi->framebuffer_width = 640;
+    mbi->framebuffer_height = 480;
+    mbi->framebuffer_bpp = 32;
+    mbi->framebuffer_type = MULTIBOOT_FRAMEBUFFER_RGB;
+    multiboot_init(addr32(mbi));
+    TEST_ASSERT(multiboot_framebuffer_usable());
+
+    /* Each field that makes the mode unusable. */
+    mbi->framebuffer_bpp = 24;
+    TEST_ASSERT(!multiboot_framebuffer_usable());
+    mbi->framebuffer_bpp = 32;
+    mbi->framebuffer_type = 2; /* EGA text */
+    TEST_ASSERT(!multiboot_framebuffer_usable());
+    mbi->framebuffer_type = MULTIBOOT_FRAMEBUFFER_RGB;
+    mbi->framebuffer_pitch = 2559;
+    TEST_ASSERT(!multiboot_framebuffer_usable());
+    mbi->framebuffer_pitch = 2560;
+    mbi->framebuffer_addr = 0x100000000ull;
+    TEST_ASSERT(!multiboot_framebuffer_usable());
+    mbi->framebuffer_addr = 0xFD000000u;
+    mbi->framebuffer_height = 0;
+    TEST_ASSERT(!multiboot_framebuffer_usable());
+    mbi->framebuffer_height = 480;
+    TEST_ASSERT(multiboot_framebuffer_usable());
+
+    /* Text mode: the loader leaves flags bit 12 clear. */
+    mbi->flags = 0;
+    TEST_ASSERT(!multiboot_framebuffer_usable());
+}
+
 int main(void)
 {
     area = mmap(NULL, AREA_SIZE, PROT_READ | PROT_WRITE,
@@ -321,6 +357,7 @@ int main(void)
     TEST_RUN(test_hal_memory_regions_without_map);
     TEST_RUN(test_hal_reserved_regions);
     TEST_RUN(test_hal_reserved_regions_without_map);
+    TEST_RUN(test_framebuffer_usable);
     TEST_RUN(test_hal_modules);
     TEST_RUN(test_hal_modules_flag_clear);
 

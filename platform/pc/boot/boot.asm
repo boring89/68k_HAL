@@ -4,10 +4,21 @@
 section .multiboot
 align 4
 
+; Flags: bit 1 = memory info, bit 2 = video mode (Multiboot Specification
+; 0.6.96, 3.1.2 and 3.1.4). The five address fields are only used when
+; bit 16 is set, so they stay 0 (the kernel is an ELF file).
+MB_MAGIC equ 0x1BADB002
+MB_FLAGS equ 0x00000006
+
 multiboot_header:
-	dd 0x1BADB002
-	dd 0x00000002
-	dd -(0x1BADB002 + 0x00000002)
+	dd MB_MAGIC
+	dd MB_FLAGS
+	dd -(MB_MAGIC + MB_FLAGS)
+	dd 0, 0, 0, 0, 0
+	dd 0            ; mode_type: linear graphics
+	dd 640          ; width
+	dd 480          ; height
+	dd 32           ; depth
 
 section .text
 
