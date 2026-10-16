@@ -6,6 +6,7 @@
 #include "process.h"
 
 #include "hal/clock.h"
+#include "hal/mmu.h"
 #include "hal/cpu.h"
 #include "hal/timer.h"
 #include "hal/usermode.h"
@@ -141,7 +142,7 @@ static int32_t enosys(uint32_t number)
 
 static int32_t copy_out(uint32_t address, const void *data, uint32_t length)
 {
-    if (!user_range_ok(address, length))
+    if (!user_range_writable(address, length))
         return -K_EFAULT;
 
     k_memcpy((void *)(uintptr_t)address, data, length);
@@ -204,7 +205,7 @@ static int32_t sys_read(int fd, uint32_t address, uint32_t count)
     if (file == NULL)
         return -K_EBADF;
 
-    if (!user_range_ok(address, count))
+    if (!user_range_writable(address, count))
         return -K_EFAULT;
 
     return vfs_read(file, (void *)(uintptr_t)address, count);
@@ -344,7 +345,7 @@ static int32_t sys_getdents64(int fd, uint32_t address, uint32_t count)
     if (file == NULL)
         return -K_EBADF;
 
-    if (!user_range_ok(address, count))
+    if (!user_range_writable(address, count))
         return -K_EFAULT;
 
     uint32_t used = 0;
@@ -565,12 +566,13 @@ static int32_t sys_brk(uint32_t requested)
 #define MAP_FIXED 0x10u
 #define MAP_ANONYMOUS 0x20u
 
+static int32_t protect_pages(uint32_t addr, uint32_t length, uint32_t prot);
+
 static int32_t sys_mmap2(uint32_t addr, uint32_t length, uint32_t prot, uint32_t flags,
                          int fd, uint32_t pgoffset)
 {
     user_process_t *p = &user_process;
 
-    (void)prot;
     (void)addr;
 
     if (length == 0 || (flags & MAP_FIXED))
@@ -620,7 +622,36 @@ static int32_t sys_mmap2(uint32_t addr, uint32_t length, uint32_t prot, uint32_t
         file->pos = saved;
     }
 
+    /* A mapping that is not writable (or not even readable: a guard area). */
+    if (!(prot & 2))
+        protect_pages(start, size, prot);
+
     return (int32_t)start;
+}
+
+/*
+ * mprotect: PROT_READ (1), PROT_WRITE (2), PROT_EXEC (4). The CPU (without PAE)
+ * has no execute bit, so readable means executable; PROT_NONE makes the page
+ * unreachable for the program (and a guard page).
+ */
+static int32_t protect_pages(uint32_t addr, uint32_t length, uint32_t prot)
+{
+    uint32_t end = (addr + length + PAGE - 1) & ~(PAGE - 1);
+    uint32_t flags = prot == 0 ? 0 : (HAL_MMU_USER | ((prot & 2) ? HAL_MMU_WRITABLE : 0));
+
+    if ((addr & (PAGE - 1)) || end < addr)
+        return -K_EINVAL;
+
+    if (length == 0)
+        return 0;
+
+    if (!user_regions_contains(&user_process.regions, addr, end - addr))
+        return -K_ENOMEM;
+
+    for (uint32_t page = addr; page < end; page += PAGE)
+        hal_mmu_protect(page, flags);
+
+    return 0;
 }
 
 static int32_t sys_munmap(uint32_t addr, uint32_t length)
@@ -884,7 +915,7 @@ static int32_t sys_poll(uint32_t fds_address, uint32_t count, int32_t timeout_ms
     if (count > USER_MAX_FDS * 4)
         return -K_EINVAL;
 
-    if (!user_range_ok(fds_address, count * 8))
+    if (!user_range_writable(fds_address, count * 8))
         return -K_EFAULT;
 
     uint64_t end = timeout_ms > 0 ? hal_timer_ns() + (uint64_t)timeout_ms * 1000000u : 0;
@@ -942,7 +973,7 @@ static int32_t sys_select(uint32_t n, uint32_t read_set, uint32_t write_set, uin
         if (sets[k] == 0)
             continue;
 
-        if (!user_range_ok(sets[k], bytes))
+        if (!user_range_writable(sets[k], bytes))
             return -K_EFAULT;
 
         k_memcpy(original[k], (const void *)(uintptr_t)sets[k], bytes);
@@ -1075,7 +1106,7 @@ static int32_t sys_set_thread_area(uint32_t address)
 
 static int32_t sys_getrandom(uint32_t address, uint32_t count)
 {
-    if (!user_range_ok(address, count))
+    if (!user_range_writable(address, count))
         return -K_EFAULT;
 
     vfs_file_t *random;
@@ -1309,8 +1340,10 @@ int32_t user_syscall(const hal_user_syscall_t *call)
         return sys_statx((int)a[0], a[1], a[2], a[4]);
 
     case SYS_mprotect:
+        return protect_pages(a[0], a[1], a[2]);
+
     case SYS_madvise:
-        return 0; /* all memory is read/write/execute */
+        return 0; /* advice only */
 
     case SYS_getpid:
     case SYS_gettid:

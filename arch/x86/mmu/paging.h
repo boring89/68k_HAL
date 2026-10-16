@@ -52,4 +52,10 @@ int paging_map(uintptr_t virt, uintptr_t phys, uint32_t flags);
  */
 int paging_unmap(uintptr_t virt);
 
+/* Replace the flags of a mapped page (PAGING_* bits; PAGING_PRESENT is kept). Returns 0 or -1. */
+int paging_protect(uintptr_t virt, uint32_t flags);
+
+/* The flags of a mapped page (without the frame address). Returns 0 or -1. */
+int paging_get_flags(uintptr_t virt, uint32_t *flags);
+
 #endif

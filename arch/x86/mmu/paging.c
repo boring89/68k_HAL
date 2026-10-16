@@ -192,3 +192,50 @@ int paging_unmap(uintptr_t virt)
 
     return 0;
 }
+
+static paging_entry_t *find_entry(uintptr_t virt)
+{
+    uint32_t dir_index = paging_dir_index(virt);
+
+    if (dir_index == PAGING_RECURSIVE_INDEX)
+        return 0;
+
+    paging_entry_t *directory = (paging_entry_t *)PAGING_DIRECTORY_VIRT;
+
+    if (!paging_entry_is_present(directory[dir_index]))
+        return 0;
+
+    paging_entry_t *entry = &((paging_entry_t *)paging_table_virt(dir_index))[paging_table_index(virt)];
+
+    return paging_entry_is_present(*entry) ? entry : 0;
+}
+
+int paging_protect(uintptr_t virt, uint32_t flags)
+{
+    if (virt % PMM_FRAME_SIZE != 0)
+        return -1;
+
+    paging_entry_t *entry = find_entry(virt);
+
+    if (entry == 0)
+        return -1;
+
+    *entry = paging_entry_make(paging_entry_get_phys(*entry), flags | PAGING_PRESENT);
+
+    /* Stale translations would keep the old permissions. */
+    cpu_invlpg(virt);
+
+    return 0;
+}
+
+int paging_get_flags(uintptr_t virt, uint32_t *flags)
+{
+    paging_entry_t *entry = find_entry(virt & ~(uintptr_t)(PMM_FRAME_SIZE - 1));
+
+    if (entry == 0 || flags == 0)
+        return -1;
+
+    *flags = *entry & 0xFFF;
+
+    return 0;
+}

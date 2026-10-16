@@ -60,8 +60,11 @@ int32_t user_map(uint32_t start, uint32_t end);
 /* Undo user_map for [start, end): unmap and free the frames, forget the regions. */
 void user_unmap(uint32_t start, uint32_t end);
 
-/* True if the whole range may be touched by the kernel on behalf of the program. */
+/* True if the program may read the whole range (it is the program's and not a guard page). */
 int user_range_ok(uint32_t address, uint32_t length);
+
+/* True if the program may also write it (not read-only). The kernel must check this before it writes into user memory. */
+int user_range_writable(uint32_t address, uint32_t length);
 
 /*
  * Copy a NUL-terminated string from the program into buffer (size

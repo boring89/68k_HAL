@@ -103,16 +103,44 @@ void user_unmap(uint32_t start, uint32_t end)
     user_regions_remove(&user_process.regions, start, end);
 }
 
+/* True if every page that [address, address + length) touches is mapped with at least the flags in need. */
+static int pages_allow(uint32_t address, uint32_t length, uint32_t need)
+{
+    if (length == 0)
+        return 1;
+
+    for (uint32_t page = page_down(address); page <= page_down(address + length - 1); page += PAGE)
+    {
+        uint32_t flags;
+
+        if (hal_mmu_get_flags(page, &flags) != 0 || (flags & need) != need)
+            return 0;
+
+        if (page + PAGE < page)
+            break; /* the last page of the address space */
+    }
+
+    return 1;
+}
+
 int user_range_ok(uint32_t address, uint32_t length)
 {
-    return user_regions_contains(&user_process.regions, address, length);
+    return user_regions_contains(&user_process.regions, address, length) &&
+           pages_allow(address, length, HAL_MMU_USER);
+}
+
+int user_range_writable(uint32_t address, uint32_t length)
+{
+    return user_regions_contains(&user_process.regions, address, length) &&
+           pages_allow(address, length, HAL_MMU_USER | HAL_MMU_WRITABLE);
 }
 
 int32_t user_copy_string(char *buffer, size_t size, uint32_t address)
 {
     for (size_t i = 0; i < size; i++)
     {
-        if (!user_range_ok(address + (uint32_t)i, 1))
+        /* Mapped and readable: checked on the first byte and whenever a new page starts. */
+        if ((i == 0 || ((address + i) & (PAGE - 1)) == 0) && !user_range_ok(address + (uint32_t)i, 1))
             return -K_EFAULT;
 
         buffer[i] = *(const char *)(uintptr_t)(address + i);
@@ -276,6 +304,36 @@ static int32_t load_image(const uint8_t *file, const elf_image_t *image)
 
         if (page_up(end) > image_end)
             image_end = page_up(end);
+    }
+
+    /*
+     * Pages of segments without the write flag become read-only (code and constants
+     * cannot be overwritten, a stray write faults). A page that two segments share
+     * stays writable if either one is.
+     */
+    for (unsigned int i = 0; i < image->segment_count; i++)
+    {
+        const elf_segment_t *seg = &image->segments[i];
+
+        if (seg->flags & ELF_PF_W)
+            continue;
+
+        for (uint32_t page = page_down(seg->vaddr); page < page_up(seg->vaddr + seg->memsz); page += PAGE)
+        {
+            int shared_writable = 0;
+
+            for (unsigned int j = 0; j < image->segment_count; j++)
+            {
+                const elf_segment_t *other = &image->segments[j];
+
+                if ((other->flags & ELF_PF_W) && page < page_up(other->vaddr + other->memsz) &&
+                    page_down(other->vaddr) <= page)
+                    shared_writable = 1;
+            }
+
+            if (!shared_writable)
+                hal_mmu_protect(page, HAL_MMU_USER);
+        }
     }
 
     user_process.brk_start = image_end;

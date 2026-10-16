@@ -1,0 +1,5 @@
+writable page
+read into a read-only page: -1 (Bad address)
+read into it after mprotect(RW): 10
+write() from an unreachable page: -1 (Bad address)
+read-only mapping reads as 0

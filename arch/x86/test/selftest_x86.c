@@ -803,8 +803,40 @@ static void test_user_runs_twice(void)
     SELFTEST_ASSERT(run_user_program(code, sizeof(code)) == 7);
 }
 
+static void test_hal_mmu_protect(void)
+{
+    uintptr_t frame = pmm_alloc_frame();
+    uint32_t flags = 0;
+
+    SELFTEST_ASSERT(frame != 0);
+    SELFTEST_ASSERT(hal_mmu_map(TEST_HAL_MMU_VIRT + PMM_FRAME_SIZE, frame, HAL_MMU_WRITABLE | HAL_MMU_USER) == 0);
+    SELFTEST_ASSERT(hal_mmu_get_flags(TEST_HAL_MMU_VIRT + PMM_FRAME_SIZE, &flags) == 0);
+    SELFTEST_ASSERT(flags == (HAL_MMU_WRITABLE | HAL_MMU_USER));
+
+    /* Read-only for the program, then a guard page nobody but the kernel can reach. */
+    SELFTEST_ASSERT(hal_mmu_protect(TEST_HAL_MMU_VIRT + PMM_FRAME_SIZE, HAL_MMU_USER) == 0);
+    SELFTEST_ASSERT(hal_mmu_get_flags(TEST_HAL_MMU_VIRT + PMM_FRAME_SIZE, &flags) == 0);
+    SELFTEST_ASSERT(flags == HAL_MMU_USER);
+    SELFTEST_ASSERT(hal_mmu_protect(TEST_HAL_MMU_VIRT + PMM_FRAME_SIZE, 0) == 0);
+    SELFTEST_ASSERT(hal_mmu_get_flags(TEST_HAL_MMU_VIRT + PMM_FRAME_SIZE, &flags) == 0);
+    SELFTEST_ASSERT(flags == 0);
+
+    /* The frame did not change, and bad arguments are refused. */
+    uintptr_t phys = 0;
+
+    SELFTEST_ASSERT(hal_mmu_get_phys(TEST_HAL_MMU_VIRT + PMM_FRAME_SIZE, &phys) == 0 && phys == frame);
+    SELFTEST_ASSERT(hal_mmu_protect(TEST_HAL_MMU_VIRT + PMM_FRAME_SIZE + 1, 0) == -1);
+    SELFTEST_ASSERT(hal_mmu_protect(TEST_HAL_MMU_VIRT + 5 * PMM_FRAME_SIZE, 0) == -1); /* not mapped */
+    SELFTEST_ASSERT(hal_mmu_protect(TEST_HAL_MMU_VIRT + PMM_FRAME_SIZE, 0x80) == -1);
+    SELFTEST_ASSERT(hal_mmu_get_flags(TEST_HAL_MMU_VIRT + 5 * PMM_FRAME_SIZE, &flags) == -1);
+
+    SELFTEST_ASSERT(hal_mmu_unmap(TEST_HAL_MMU_VIRT + PMM_FRAME_SIZE) == 0);
+    pmm_free_frame(frame);
+}
+
 void selftest_arch_run(void)
 {
+    SELFTEST_RUN(test_hal_mmu_protect);
     SELFTEST_RUN(test_user_exit);
     SELFTEST_RUN(test_user_syscall_result);
     SELFTEST_RUN(test_user_cannot_touch_kernel);

@@ -128,6 +128,7 @@ kernel_main()（kernel/main.c）
 | `hal/timer.h`（新增） | `hal_timer_ns`、`hal_timer_ns_resolution` | `platform/pc/timer/hal_timer.c` | 奈秒時鐘（TSC，用 PIT 通道 2 校正）；沒有 TSC 時退回 tick |
 | `hal/acpi.h` | `hal_acpi_info` | `platform/pc/acpi/hal_acpi.c` | MADT：處理器、local APIC、I/O APIC |
 | `hal/mmu.h`（新增旗標） | `HAL_MMU_UNCACHED` | `arch/x86/mmu/paging_entry.c` | PCD+PWT：裝置暫存器用 |
+| `hal/mmu.h`（新增函式） | `hal_mmu_protect`、`hal_mmu_get_flags` | `arch/x86/mmu/hal_mmu.c` | 改變已映射頁面的旗標（唯讀、保護頁）、讀回旗標 |
 | `hal/usermode.h` | `hal_user_init`、`hal_user_run`、`hal_user_exit`、`hal_user_set_tls` | `arch/x86/user/hal_user.c` | ring 3、系統呼叫、使用者錯誤；見 `docs/userland.md` |
 | `hal/pci.h` | `hal_pci_device_count`、`hal_pci_device`、`hal_pci_find*`、`hal_pci_config_read/write`、`hal_pci_enable`、`hal_pci_map_bar`、`hal_pci_probe_drivers`、型別 `hal_pci_driver_t` | `platform/pc/pci/` | PCI 列舉、BAR、驅動比對；見 `docs/pci.md` |
 | `hal/dma.h` | `hal_dma_alloc`、`hal_dma_free` | `platform/pc/dma/hal_dma.c` | 實體連續、歸零、有實體位址的記憶體，給裝置 DMA |

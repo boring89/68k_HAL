@@ -36,6 +36,18 @@ int hal_mmu_map(uintptr_t virt, uintptr_t phys, uint32_t flags);
 int hal_mmu_unmap(uintptr_t virt);
 
 /*
+ * Change the flags of the page at virt (which must be mapped) to flags
+ * (HAL_MMU_* bits); the frame stays. Returns -1 if virt is not page
+ * aligned, flags has unknown bits, or virt is not mapped or is reserved by
+ * the architecture. Use it to make loaded code read-only or to turn a page
+ * into a guard page (flags 0: only the kernel can reach it).
+ */
+int hal_mmu_protect(uintptr_t virt, uint32_t flags);
+
+/* The flags the page at virt is mapped with. Returns 0, or -1 if it is not mapped. */
+int hal_mmu_get_flags(uintptr_t virt, uint32_t *flags);
+
+/*
  * Translate virt. On success stores the physical address (including the
  * offset within the page) in *phys and returns 0; returns -1 and leaves
  * *phys unchanged if virt is not mapped or phys is NULL.

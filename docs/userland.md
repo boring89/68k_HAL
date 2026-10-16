@@ -101,7 +101,7 @@ compiled by tcc: fib(20)=6765 1099511627 ok 6.28
 其他          kernel 與裝置：使用者程式碰到會被殺掉（見下）
 ```
 
-所有使用者頁面都以「可讀寫」映射（`mprotect` 是空操作）。kernel 的頁面沒有 User 位元，程式碰到就 page fault；kernel 把程式殺掉並印出：
+**頁面保護**：沒有寫入旗標的 ELF segment（程式碼、常數）載入後改成唯讀（`hal_mmu_protect`），所以寫入常數會被殺掉（結束碼 139）；`mprotect` 與 `mmap` 的 `prot` 真的有效：`PROT_NONE` = 使用者碰不到的保護頁，唯讀頁寫入會 page fault。沒有 NX（需要 PAE），所以「可讀」等於「可執行」。kernel 替程式寫入使用者記憶體前會檢查頁面可寫（`user_range_writable`），所以 `read()` 到唯讀頁回 `EFAULT` 而不是讓 kernel 當掉。kernel 的頁面沒有 User 位元，程式碰到就 page fault；kernel 把程式殺掉並印出：
 
 ```
 /bin/crash: segmentation fault at 100000 (eip 8049123)
@@ -119,7 +119,7 @@ compiled by tcc: fib(20)=6765 1099511627 ok 6.28
 | 檔案 | `fdatasync`、`chmod/fchmod/chown32/fchown32`（空操作）、檔案鎖（`fcntl` 的 `F_SETLK` 等，一律成功）、`read`、`write`、`readv`、`writev`、`open`、`openat`（僅絕對路徑）、`close`、`lseek`、`_llseek`、`pread64`、`ftruncate`、`fsync`、`dup`、`dup2`、`fcntl64` |
 | 檔案資訊 | `stat64`、`lstat64`、`fstat64`、`fstatat64`、`statx`、`getdents64`、`access`、`faccessat`、`readlink`（一律 EINVAL） |
 | 目錄 | `mkdir`、`mkdirat`、`unlink`、`unlinkat`、`rmdir`、`rename`、`renameat`、`getcwd` |
-| 記憶體 | `brk`、`mmap2`（匿名與檔案私有）、`munmap`、`mremap`（一律搬移）、`mprotect`、`madvise` |
+| 記憶體 | `brk`、`mmap2`（匿名與檔案私有，`prot` 有效）、`munmap`、`mremap`（一律搬移）、`mprotect`（真的改頁面權限）、`madvise`（忽略） |
 | 時間 | `clock_gettime`、`clock_gettime64`、`gettimeofday`、`time`、`nanosleep`、`clock_nanosleep(_time64)` |
 | 行程資訊 | `getpid`、`gettid`、`getppid`、`getuid32` 等、`uname`、`getrlimit`、`ugetrlimit`、`umask` |
 | 執行緒 | `set_thread_area`（TLS，GDT 項目 0x33）、`set_tid_address` |
@@ -160,7 +160,7 @@ compiled by tcc: fib(20)=6765 1099511627 ok 6.28
 ## 7. 限制（已知）
 
 - 一次一個程式；沒有 `fork`/`execve`/`pipe`/`socket`/`poll`、執行緒、訊號。
-- 所有頁面可寫可執行；沒有 NX。
+- 沒有 NX（需要 PAE）：可讀的頁面都能執行；`PROT_EXEC` 被忽略。
 - 堆疊固定 2 MiB，不會自動成長。
 - `mmap` 的位址只增不減（`munmap` 釋放頁面，但位址不重用）；不支援 `MAP_FIXED`。
 - FPU/SSE 狀態不會在 kernel 與程式之間保存（kernel 不用浮點）。

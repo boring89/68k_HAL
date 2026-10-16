@@ -554,6 +554,7 @@ static const struct
     {"hfs", 0, NULL, NULL},
     {"lua", 0, "/data/test.lua", NULL}, /* the Lua interpreter, a ported program */
     {"sqlite3", 0, "/tmp/test.db", ".read /data/test.sql"}, /* a database engine */
+    {"protect", 139, NULL, NULL},       /* read-only and unreachable pages; ends by writing a constant */
     {"crash", 139, NULL, NULL},         /* 128 + SIGSEGV */
 };
 

@@ -425,7 +425,7 @@ static int32_t write_address(uint32_t address, uint32_t length_pointer, const ui
     sockaddr[3] = (uint8_t)port;
     k_memcpy(sockaddr + 4, ip, 4);
 
-    if (!user_range_ok(length_pointer, 4))
+    if (!user_range_writable(length_pointer, 4))
         return -K_EFAULT;
 
     uint32_t room = *(uint32_t *)(uintptr_t)length_pointer;
@@ -433,7 +433,7 @@ static int32_t write_address(uint32_t address, uint32_t length_pointer, const ui
     if (room < length)
         length = room;
 
-    if (!user_range_ok(address, length))
+    if (!user_range_writable(address, length))
         return -K_EFAULT;
 
     k_memcpy((void *)(uintptr_t)address, sockaddr, length);
@@ -671,7 +671,7 @@ static int32_t sock_recvfrom(int fd, uint32_t buffer, uint32_t length, uint32_t 
     if (s == NULL)
         return -K_ENOTSOCK;
 
-    if (!user_range_ok(buffer, length))
+    if (!user_range_writable(buffer, length))
         return -K_EFAULT;
 
     int32_t n = recv_data(s, (void *)(uintptr_t)buffer, length, ip, &port);
@@ -729,7 +729,7 @@ static int32_t sock_getsockopt(int fd, uint32_t level, uint32_t name, uint32_t v
     else if (level == SOL_SOCKET && name == SO_ERROR && s->type == SOCK_STREAM && s->connection >= 0)
         result = tcp_error(net_tcp(), s->connection) ? tcp_error_to_errno(tcp_error(net_tcp(), s->connection)) : 0;
 
-    if (value == 0 || length_pointer == 0 || !user_range_ok(value, 4) || !user_range_ok(length_pointer, 4))
+    if (value == 0 || length_pointer == 0 || !user_range_writable(value, 4) || !user_range_writable(length_pointer, 4))
         return -K_EFAULT;
 
     *(int32_t *)(uintptr_t)value = result;
@@ -790,7 +790,7 @@ static int32_t sock_message(int fd, uint32_t msg_address, int sending)
     uint8_t ip[4];
     uint16_t port = 0;
 
-    if (!user_range_ok(iov[0], iov[1]))
+    if (!user_range_writable(iov[0], iov[1]) || !user_range_writable(msg_address, sizeof(msg)))
         return -K_EFAULT;
 
     int32_t n = recv_data(s, (void *)(uintptr_t)iov[0], iov[1], ip, &port);
@@ -804,7 +804,7 @@ static int32_t sock_message(int fd, uint32_t msg_address, int sending)
 
         uint8_t sockaddr[16] = {AF_INET, 0, (uint8_t)(port >> 8), (uint8_t)port, ip[0], ip[1], ip[2], ip[3]};
 
-        if (user_range_ok(msg[0], length))
+        if (user_range_writable(msg[0], length))
             k_memcpy((void *)(uintptr_t)msg[0], sockaddr, length);
 
         ((uint32_t *)(uintptr_t)msg_address)[1] = 16;
