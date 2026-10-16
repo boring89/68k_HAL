@@ -22,9 +22,11 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential nasm binutils binutils-m68k-linux-gnu \
             grub2-common grub-pc-bin xorriso mtools \
-            qemu-system-x86 python3 hfsutils
+            qemu-system-x86 python3 hfsutils curl
 
-      - name: Boundary, host and QEMU self tests
+      # Downloads the sources of musl, Lua and TinyCC on the first run (the
+      # SDK, the example programs and the QEMU self tests need them).
+      - name: Boundary, host, QEMU, shell and video tests
         run: make test
 
       - name: Build the bootable ISO

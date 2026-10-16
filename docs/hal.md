@@ -77,11 +77,14 @@ kernel_main()（kernel/main.c）
  ② console_init()       terminal 接上已註冊的顯示裝置
  ③ hal_init_early()     檢查 magic、解析 Multiboot、印出 Multiboot 資訊
  ④ memory_init、pmm_init（用 hal/boot.h）
- ⑤ hal_init()           IDT → 分頁 → 對應開機資料 → PIC → PIT（100 Hz）→ PS/2 鍵盤、滑鼠
+ ⑤ hal_init()           hal_cpu_init（CPUID、FPU/SSE）→ IDT → 分頁 → 對應開機資料 → framebuffer
+                        → ACPI（MADT）→ PCI 列舉 → PIC → PIT（100 Hz）→ PS/2 鍵盤 → TSC 校正
+                        → SMP（叫醒其他處理器）→ PS/2 滑鼠 → ATA → PCI 驅動（e1000、HDA、BGA）
     heap_vm_init()      heap 放在專用虛擬位址，需要分頁，之後 kmalloc 才能用
+    user_init()         VFS（/ 是 initrd、/tmp、/dev、/hfs）與使用者模式（見 docs/userland.md）
  ⑥ input、terminal input、shell 初始化
  ⑦ hal_cpu_enable_interrupts()
- ⑧ 主迴圈：處理 input event，hal_cpu_idle()
+ ⑧ 主迴圈：net_poll、處理 input event，hal_cpu_idle()
 ```
 
 初始化分成三段，是因為依賴關係本身就有三段：terminal 需要顯示裝置（①在②之前）；PMM 需要開機記憶體表（③在④之前）；分頁需要 PMM（④在⑤之前），heap 需要分頁。順序中隱藏的依賴：
@@ -92,6 +95,8 @@ kernel_main()（kernel/main.c）
 | 對應開機資料在分頁之後 | 用 `hal_mmu_map`，需要 recursive mapping |
 | PIC 在 PIT、鍵盤之前 | `pic_init` 會遮蔽所有線，驅動之後才各自 unmask |
 | ⑤的驅動在⑥之前沒有問題 | 中斷在⑦才開啟，事件不會在 input buffer 準備好之前進來 |
+| ACPI 與 PCI 在 PIC 之前 | 只需要分頁與 `vmap`；PCI 驅動則在最後，因為它們用計時器（`hal_timer_ns`）與中斷控制器 |
+| TSC 校正在 PIT 之後、SMP 之前 | 校正用 PIT 通道 2；叫醒其他處理器要靠 `hal_timer_ns` 計時 |
 
 ## 4. 介面清單
 
@@ -230,6 +235,8 @@ IDT[0x20 + n] = irq_stub_table[n]（arch/x86/interrupt/irq_stub.asm）  ▼
 4. **由平台初始化與註冊**：在 `platform/pc/hal_init.c` 適當的階段呼叫 `rtc_init()` 並註冊（console 類在 `hal_init_console`，其他通常在 `hal_init` 的最後）。kernel 不 include 驅動。
 5. **測試**：不碰硬體的部分（例如 scancode 轉換）加進 `HOST_LIB_SOURCES` 寫 host 測試；需要硬體的部分寫在 `platform/pc/test/selftest_pc.c`。
 6. `make test` 必須通過（邊界檢查會擋下 kernel include 驅動、驅動 include 平台或其他驅動）。
+
+**PCI 裝置的驅動**（網卡、聲音、顯示）不由 `hal_init` 直接呼叫，而是匯出一個 `hal_pci_driver_t`（vendor/device 或 class 比對、`probe`），列進 `platform/pc/pci/pci_drivers.c` 的 `drivers[]`；`probe` 用 `hal_pci_enable`、`hal_pci_map_bar`、`hal_dma_alloc`、`hal_irq_register`。見 `docs/pci.md`，例子是 `drivers/e1000`、`drivers/hda`、`drivers/bga`。
 
 ## 9. 新增 HAL 介面或新平台
 

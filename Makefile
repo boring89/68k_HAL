@@ -483,7 +483,7 @@ $(BUILD)/test/ata_test.img: Makefile
 test-qemu: $(BUILD)/test/module_test.txt $(BUILD)/images/disk.img $(BUILD)/test/ata_test.img $(INITRD)
 	$(MAKE) --no-print-directory BUILD=$(BUILD)/test \
 		EXTRA_CFLAGS=-DKERNEL_SELFTEST $(BUILD)/test/kernel.elf
-	@timeout 10 qemu-system-i386 -kernel $(BUILD)/test/kernel.elf \
+	@timeout 60 qemu-system-i386 -kernel $(BUILD)/test/kernel.elf \
 		-initrd "$(BUILD)/test/module_test.txt testmod,$(BUILD)/images/disk.img disk,$(INITRD) initrd" \
 		-drive file=$(BUILD)/test/ata_test.img,format=raw,if=ide,index=0,media=disk $(QEMU_TEST_FLAGS); \
 	status=$$?; \

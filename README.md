@@ -28,18 +28,22 @@ The long-term vision is simple:
 - Interrupt handling (IDT / PIC)
 - Basic keyboard input
 - Modular HAL architecture
-- 68k virtual machine (Musashi) and a Macintosh IIci machine model that boots a user-supplied ROM and System 7.5.3 disk image to the Finder desktop, with keyboard and mouse (experimental, see [docs/mac.md](docs/mac.md))
+- 68k virtual machine (Musashi) and a Macintosh IIci machine model that boots a user-supplied ROM and System 7.5.3 disk image to the Finder desktop, with keyboard, mouse, sound (Apple Sound Chip), a real-time clock, an optionally 2x enlarged screen and writes to an ATA disk (experimental, see [docs/mac.md](docs/mac.md))
+- CPU: CPUID, x87/SSE, TSC nanosecond clock, ACPI tables, starting the other processors ([docs/cpu.md](docs/cpu.md))
+- Ring 3 user mode running static Linux i386 programs, with a C SDK (musl) so that C programs can be ported; Lua and the Tiny C Compiler already run, and the OS can compile C itself ([docs/userland.md](docs/userland.md))
+- Virtual file tree (initrd, RAM disk `/tmp`, `/dev`, the Mac disk's HFS volume at `/hfs`)
+- PCI bus, driver framework and DMA memory ([docs/pci.md](docs/pci.md))
+- Networking: Intel e1000 driver, ARP, IPv4, ICMP, UDP, DHCP, DNS ([docs/net.md](docs/net.md))
+- Audio: Intel HD Audio driver and a streaming sound interface ([docs/sound.md](docs/sound.md))
+- Graphics: Bochs/QEMU VGA mode setting at any resolution ([docs/gpu.md](docs/gpu.md))
 
 ### Planned
 
 - 68k compatibility layer
-- Modern memory management
-- Modern filesystem
-- Graphics subsystem (the Mac screen is drawn into the boot framebuffer today)
-- USB support
-- Networking
-- Audio subsystem
-- Modern driver framework
+- Modern memory management (multitasking, per-process address spaces)
+- Modern filesystem (writable, on disk)
+- TCP, USB, more drivers (virtio, AHCI, native GPUs)
+- Interrupts through the APIC and using the other processors
 
 ---
 
@@ -61,6 +65,7 @@ The goal is to preserve the simplicity, usability, and software philosophy of th
 | `nasm` | `nasm` | Assemble boot and interrupt stubs |
 | `ld` | `binutils` | Link the kernel ELF |
 | `m68k-linux-gnu-as` | `binutils-m68k-linux-gnu` | Assemble the 68k test programs in `tests/m68k/` |
+| `curl`, `tar`, `sha256sum` | `curl`, `tar`, `coreutils` | Download and check the sources of musl, Lua and TinyCC (`third_party/downloads/`, not in the repository) |
 | `grub-mkrescue` | `grub2-common` | Create the bootable ISO |
 | GRUB BIOS modules | `grub-pc-bin` | Make the ISO bootable on BIOS (QEMU's default firmware) |
 | `xorriso` | `xorriso` | Used by `grub-mkrescue` to write the ISO |
@@ -70,7 +75,7 @@ The goal is to preserve the simplicity, usability, and software philosophy of th
 | `hformat`, `hcopy`, ... | `hfsutils` | Build the HFS test volume (`tools/make_hfs_image.sh`). It keeps its "current volume" in `~/.hcwd`; the script uses a temporary `HOME` so yours is untouched |
 
 ```bash
-sudo apt install build-essential nasm binutils binutils-m68k-linux-gnu grub2-common grub-pc-bin xorriso mtools qemu-system-x86 python3 hfsutils
+sudo apt install build-essential nasm binutils binutils-m68k-linux-gnu grub2-common grub-pc-bin xorriso mtools qemu-system-x86 python3 hfsutils curl
 ```
 
 ### Commands
@@ -79,7 +84,9 @@ sudo apt install build-essential nasm binutils binutils-m68k-linux-gnu grub2-com
 make            # build/kernel.elf
 make iso        # build/68k_HAL.iso
 make run        # boot the ISO in QEMU, serial output on stdio
-make test       # host unit tests + QEMU self tests
+make test       # boundary check, host unit tests, QEMU self tests, shell and video tests
+make sdk        # the C SDK (musl) in build/sdk; downloads musl on the first run
+make initrd     # the example programs, Lua and tcc, packed as build/initrd.tar
 make clean
 ```
 
@@ -102,8 +109,22 @@ make test-rom MAC_ROM=...        # boots the ROM on the host (skipped without a 
 make test-rom-qemu MAC_ROM=... MAC_DISK=...   # kernel and host must draw the same screen
 ```
 
-Details, the list of ROM patches and the known limits (no sound, serial or
-network yet) are in [docs/mac.md](docs/mac.md).
+`mac 2` (instead of `mac`) shows the Mac enlarged to 1280x960. Details, the
+list of ROM patches and the known limits (no serial or network yet) are in
+[docs/mac.md](docs/mac.md). More local tests: `make test-mac-sound`,
+`make test-mac-clock`, `make test-mac-persist`.
+
+### Porting a C program
+
+```bash
+make sdk
+tools/68khal-cc -O2 hello.c -o hello    # a static i386 Linux program using musl
+# put it in userland/, then
+make run                                # HAL> run /bin/hello
+```
+
+See [docs/userland.md](docs/userland.md) for the system calls that exist and
+how to add one.
 
 ---
 
