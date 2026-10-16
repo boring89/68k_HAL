@@ -421,6 +421,7 @@ static const struct
     {"sort", 0},
     {"args", 3},
     {"time", 0},
+    {"hfs", 0},
     {"crash", 139}, /* 128 + SIGSEGV */
 };
 

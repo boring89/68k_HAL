@@ -413,7 +413,9 @@ test-shell: iso
 	python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
 		"run /bin/hello=Hello from user mode!" \
 		"run /bin/args a b=argv[2]: b" \
-		"run /bin/crash=before"
+		"run /bin/crash=before" \
+		"run /bin/readline=Type something" \
+		"hello world=you typed: hello world (11 characters)"
 
 # The source tree must pass every rule. Each tests/boundary/<rule>/ is a
 # fixture tree that breaks that rule, so the check must report <rule>.

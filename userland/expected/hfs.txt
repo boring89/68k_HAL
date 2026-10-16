@@ -1,0 +1,4 @@
+ReadMe: Hello from HFS
+leaf: found
+docs is a folder: 1
+listing has docs: 1, ReadMe: 1

@@ -21,6 +21,7 @@
 #include "kernel/memory/heap.h"
 #include "kernel/memory/pmm.h"
 #include "kernel/printf/printf.h"
+#include "kernel/vfs/hfsfs.h"
 #include "kernel/vfs/ramfs.h"
 #include "kernel/vfs/tarfs.h"
 
@@ -480,4 +481,5 @@ void user_init(void)
     mount_or_warn("/", root != NULL ? root : ramfs_create());
     mount_or_warn("/tmp", ramfs_create());
     mount_or_warn("/dev", devfs_create());
+    mount_or_warn("/hfs", hfsfs_create());
 }
