@@ -132,6 +132,7 @@ all: $(BUILD)/kernel.elf $(BUILD)/kernel-gfx.elf
 
 # Hardware-independent sources that can be built and tested on the host.
 HOST_LIB_SOURCES := \
+	arch/x86/cpu/cpuid_decode.c \
 	arch/x86/interrupt/page_fault.c \
 	arch/x86/mmu/paging_entry.c \
 	drivers/ps2_keyboard/keymap.c \

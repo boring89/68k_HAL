@@ -33,4 +33,51 @@ void hal_cpu_idle(void);
 /* Disable interrupts and stop the CPU for good. */
 void hal_cpu_halt(void) __attribute__((noreturn));
 
+/*
+ * What the CPU reports about itself (CPUID). Feature bits are the
+ * HAL_CPU_FEATURE_* masks.
+ */
+#include <stdint.h>
+
+#define HAL_CPU_FEATURE_FPU 0x00000001u      /* x87 floating point unit */
+#define HAL_CPU_FEATURE_TSC 0x00000002u      /* time stamp counter */
+#define HAL_CPU_FEATURE_MSR 0x00000004u      /* model specific registers */
+#define HAL_CPU_FEATURE_PAE 0x00000008u      /* physical address extension */
+#define HAL_CPU_FEATURE_APIC 0x00000010u     /* local APIC on chip */
+#define HAL_CPU_FEATURE_CMOV 0x00000020u     /* conditional move */
+#define HAL_CPU_FEATURE_PGE 0x00000040u      /* global pages */
+#define HAL_CPU_FEATURE_FXSR 0x00000080u     /* FXSAVE / FXRSTOR */
+#define HAL_CPU_FEATURE_SSE 0x00000100u
+#define HAL_CPU_FEATURE_SSE2 0x00000200u
+#define HAL_CPU_FEATURE_SSE3 0x00000400u
+#define HAL_CPU_FEATURE_SSSE3 0x00000800u
+#define HAL_CPU_FEATURE_SSE41 0x00001000u
+#define HAL_CPU_FEATURE_SSE42 0x00002000u
+#define HAL_CPU_FEATURE_X2APIC 0x00004000u
+#define HAL_CPU_FEATURE_POPCNT 0x00008000u
+#define HAL_CPU_FEATURE_XSAVE 0x00010000u
+#define HAL_CPU_FEATURE_AVX 0x00020000u
+#define HAL_CPU_FEATURE_NX 0x00040000u       /* no-execute page bit */
+#define HAL_CPU_FEATURE_INVARIANT_TSC 0x00080000u /* TSC rate never changes */
+#define HAL_CPU_FEATURE_HYPERVISOR 0x00100000u    /* running in a virtual machine */
+
+typedef struct
+{
+    char vendor[13]; /* "GenuineIntel", "AuthenticAMD", ... */
+    char brand[49];  /* marketing name; empty if the CPU has none */
+    uint32_t family;
+    uint32_t model;
+    uint32_t stepping;
+    uint32_t features; /* HAL_CPU_FEATURE_* */
+} hal_cpu_info_t;
+
+/*
+ * Identify the CPU and switch on its floating point / SSE units so
+ * that user programs can use them. Call once, early in hal_init.
+ */
+void hal_cpu_init(void);
+
+/* The result of hal_cpu_init(). */
+const hal_cpu_info_t *hal_cpu_info(void);
+
 #endif

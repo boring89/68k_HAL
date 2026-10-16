@@ -124,6 +124,8 @@ static void map_boot_data(void)
 
 void hal_init(void)
 {
+    hal_cpu_init();
+
     idt_init();
     kernel_log(LOG_INFO, "IDT loaded");
 

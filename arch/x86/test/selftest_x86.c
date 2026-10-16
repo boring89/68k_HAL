@@ -629,8 +629,62 @@ static void test_irq_stub_line_number(void)
     SELFTEST_ASSERT(irq5_count == 1);
 }
 
+static void test_cpu_info(void)
+{
+    const hal_cpu_info_t *info = hal_cpu_info();
+
+    SELFTEST_ASSERT(info->vendor[0] != '\0');
+    SELFTEST_ASSERT(info->family >= 5);
+    SELFTEST_ASSERT(info->features & HAL_CPU_FEATURE_FPU);
+    SELFTEST_ASSERT(info->features & HAL_CPU_FEATURE_TSC);
+}
+
+static void test_cpu_fpu_enabled(void)
+{
+    SELFTEST_ASSERT((cpu_read_cr0() & CPU_CR0_EM) == 0);
+    SELFTEST_ASSERT((cpu_read_cr0() & CPU_CR0_MP) != 0);
+
+    /* x87: 1.0 + 1.0 == 2 (integer 2 via FISTP). */
+    int32_t result = 0;
+
+    asm volatile(
+        "fld1\n\t"
+        "fld1\n\t"
+        "faddp\n\t"
+        "fistpl %0"
+        : "=m"(result)
+        :
+        : "memory", "st");
+    SELFTEST_ASSERT(result == 2);
+}
+
+static void test_cpu_sse_enabled(void)
+{
+    if (!(hal_cpu_info()->features & HAL_CPU_FEATURE_SSE2))
+        return;
+
+    SELFTEST_ASSERT((cpu_read_cr4() & CPU_CR4_OSFXSR) != 0);
+
+    /* SSE2: PADDD adds four 32-bit lanes (Intel SDM Vol.2B "PADDB/PADDW/PADDD"). */
+    uint32_t a[4] __attribute__((aligned(16))) = {1, 2, 3, 4};
+    uint32_t b[4] __attribute__((aligned(16))) = {10, 20, 30, 40};
+
+    asm volatile(
+        "movdqu (%0), %%xmm0\n\t"
+        "movdqu (%1), %%xmm1\n\t"
+        "paddd %%xmm1, %%xmm0\n\t"
+        "movdqu %%xmm0, (%0)"
+        :
+        : "r"(a), "r"(b)
+        : "memory"); /* no xmm clobber: the kernel is built without SSE */
+    SELFTEST_ASSERT(a[0] == 11 && a[1] == 22 && a[2] == 33 && a[3] == 44);
+}
+
 void selftest_arch_run(void)
 {
+    SELFTEST_RUN(test_cpu_info);
+    SELFTEST_RUN(test_cpu_fpu_enabled);
+    SELFTEST_RUN(test_cpu_sse_enabled);
     SELFTEST_RUN(test_divide_error_exception);
     SELFTEST_RUN(test_idt_irq_gates);
     SELFTEST_RUN(test_irq_stub_line_number);

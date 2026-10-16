@@ -11,7 +11,15 @@
 /* CR0 bits (Intel SDM Vol.3A 2.5, Figure 2-7). */
 #define CPU_CR0_PE 0x00000001u /* bit 0: protected mode enable */
 #define CPU_CR0_WP 0x00010000u /* bit 16: write protect, ring 0 honours R/W */
+#define CPU_CR0_MP 0x00000002u /* bit 1: monitor coprocessor (WAIT honours TS) */
+#define CPU_CR0_EM 0x00000004u /* bit 2: emulate FPU; x87/SSE raise #NM when set */
+#define CPU_CR0_TS 0x00000008u /* bit 3: task switched */
+#define CPU_CR0_NE 0x00000020u /* bit 5: x87 errors raise #MF instead of IRQ 13 */
 #define CPU_CR0_PG 0x80000000u /* bit 31: paging */
+
+/* CR4 bits (Intel SDM Vol.3A 2.5, Figure 2-7). */
+#define CPU_CR4_OSFXSR 0x00000200u     /* bit 9: OS uses FXSAVE/FXRSTOR, SSE allowed */
+#define CPU_CR4_OSXMMEXCPT 0x00000400u /* bit 10: unmasked SSE faults raise #XM */
 
 /* EFLAGS bits (Intel SDM Vol.1 3.4.3, Figure 3-8). */
 #define CPU_EFLAGS_IF 0x00000200u /* bit 9: maskable interrupts enabled */
@@ -39,6 +47,30 @@ static inline void cpu_write_cr0(uint32_t value)
 {
     asm volatile(
         "mov %0, %%cr0"
+        :
+        : "r"(value)
+        : "memory"
+    );
+}
+
+static inline uint32_t cpu_read_cr4(void)
+{
+    uint32_t value;
+
+    asm volatile(
+        "mov %%cr4, %0"
+        : "=r"(value)
+        :
+        : "memory"
+    );
+
+    return value;
+}
+
+static inline void cpu_write_cr4(uint32_t value)
+{
+    asm volatile(
+        "mov %0, %%cr4"
         :
         : "r"(value)
         : "memory"

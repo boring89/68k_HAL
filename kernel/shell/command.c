@@ -21,6 +21,7 @@
 #include "kernel/fs/volume.h"
 #include "hal/boot.h"
 #include "hal/clock.h"
+#include "hal/cpu.h"
 
 static void cmd_help(
     int argc,
@@ -71,6 +72,9 @@ static void cmd_ls(
     int argc,
     char **argv);
 static void cmd_cat(
+    int argc,
+    char **argv);
+static void cmd_cpuinfo(
     int argc,
     char **argv);
 static void cmd_mac(
@@ -146,7 +150,11 @@ static shell_command_entry_t commands[] =
         {COMMAND_MAC,
          "mac",
          "Run the Macintosh IIci on boot modules mac_rom and mac_disk (` stops)",
-         cmd_mac}};
+         cmd_mac},
+        {COMMAND_CPUINFO,
+         "cpuinfo",
+         "Display the CPU model and features",
+         cmd_cpuinfo}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -883,4 +891,77 @@ static void cmd_mac(
     (void)argv;
 
     mac_machine_run(0);
+}
+
+static void cmd_cpuinfo(
+    int argc,
+    char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    static const struct
+    {
+        uint32_t mask;
+        const char *name;
+    } flags[] = {
+        {HAL_CPU_FEATURE_FPU, "fpu"},
+        {HAL_CPU_FEATURE_TSC, "tsc"},
+        {HAL_CPU_FEATURE_MSR, "msr"},
+        {HAL_CPU_FEATURE_PAE, "pae"},
+        {HAL_CPU_FEATURE_APIC, "apic"},
+        {HAL_CPU_FEATURE_CMOV, "cmov"},
+        {HAL_CPU_FEATURE_PGE, "pge"},
+        {HAL_CPU_FEATURE_FXSR, "fxsr"},
+        {HAL_CPU_FEATURE_SSE, "sse"},
+        {HAL_CPU_FEATURE_SSE2, "sse2"},
+        {HAL_CPU_FEATURE_SSE3, "sse3"},
+        {HAL_CPU_FEATURE_SSSE3, "ssse3"},
+        {HAL_CPU_FEATURE_SSE41, "sse4.1"},
+        {HAL_CPU_FEATURE_SSE42, "sse4.2"},
+        {HAL_CPU_FEATURE_X2APIC, "x2apic"},
+        {HAL_CPU_FEATURE_POPCNT, "popcnt"},
+        {HAL_CPU_FEATURE_XSAVE, "xsave"},
+        {HAL_CPU_FEATURE_AVX, "avx"},
+        {HAL_CPU_FEATURE_NX, "nx"},
+        {HAL_CPU_FEATURE_INVARIANT_TSC, "invariant_tsc"},
+        {HAL_CPU_FEATURE_HYPERVISOR, "hypervisor"},
+    };
+
+    const hal_cpu_info_t *info = hal_cpu_info();
+    char buffer[16];
+
+    if (info->vendor[0] == '\0')
+    {
+        terminal_write_line("CPUID not available");
+        return;
+    }
+
+    terminal_write("Vendor:   ");
+    terminal_write_line(info->vendor);
+    terminal_write("Model:    ");
+    terminal_write_line(info->brand[0] != '\0' ? info->brand : "(no name)");
+
+    terminal_write("Family ");
+    k_utoa(info->family, buffer);
+    terminal_write(buffer);
+    terminal_write(", model ");
+    k_utoa(info->model, buffer);
+    terminal_write(buffer);
+    terminal_write(", stepping ");
+    k_utoa(info->stepping, buffer);
+    terminal_write_line(buffer);
+
+    terminal_write("Features:");
+
+    for (unsigned int i = 0; i < sizeof(flags) / sizeof(flags[0]); i++)
+    {
+        if (info->features & flags[i].mask)
+        {
+            terminal_write(" ");
+            terminal_write(flags[i].name);
+        }
+    }
+
+    terminal_newline();
 }
