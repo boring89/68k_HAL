@@ -6,7 +6,7 @@
 # Boot the "graphics" GRUB entry in QEMU and check that the framebuffer shows
 # the test pattern (kernel/display/fb_pattern.c).
 #
-# Usage: tools/fb_check.py [kernel.elf]   (default: build/kernel.elf)
+# Usage: tools/fb_check.py [kernel.elf]   (default: build/kernel-gfx.elf)
 #
 # Needs grub-mkrescue and python3. Not part of `make test`. It builds a
 # temporary ISO whose menu starts the second entry of grub.cfg, boots it with
@@ -43,14 +43,14 @@ def read_ppm(path):
 
 
 def main():
-    kernel = sys.argv[1] if len(sys.argv) > 1 else "build/kernel.elf"
+    kernel = sys.argv[1] if len(sys.argv) > 1 else "build/kernel-gfx.elf"
     if not os.path.exists(kernel):
         sys.exit(f"{kernel} not found; run make first")
 
     with tempfile.TemporaryDirectory() as tmp:
         root = os.path.join(tmp, "iso")
         os.makedirs(os.path.join(root, "boot", "grub"))
-        subprocess.run(["cp", kernel, os.path.join(root, "boot", "kernel.elf")],
+        subprocess.run(["cp", kernel, os.path.join(root, "boot", "kernel-gfx.elf")],
                        check=True)
         with open("grub.cfg") as f:
             cfg = f.read().replace("set default=0", "set default=1", 1)

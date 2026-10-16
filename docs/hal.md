@@ -111,7 +111,7 @@ kernel_main()（kernel/main.c）
 | | `hal_boot_reserved_region(i, &r)` | | 開機資料本身佔用的記憶體（PMM 必須保留）；順序：Multiboot info、記憶體表、module 表，之後每個 module 依序是內容與名稱字串。`hal_init` 會把這些區域唯讀 identity map，所以 module 在分頁開啟後仍可讀 |
 | | `hal_boot_module_count()`、`hal_boot_module(i, &m)` | | boot loader 載入的檔案（GRUB `module`、QEMU `-initrd "檔案 名稱,檔案 名稱"`）：位址、長度、名稱字串。shell 指令 `modules` 列出；QEMU 給的名稱是「檔案 名稱」整串 |
 | `hal/init.h` | `hal_init_console`、`hal_init_early`、`hal_init` | `platform/pc/hal_init.c` | 見第 3 節 |
-| `hal/framebuffer.h` | `hal_framebuffer_get(&fb)` | `platform/pc/video/hal_framebuffer.c` | 圖形模式的線性 framebuffer（位址、寬高、pitch、32 bpp 0x00RRGGBB）。文字模式回傳 -1。`multiboot` header 要求 640x480x32；GRUB 預設項目用 `gfxpayload=text` 維持文字模式，「graphics」項目才使用 framebuffer，此時 console 只輸出到 serial，畫面只畫測試圖樣（`kernel/display/fb_pattern.c`）。QEMU `-kernel` 不提供 framebuffer（會印 `multiboot knows VBE. we don't`，無害）。檢查：`tools/fb_check.py`（開 ISO 的 graphics 項目並比對 screendump） |
+| `hal/framebuffer.h` | `hal_framebuffer_get(&fb)` | `platform/pc/video/hal_framebuffer.c` | 圖形模式的線性 framebuffer（位址、寬高、pitch、32 bpp 0x00RRGGBB）。文字模式回傳 -1。圖形模式要靠 Multiboot header 要求（flags bit 2，640x480x32）。GRUB 對 Multiboot 1 只看 header、不理會 `gfxpayload`（實測），所以同一份 kernel 連結兩次：`kernel.elf`（文字模式）與 `kernel-gfx.elf`（`nasm -d GRAPHICS`，header 要求圖形模式），GRUB 選單有兩個項目。圖形模式時 console 只輸出到 serial，畫面只畫測試圖樣（`kernel/display/fb_pattern.c`）。QEMU `-kernel kernel-gfx.elf` 不提供 framebuffer（會印 `multiboot knows VBE. we don't`，無害），請用 ISO。檢查：`tools/fb_check.py`（開 ISO 的 graphics 項目並比對 screendump） |
 
 ### kernel 的裝置介面（由驅動程式實作）
 
