@@ -29,8 +29,11 @@
 #define MAC_ROM_END 0x50000000u
 #define MAC_IO_BASE 0x50000000u
 #define MAC_IO_END 0x60000000u
+/* Slot $E: the on-board video's declaration ROM is the tail of the main ROM. */
+#define MAC_SLOT_E_BASE 0xFE000000u
+#define MAC_SLOT_E_END 0xFF000000u
 
-#define MAC_UNIMPL_LOG_SIZE 64
+#define MAC_UNIMPL_LOG_SIZE 256
 #define MAC_TRACE_SIZE 4096
 #define MAC_FLOW_SIZE 1024       /* ROM blocks remembered in first-seen order */
 #define MAC_FLOW_SHIFT 6         /* block = 64 bytes */
@@ -62,6 +65,22 @@ typedef struct
     bool t2_running;
     uint8_t in_a, in_b;         /* levels the outside world drives on the pins */
 } mac_via_t;
+
+/* RBV: the Mac IIci's replacement for VIA2, with the video control bits. */
+typedef struct
+{
+    uint8_t ifr, ier;
+    uint8_t depth;              /* bits 0-2 of register 0x10: 0=1 bpp .. 3=8 bpp */
+    uint8_t other[0x20];        /* registers without special behavior */
+} mac_rbv_t;
+
+/* Bt-style color lookup table of the built-in video (the DAC). */
+typedef struct
+{
+    uint8_t rgb[256][3];
+    uint8_t index;
+    uint8_t phase;              /* next component of the entry: 0=R 1=G 2=B */
+} mac_dac_t;
 
 /* NCR 5380 SCSI controller with an empty bus (see scsi.c). */
 typedef struct
@@ -105,11 +124,15 @@ typedef struct
 
     mac_iwm_t iwm;
     mac_scsi_t scsi;
+    mac_rbv_t rbv;
+    mac_dac_t dac;
+    uint8_t *vram;              /* video RAM, set by the host */
+    uint32_t vram_size;
+    uint32_t vram_base;         /* guest address of the first byte */
 
     mac_via_t via1;
-    uint64_t cycles;            /* CPU cycles since reset */
-    uint64_t via_cycles;        /* part of 'cycles' already given to the VIAs */
-    uint64_t next_tick;         /* cycle of the next 60 Hz tick */
+    uint32_t via_rem;           /* CPU cycles not yet given to the VIAs (< 32) */
+    uint32_t frame_cycles;      /* CPU cycles since the last 60 Hz tick */
 } mac_t;
 
 /*
@@ -151,6 +174,25 @@ bool mac_via_irq(const mac_via_t *via);
 #define VIA_INT_SR 0x04
 #define VIA_INT_T2 0x20
 #define VIA_INT_T1 0x40
+
+/* RBV registers: 'reg' is the byte offset in the chip, 0-31. */
+uint32_t mac_rbv_read(mac_rbv_t *rbv, uint32_t reg, bool vblank);
+void mac_rbv_write(mac_rbv_t *rbv, uint32_t reg, uint32_t value);
+bool mac_rbv_irq(const mac_rbv_t *rbv);
+void mac_rbv_set_flag(mac_rbv_t *rbv, uint8_t mask);
+#define RBV_INT_VBLANK 0x40
+#define RBV_SENSE_13_RGB 6      /* Apple 13" RGB, 640x480 */
+
+/* DAC registers: the address register at offset 0, data at offset 4. */
+uint32_t mac_dac_access(mac_dac_t *dac, uint32_t offset, bool write,
+                        uint32_t value);
+
+/* Draw the screen into 'out' (width * height 0x00RRGGBB pixels) from the
+ * video RAM, depth and color table. Returns 0, or -1 if there is no video
+ * RAM. */
+#define MAC_SCREEN_W 640
+#define MAC_SCREEN_H 480
+int mac_render(const mac_t *mac, uint32_t *out);
 
 /* SCSI registers: one byte access at 'offset' from 0x50F10000. */
 uint32_t mac_scsi_access(mac_scsi_t *scsi, uint32_t offset, bool write,

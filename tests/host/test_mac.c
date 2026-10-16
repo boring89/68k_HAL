@@ -171,6 +171,76 @@ static void test_rom_patch_rejects_other_roms(void)
     TEST_ASSERT_EQ_INT(-1, mac_rom_patch(other, 0x1000));
 }
 
+static void test_rbv_registers(void)
+{
+    mac_rbv_t rbv = { 0 };
+
+    /* Monitor sense (13" RGB = 6) in bits 5-3, depth in bits 2-0. */
+    mac_rbv_write(&rbv, 0x10, 3);
+    TEST_ASSERT_EQ_INT((6 << 3) | 3, mac_rbv_read(&rbv, 0x10, false));
+
+    /* Bit 6 of register 2 follows the blanking input. */
+    TEST_ASSERT(!(mac_rbv_read(&rbv, 0x02, false) & 0x40));
+    TEST_ASSERT(mac_rbv_read(&rbv, 0x02, true) & 0x40);
+
+    /* The vertical blank interrupt needs the enable bit. */
+    mac_rbv_set_flag(&rbv, RBV_INT_VBLANK);
+    TEST_ASSERT(!mac_rbv_irq(&rbv));
+    mac_rbv_write(&rbv, 0x12, 0xC0);
+    TEST_ASSERT(mac_rbv_irq(&rbv));
+    mac_rbv_write(&rbv, 0x02, 0x40);
+    TEST_ASSERT(!mac_rbv_irq(&rbv));
+}
+
+static void test_dac_and_render(void)
+{
+    static uint8_t vram[0x80000];
+    static uint32_t pixels[MAC_SCREEN_W * MAC_SCREEN_H];
+
+    TEST_ASSERT_EQ_INT(0, mac_init(&mac, ram, RAM_SIZE, rom, ROM_SIZE));
+    mac_reset(&mac);
+    mac.vram = vram;
+    mac.vram_size = sizeof vram;
+    mac.vram_base = 0xFBB08000u;
+
+    /* Entry 5 = (1, 2, 3); the index moves on after the blue byte. */
+    mac_bus_write(&mac, 0x50F24000, 1, 5);
+    mac_bus_write(&mac, 0x50F24004, 1, 1);
+    mac_bus_write(&mac, 0x50F24004, 1, 2);
+    mac_bus_write(&mac, 0x50F24004, 1, 3);
+    TEST_ASSERT_EQ_INT(6, mac_bus_read(&mac, 0x50F24000, 1));
+    TEST_ASSERT_EQ_INT(3, mac.dac.rgb[5][2]);
+
+    /* 8 bits per pixel: the first byte is pixel (0, 0). */
+    mac.rbv.depth = 3;
+    mac_bus_write(&mac, 0xFBB08000u, 1, 5);
+    TEST_ASSERT_EQ_INT(0, mac_render(&mac, pixels));
+    TEST_ASSERT_EQ_INT(0x010203, pixels[0]);
+
+    /* 1 bit per pixel: the top bit of a byte is the leftmost pixel. */
+    mac.rbv.depth = 0;
+    mac.dac.rgb[255][0] = 0xFF;
+    mac_bus_write(&mac, 0xFBB08000u, 1, 0x80);
+    TEST_ASSERT_EQ_INT(0, mac_render(&mac, pixels));
+    TEST_ASSERT_EQ_INT(0xFF0000, pixels[0]);
+    TEST_ASSERT_EQ_INT(0, pixels[1]);
+
+    /* Video RAM reads back through the bus. */
+    TEST_ASSERT_EQ_INT(0x80, mac_bus_read(&mac, 0xFBB08000u, 1));
+}
+
+static void test_scsi_bus_is_empty(void)
+{
+    mac_scsi_t scsi = { { 0 } };
+
+    /* Arbitrate: the chip reports "arbitration in progress". */
+    mac_scsi_access(&scsi, 0x20, true, 0x01);
+    TEST_ASSERT(mac_scsi_access(&scsi, 0x10, false, 0) & 0x40);
+    /* Select a target: BSY never comes back. */
+    mac_scsi_access(&scsi, 0x10, true, 0x04);
+    TEST_ASSERT(!(mac_scsi_access(&scsi, 0x40, false, 0) & 0x40));
+}
+
 int main(void)
 {
     TEST_RUN(test_init_rejects);
@@ -181,6 +251,9 @@ int main(void)
     TEST_RUN(test_via_ports);
     TEST_RUN(test_iwm_mode_readback);
     TEST_RUN(test_rom_patch_rejects_other_roms);
+    TEST_RUN(test_rbv_registers);
+    TEST_RUN(test_dac_and_render);
+    TEST_RUN(test_scsi_bus_is_empty);
 
     return TEST_REPORT("mac");
 }

@@ -9,6 +9,7 @@
  * Usage: mac_run [-n instructions] [-t N] <rom-file>
  *
  *   -n   run at most this many instructions (default 1000000)
+ *   -p   write the screen as a PPM image at the end
  *   -m   print 16 bytes of guest memory at this address (hex) at the end
  *   -s   after a -b break, run this many more instructions
  *   -a   list all remembered unimplemented accesses (default: the first 24)
@@ -32,6 +33,8 @@
 #include "third_party/musashi/m68k.h"
 
 #define RAM_SIZE (8u * 1024 * 1024)
+#define VRAM_BASE 0xFBB08000u      /* from the ROM's UniversalInfo video table */
+#define VRAM_SIZE (512u * 1024)
 
 void m68k_vm_fatal(const char *message)
 {
@@ -133,6 +136,7 @@ int main(int argc, char **argv)
     uint32_t tail = 32;
     uint32_t head = 0;
     uint32_t break_pc = 0;
+    const char *ppm_path = NULL;
     uint32_t dump[8];
     int ndump = 0;
     uint32_t extra = 0;
@@ -156,6 +160,10 @@ int main(int argc, char **argv)
         else if (argv[i][0] == '-' && argv[i][1] == 'm' && i + 1 < argc && ndump < 8)
         {
             dump[ndump++] = strtoul(argv[++i], NULL, 16);
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'p' && i + 1 < argc)
+        {
+            ppm_path = argv[++i];
         }
         else if (argv[i][0] == '-' && argv[i][1] == 's' && i + 1 < argc)
         {
@@ -218,6 +226,9 @@ int main(int argc, char **argv)
     }
     g_tail = tail;
     atexit(on_exit_dump);
+    mac.vram = calloc(1, VRAM_SIZE);
+    mac.vram_size = VRAM_SIZE;
+    mac.vram_base = VRAM_BASE;
     mac.trace_enabled = true;
     mac.rtc_seconds = 0xD0000000u;     /* a fixed date in 2013 */
     mac_reset(&mac);
@@ -301,6 +312,28 @@ int main(int argc, char **argv)
         printf("   ... %u repeated\n", skipped);
     }
 
+    if (ppm_path != NULL)
+    {
+        static uint32_t pixels[MAC_SCREEN_W * MAC_SCREEN_H];
+        FILE *f = fopen(ppm_path, "wb");
+
+        if (f != NULL && mac_render(&mac, pixels) == 0)
+        {
+            fprintf(f, "P6\n%d %d\n255\n", MAC_SCREEN_W, MAC_SCREEN_H);
+            for (uint32_t i = 0; i < MAC_SCREEN_W * MAC_SCREEN_H; i++)
+            {
+                fputc(pixels[i] >> 16, f);
+                fputc(pixels[i] >> 8, f);
+                fputc(pixels[i], f);
+            }
+            printf("screen written to %s (depth %u bpp)\n", ppm_path,
+                   1u << (mac.rbv.depth & 3));
+        }
+        if (f != NULL)
+        {
+            fclose(f);
+        }
+    }
     for (int k = 0; k < ndump; k++)
     {
         printf("mem %08X:", dump[k]);

@@ -13,6 +13,11 @@
 #define SCSI_BASE 0x50F10000u
 #define SCSI_SPAN 0x2000u
 
+#define RBV_BASE 0x50F26000u
+#define RBV_SPAN 0x2000u
+#define DAC_BASE 0x50F24000u
+#define DAC_SPAN 0x2000u
+
 #define IWM_BASE 0x50F16000u
 #define IWM_SPAN 0x2000u
 
@@ -30,6 +35,7 @@
 #define CPU_HZ 25000000u
 #define TICK_HZ 60u
 #define IRQ_LEVEL_VIA1 1
+#define IRQ_LEVEL_RBV 2
 #define TIME_SLICE 2000     /* CPU cycles between device updates */
 
 /* Port A bit 4 of VIA1 is the ROM overlay line (vOverlay): the ROM maps
@@ -65,6 +71,11 @@ static void log_unimpl(mac_t *mac, uint32_t addr, int size, bool write,
     uint32_t pc = m68k_vm_get_reg(M68K_VM_REG_PC);
     mac_access_t *a;
 
+    /* Reads of empty NuBus slots are expected (the slot manager probes them). */
+    if (!write && addr >= 0xF0000000u && addr < MAC_SLOT_E_BASE)
+    {
+        return;
+    }
     mac->unimpl_total++;
     for (uint32_t i = 0; i < mac->unimpl_used; i++)
     {
@@ -99,6 +110,15 @@ static void via1_update_overlay(mac_t *mac)
 }
 
 
+/* The first part of every video frame is the vertical blanking interval. */
+#define VBLANK_FRACTION 16
+
+static bool in_vblank(const mac_t *mac)
+{
+    return mac->frame_cycles < CPU_HZ / TICK_HZ / VBLANK_FRACTION;
+}
+
+
 /* Byte access to the I/O area. Returns the read value. */
 static uint32_t io_access(mac_t *mac, uint32_t addr, bool write, uint32_t value)
 {
@@ -116,6 +136,21 @@ static uint32_t io_access(mac_t *mac, uint32_t addr, bool write, uint32_t value)
             return 0;
         }
         return mac_via_read(&mac->via1, reg);
+    }
+
+    if (addr >= RBV_BASE && addr < RBV_BASE + RBV_SPAN)
+    {
+        if (write)
+        {
+            mac_rbv_write(&mac->rbv, addr - RBV_BASE, value);
+            return 0;
+        }
+        return mac_rbv_read(&mac->rbv, addr - RBV_BASE, in_vblank(mac));
+    }
+
+    if (addr >= DAC_BASE && addr < DAC_BASE + DAC_SPAN)
+    {
+        return mac_dac_access(&mac->dac, addr - DAC_BASE, write, value);
     }
 
     if (addr >= SCSI_BASE && addr < SCSI_BASE + SCSI_SPAN)
@@ -162,6 +197,22 @@ uint32_t mac_bus_read(mac_t *mac, uint32_t addr, int size)
         return 0;
     }
 
+    if (mac->vram != NULL && addr >= mac->vram_base &&
+        addr - mac->vram_base + size <= mac->vram_size)
+    {
+        return bswap_read(mac->vram + (addr - mac->vram_base), size);
+    }
+
+    if (addr >= MAC_SLOT_E_BASE && addr < MAC_SLOT_E_END)
+    {
+        /* The slot manager reads the declaration ROM from the top of the
+         * slot's 16 MiB; it is the end of the ROM image, repeated. */
+        uint32_t off = (addr - MAC_SLOT_E_BASE) & (mac->rom_size - 1);
+
+        return off + size > mac->rom_size ? 0
+                                          : bswap_read(mac->rom + off, size);
+    }
+
     if (addr >= MAC_IO_BASE && addr < MAC_IO_END)
     {
         uint32_t v = 0;
@@ -195,6 +246,13 @@ void mac_bus_write(mac_t *mac, uint32_t addr, int size, uint32_t value)
 
     if (addr >= MAC_ROM_BASE && addr < MAC_ROM_END)
     {
+        return;
+    }
+
+    if (mac->vram != NULL && addr >= mac->vram_base &&
+        addr - mac->vram_base + size <= mac->vram_size)
+    {
+        bswap_write(mac->vram + (addr - mac->vram_base), size, value);
         return;
     }
 
@@ -541,11 +599,12 @@ int mac_reset(mac_t *mac)
     k_memset(&mac->via1, 0, sizeof mac->via1);
     mac->via1.in_a = 0xFF;
     mac->via1.in_b = 0xFF;
-    mac->cycles = 0;
-    mac->via_cycles = 0;
-    mac->next_tick = CPU_HZ / TICK_HZ;
+    mac->via_rem = 0;
+    mac->frame_cycles = 0;
     k_memset(&mac->iwm, 0, sizeof mac->iwm);
     k_memset(&mac->scsi, 0, sizeof mac->scsi);
+    k_memset(&mac->rbv, 0, sizeof mac->rbv);
+    k_memset(&mac->dac, 0, sizeof mac->dac);
     mac->overlay = true;
     mac->insn_count = 0;
     mac->flow_count = 0;
@@ -562,23 +621,23 @@ int mac_reset(mac_t *mac)
 /* Let time pass for the chips after the CPU ran 'used' cycles. */
 static void advance_devices(mac_t *mac, int used)
 {
-    uint64_t via_now;
+    uint32_t total = mac->via_rem + (uint32_t)used;
 
-    mac->cycles += (uint64_t)used;
-    via_now = mac->cycles / CPU_PER_VIA;
-    if (via_now > mac->via_cycles / CPU_PER_VIA)
+    if (total >= CPU_PER_VIA)
     {
-        mac_via_advance(&mac->via1,
-                        (uint32_t)(via_now - mac->via_cycles / CPU_PER_VIA));
+        mac_via_advance(&mac->via1, total / CPU_PER_VIA);
     }
-    mac->via_cycles = mac->cycles;
+    mac->via_rem = total % CPU_PER_VIA;
 
-    while (mac->cycles >= mac->next_tick)
+    mac->frame_cycles += (uint32_t)used;
+    while (mac->frame_cycles >= CPU_HZ / TICK_HZ)
     {
+        mac->frame_cycles -= CPU_HZ / TICK_HZ;
         mac_via_set_flag(&mac->via1, VIA_INT_CA1);
-        mac->next_tick += CPU_HZ / TICK_HZ;
+        mac_rbv_set_flag(&mac->rbv, RBV_INT_VBLANK);
     }
-    m68k_vm_set_irq(mac_via_irq(&mac->via1) ? IRQ_LEVEL_VIA1 : 0);
+    m68k_vm_set_irq(mac_rbv_irq(&mac->rbv) ? IRQ_LEVEL_RBV
+                    : mac_via_irq(&mac->via1) ? IRQ_LEVEL_VIA1 : 0);
 }
 
 
