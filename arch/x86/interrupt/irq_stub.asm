@@ -20,6 +20,7 @@ section .text
 irq_common_stub:
     ; Interrupt gates clear IF on entry (Intel SDM Vol.3 6.12.1.3).
     pusha
+    cld
 
     push dword [esp + 32]
     call irq_handler

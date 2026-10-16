@@ -30,6 +30,7 @@ section .text
 
 isr_common_stub:
     pusha
+    cld
 
     push esp
     call exception_handler

@@ -4,6 +4,7 @@
 bits 32
 
 global gdt_init
+global gdt_start
 
 section .text
 
@@ -50,6 +51,28 @@ db 0x00
 db 10010010b
 db 11001111b
 db 0x00
+
+; user code segment, ring 3 (selector 0x18 | 3 = 0x1B)
+dw 0xffff
+dw 0x0000
+db 0x00
+db 11111010b            ; present, DPL 3, code, readable
+db 11001111b
+db 0x00
+
+; user data segment, ring 3 (selector 0x20 | 3 = 0x23)
+dw 0xffff
+dw 0x0000
+db 0x00
+db 11110010b            ; present, DPL 3, data, writable
+db 11001111b
+db 0x00
+
+; task state segment (0x28): filled in by gdt_set_tss
+dq 0
+
+; thread-local storage segment (0x30 | 3 = 0x33): filled in by gdt_set_tls
+dq 0
 
 gdt_end:
 

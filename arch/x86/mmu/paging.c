@@ -97,9 +97,13 @@ static paging_entry_t *paging_get_or_create_table(uint32_t dir_index)
     /*
      * The new frame is only reachable through its recursive address
      * once the PDE exists, so link it first and zero it afterwards.
-     * Restrictions go in the PTEs; the PDE stays permissive.
+     * Restrictions go in the PTEs; the PDE stays permissive: the CPU
+     * checks U/S and R/W in both levels and allows the access only if
+     * both allow it (Intel SDM Vol.3A 4.6.1), so U/S = 1 here lets a
+     * PTE with U/S = 1 through while kernel PTEs (U/S = 0) stay closed.
      */
-    directory[dir_index] = paging_entry_make(table_phys, PAGING_KERNEL_FLAGS);
+    directory[dir_index] =
+        paging_entry_make(table_phys, PAGING_KERNEL_FLAGS | PAGING_USER);
 
     /* Also drops any paging-structure cache entry (Intel SDM Vol.3A 4.10.4.1). */
     cpu_invlpg((uintptr_t)table);

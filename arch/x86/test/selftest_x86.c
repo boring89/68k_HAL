@@ -13,6 +13,7 @@
 #include "hal/cpu.h"
 #include "hal/irq.h"
 #include "hal/mmu.h"
+#include "hal/usermode.h"
 
 #include "arch/x86/cpu/cpu.h"
 #include "arch/x86/interrupt/exception.h"
@@ -680,8 +681,128 @@ static void test_cpu_sse_enabled(void)
     SELFTEST_ASSERT(a[0] == 11 && a[1] == 22 && a[2] == 33 && a[3] == 44);
 }
 
+/*
+ * User mode: tiny hand-assembled programs run in ring 3 on one page
+ * (mapped user-accessible), each ending in exit(status) or a fault.
+ */
+#define USER_TEST_VIRT 0x08048000u
+
+static int32_t user_test_syscall(const hal_user_syscall_t *call)
+{
+    switch (call->number)
+    {
+    case 1: /* exit(status) */
+        hal_user_exit((int)call->arg[0]);
+
+    case 2: /* add_one(x) */
+        return (int32_t)call->arg[0] + 1;
+
+    default:
+        return -38; /* -ENOSYS */
+    }
+}
+
+/* A fault ends the program with 100 + the exception vector. */
+static void user_test_fault(const hal_user_fault_t *fault)
+{
+    hal_user_exit(100 + (int)fault->vector);
+}
+
+static int run_user_program(const uint8_t *code, size_t length)
+{
+    uintptr_t frame = pmm_alloc_frame();
+
+    SELFTEST_ASSERT(frame != 0);
+    SELFTEST_ASSERT(hal_mmu_map(USER_TEST_VIRT, frame,
+                                HAL_MMU_WRITABLE | HAL_MMU_USER) == 0);
+
+    /* The kernel may write the page before the program runs. */
+    uint8_t *page = (uint8_t *)USER_TEST_VIRT;
+
+    for (size_t i = 0; i < length; i++)
+        page[i] = code[i];
+
+    hal_user_init(user_test_syscall, user_test_fault);
+
+    int status = hal_user_run(USER_TEST_VIRT, USER_TEST_VIRT + 4096);
+
+    hal_mmu_unmap(USER_TEST_VIRT);
+    pmm_free_frame(frame);
+
+    return status;
+}
+
+static void test_user_exit(void)
+{
+    static const uint8_t code[] = {
+        0xB8, 0x01, 0x00, 0x00, 0x00, /* mov eax, 1 */
+        0xBB, 0x2A, 0x00, 0x00, 0x00, /* mov ebx, 42 */
+        0xCD, 0x80,                   /* int 0x80 */
+    };
+
+    SELFTEST_ASSERT(run_user_program(code, sizeof(code)) == 42);
+
+    /* Back in the kernel with interrupts on and the kernel's segments. */
+    SELFTEST_ASSERT((read_eflags() & EFLAGS_IF) != 0);
+}
+
+static void test_user_syscall_result(void)
+{
+    static const uint8_t code[] = {
+        0xB8, 0x02, 0x00, 0x00, 0x00, /* mov eax, 2 (add_one) */
+        0xBB, 0x29, 0x00, 0x00, 0x00, /* mov ebx, 41 */
+        0xCD, 0x80,                   /* int 0x80 -> eax = 42 */
+        0x89, 0xC3,                   /* mov ebx, eax */
+        0xB8, 0x01, 0x00, 0x00, 0x00, /* mov eax, 1 */
+        0xCD, 0x80,                   /* int 0x80 */
+    };
+
+    SELFTEST_ASSERT(run_user_program(code, sizeof(code)) == 42);
+}
+
+static void test_user_cannot_touch_kernel(void)
+{
+    /* mov eax, [0x00100000]: the kernel image, mapped but supervisor only. */
+    static const uint8_t code[] = {0xA1, 0x00, 0x00, 0x10, 0x00};
+
+    SELFTEST_ASSERT(run_user_program(code, sizeof(code)) == 100 + 14);
+}
+
+static void test_user_divide_error(void)
+{
+    static const uint8_t code[] = {
+        0x31, 0xDB, /* xor ebx, ebx */
+        0xF7, 0xF3, /* div ebx */
+    };
+
+    SELFTEST_ASSERT(run_user_program(code, sizeof(code)) == 100 + 0);
+}
+
+static void test_user_privileged_instruction(void)
+{
+    static const uint8_t code[] = {0xFA}; /* cli: #GP in ring 3 */
+
+    SELFTEST_ASSERT(run_user_program(code, sizeof(code)) == 100 + 13);
+}
+
+static void test_user_runs_twice(void)
+{
+    static const uint8_t code[] = {
+        0xB8, 0x01, 0x00, 0x00, 0x00, 0xBB, 0x07, 0x00, 0x00, 0x00, 0xCD, 0x80,
+    };
+
+    SELFTEST_ASSERT(run_user_program(code, sizeof(code)) == 7);
+    SELFTEST_ASSERT(run_user_program(code, sizeof(code)) == 7);
+}
+
 void selftest_arch_run(void)
 {
+    SELFTEST_RUN(test_user_exit);
+    SELFTEST_RUN(test_user_syscall_result);
+    SELFTEST_RUN(test_user_cannot_touch_kernel);
+    SELFTEST_RUN(test_user_divide_error);
+    SELFTEST_RUN(test_user_privileged_instruction);
+    SELFTEST_RUN(test_user_runs_twice);
     SELFTEST_RUN(test_cpu_info);
     SELFTEST_RUN(test_cpu_fpu_enabled);
     SELFTEST_RUN(test_cpu_sse_enabled);

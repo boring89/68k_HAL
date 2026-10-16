@@ -6,6 +6,7 @@
 #include "exception.h"
 
 #include "page_fault.h"
+#include "arch/x86/user/user.h"
 #include "kernel/printf/printf.h"
 #include "kernel/panic/panic.h"
 #include "arch/x86/cpu/cpu.h"
@@ -66,6 +67,10 @@ void exception_handler(struct interrupt_frame *frame)
     if (test_hook && test_hook(frame) == 0)
         return;
 #endif
+
+    /* The program in ring 3 did it: stop the program, not the kernel. */
+    if ((frame->cs & 3) == 3)
+        user_fault(frame);
 
     const char *name = frame->int_no < EXCEPTION_COUNT
         ? exception_names[frame->int_no]

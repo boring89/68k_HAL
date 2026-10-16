@@ -7,6 +7,8 @@
 #include "isr.h"
 #include "irq_stub.h"
 
+#include "arch/x86/user/user.h"
+
 struct idt_entry
 {
     uint16_t offset_low;
@@ -61,6 +63,13 @@ void idt_init(void)
 
     for (int i = 0; i < IRQ_STUB_COUNT; i++)
         idt_set_gate(IRQ_STUB_VECTOR_BASE + i, irq_stub_table[i]);
+
+    /*
+     * int 0x80: system calls. Type 0xEE = present, DPL 3 (ring 3 may
+     * execute INT 0x80, Intel SDM Vol.3A 6.12.1.1), 32-bit interrupt gate.
+     */
+    idt_set_gate(0x80, (uint32_t)(uintptr_t)user_syscall_stub);
+    idt[0x80].type_attr = 0xEE;
 
     lidt(&idtr);
 }
