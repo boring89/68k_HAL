@@ -19,6 +19,23 @@ void terminal_set_mirror(void (*function)(char c))
     mirror = function;
 }
 
+static bool mirror_suspended;
+
+bool terminal_set_mirror_suspended(bool suspended)
+{
+    bool before = mirror_suspended;
+
+    mirror_suspended = suspended;
+
+    return before;
+}
+
+static void mirror_char(char c)
+{
+    if (mirror != NULL && !mirror_suspended)
+        mirror(c);
+}
+
 static int cursor_x = 0;
 static int cursor_y = 0;
 
@@ -57,8 +74,7 @@ void terminal_init(void)
 
 void terminal_backspace(void)
 {
-    if (mirror != NULL)
-        mirror('\b');
+    mirror_char('\b');
 
     if (display == NULL)
         return;
@@ -91,8 +107,7 @@ void terminal_tab(void)
 
 void terminal_mirror_raw(char c)
 {
-    if (mirror != NULL)
-        mirror(c);
+    mirror_char(c);
 }
 
 int terminal_width(void)
@@ -103,6 +118,16 @@ int terminal_width(void)
 int terminal_height(void)
 {
     return display != NULL ? display->height : 25;
+}
+
+bool terminal_cursor_pending(void)
+{
+    return wrap_pending;
+}
+
+bool terminal_has_display(void)
+{
+    return display != NULL;
 }
 
 void terminal_get_cursor(int *x, int *y)
@@ -218,8 +243,7 @@ static void newline_no_mirror(void)
 
 void terminal_newline(void)
 {
-    if (mirror != NULL)
-        mirror('\n');
+    mirror_char('\n');
 
     newline_no_mirror();
 }
@@ -235,8 +259,8 @@ void terminal_put_char(char c)
     /* Without a display only the mirror sees the text. */
     if (display == NULL)
     {
-        if (mirror != NULL && c != '\t')
-            mirror(c);
+        if (c != '\t')
+            mirror_char(c);
 
         return;
     }
@@ -259,8 +283,7 @@ void terminal_put_char(char c)
         break;
     }
 
-    if (mirror != NULL)
-        mirror(c);
+    mirror_char(c);
 
     if (wrap_pending)
         newline_no_mirror();

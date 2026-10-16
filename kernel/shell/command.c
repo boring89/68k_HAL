@@ -682,12 +682,23 @@ void shell_dispatch(shell_command_t *cmd)
     }
 
     /*
-     * Not built in: the toolbox (userland/box.c, /bin/box) may have it as an applet. It picks the
-     * applet by the name it is started as, and exits with 127 if it has none of that name.
+     * Not built in: a program of the file tree. A name with a slash is a path; any other is looked
+     * for in /bin (where the toolbox's commands are, as links to /bin/box: userland/box.c).
      */
+    char path[VFS_PATH_MAX];
     vfs_stat_t stat;
 
-    if (vfs_stat("/bin/box", &stat) == 0)
+    if (cmd->argv[0][0] == '/')
+        k_strcpy(path, cmd->argv[0]);
+    else if (k_strlen(cmd->argv[0]) + 5 < sizeof(path))
+    {
+        k_strcpy(path, "/bin/");
+        k_strcpy(path + 5, cmd->argv[0]);
+    }
+    else
+        path[0] = '\0';
+
+    if (path[0] != '\0' && vfs_stat(path, &stat) == 0 && (stat.mode & VFS_S_IFMT) == VFS_S_IFREG)
     {
         const char *args[SHELL_MAX_ARGS + 1];
 
@@ -696,14 +707,9 @@ void shell_dispatch(shell_command_t *cmd)
 
         args[cmd->argc] = NULL;
 
-        int32_t status = user_run("/bin/box", args, shell_environment());
+        report_status(cmd->argv[0], user_run(path, args, shell_environment()));
 
-        if (status != 127)
-        {
-            report_status(cmd->argv[0], status);
-
-            return;
-        }
+        return;
     }
 
     terminal_write("Unknown command: ");
@@ -1661,4 +1667,14 @@ static void cmd_usb(
 
         terminal_newline();
     }
+}
+
+int shell_command_count(void)
+{
+    return COMMAND_TABLE_SIZE;
+}
+
+const char *shell_command_name(int index)
+{
+    return commands[index].name;
 }

@@ -8,6 +8,8 @@
 #include "kernel/console/console.h"
 #include "kernel/terminal/terminal.h"
 #include "kernel/terminal/input.h"
+#include "kernel/shell/command.h"
+#include "kernel/shell/complete.h"
 #include "kernel/shell/shell.h"
 
 #include "kernel/log/log.h"
@@ -19,7 +21,7 @@
 #include "kernel/input/event_buffer.h"
 
 #include "kernel/keyboard/state.h"
-#include "kernel/keyboard/keychar.h"
+#include "kernel/keyboard/keyseq.h"
 
 #include "kernel/mac/machine.h"
 #include "kernel/net/net.h"
@@ -102,6 +104,9 @@ void kernel_main(void)
 
     terminal_input_init();
     terminal_input_set_callback(shell_execute);
+    shell_complete_set_commands(shell_command_count, shell_command_name);
+    terminal_input_set_completer(shell_complete);
+    terminal_input_set_prompt(SHELL_PROMPT);
     shell_init();
     keyboard_state_init();
 
@@ -156,16 +161,12 @@ void kernel_main(void)
 
                 if (event.data.keyboard.pressed)
                 {
-                    char c =
-                        keyboard_keycode_to_ascii(
-                            event.data.keyboard.key,
-                            state);
+                    /* The bytes a terminal would send: characters, and escape sequences for the arrow keys. */
+                    char bytes[KEYBOARD_SEQUENCE_MAX];
+                    int count = keyboard_key_sequence(event.data.keyboard.key, state, bytes);
 
-                    /* Control characters (Ctrl-letters) are for programs, not for the shell line. */
-                    if (c && (c >= 0x20 || c == '\n' || c == '\b' || c == '\t'))
-                    {
-                        terminal_input_char(c);
-                    }
+                    for (int i = 0; i < count; i++)
+                        terminal_input_char(bytes[i]);
                 }
             }
         }

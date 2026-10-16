@@ -190,10 +190,14 @@ px[y * (fix.line_length / 4) + x] = 0x00RRGGBB;
 
 **工具箱 `/bin/box`**（`userland/box.c`，自己寫的，GPL-3.0）：BusyBox 的做法，一個程式裝很多小指令，依啟動時 `argv[0]` 的名字決定用哪一個：`cat cp mv rm [-rf] mkdir [-p] rmdir touch ls [-al] pwd echo wc [-lwc] head tail [-n] grep [-ivnc]（固定字串）sort [-rn] uniq tee [-a] hexdump [-C] seq sleep uname [-a] date env basename dirname stat clear true false`。用法：
 
-- shell 打不認得的指令時，會試 `/bin/box`（以指令名當 `argv[0]`）；box 沒有這個指令就回 127，shell 才說 `Unknown command`。所以直接打 `cp a b`、`mkdir x`、`grep foo file`、`wc -l file` 就行；
-- `box ls /tmp`、`run /bin/box ls /tmp`、`box --list`（列出指令）。
+- 每個指令在 initrd 裡是 `/bin/box` 的**硬連結**（`/bin/cp`、`/bin/mkdir`…；tar 的 hard link 項目，`tarfs` 讀得懂，不佔額外空間；與 `userland/` 裡同名的獨立程式如 `sort` 並存時以獨立程式為準）。shell 打不認得的指令時，會找 `/bin/<名稱>` 執行（名稱帶斜線就當路徑），所以直接打 `cp a b`、`mkdir x`、`grep foo file`、`wc -l file` 就行；找不到才說 `Unknown command`；
+- `box ls /tmp`、`box --list`（列出指令）。
 
 shell 內建的 `ls`、`cat`、`echo`、`date` 是舊的（`ls`／`cat` 讀 HFS 磁碟），內建優先；要用 box 的版本請打 `box ls …`。系統限制：只有 `/tmp` 可以建立檔案，沒有權限、連結、擁有者（所以沒有 `chmod`、`ln`、`chown`）。
+
+### 5.8 shell 的行編輯
+
+`kernel/terminal/input.c`：← → Home End Delete Backspace、Ctrl-A/E/U/K/W、↑ ↓ 歷史（16 行）、Tab 補全（第一個字：內建指令與 `/bin` 的程式；其他字：目前目錄的檔案，含斜線的路徑在該目錄找；`kernel/shell/complete.c`）、Ctrl-C 放棄這一行、Ctrl-L 清畫面。原理：編輯器記得「這一行第一個字元在螢幕上的線性位置」（列 × 寬 + 欄），每次修改就從改動處往後重畫，並處理換行與畫面捲動（捲動後那一行整體上移，用實際游標位置校正）。序列埠只看到鍵入的字（重畫時暫停鏡射）。沒有顯示器時只支援在行尾輸入與 Backspace。測試：`tests/host/test_input.c`、`test_shell_complete.c`、`make test-shell`。
 
 ### 遇到 ENOSYS 時怎麼補
 

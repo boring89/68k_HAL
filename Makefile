@@ -168,6 +168,7 @@ HOST_LIB_SOURCES := \
 	kernel/pci/pci_names.c \
 	kernel/memory/pmm.c \
 	kernel/shell/parser.c \
+	kernel/shell/complete.c \
 	kernel/usb/usb.c \
 	kernel/sound/sound.c \
 	kernel/user/elf.c \
@@ -177,6 +178,7 @@ HOST_LIB_SOURCES := \
 	kernel/vfs/vfs.c \
 	kernel/user/stack.c \
 	kernel/terminal/ansi.c \
+	kernel/terminal/input.c \
 	kernel/terminal/terminal.c \
 	platform/pc/boot/hal_boot.c \
 	platform/pc/boot/multiboot.c \
@@ -484,6 +486,11 @@ $(INITRD): $(USERLAND_BINS) $(wildcard userland/data/*) $(wildcard userland/expe
 	cp userland/etc/* build/initrd/etc/
 	cp userland/data/* build/initrd/data/
 	cp userland/expected/* build/initrd/expected/
+	# The toolbox commands are hard links to bin/box (tarfs reads hard links), so that
+	# /bin/ls, /bin/cp ... exist. A program of its own with the same name wins (userland/sort.c).
+	for name in $$(grep -o '{"[a-z]*", box_' userland/box.c | grep -o '"[a-z]*"' | tr -d '"'); do \
+		[ -e userland/$$name.c ] || { rm -f build/initrd/bin/$$name; ln build/initrd/bin/box build/initrd/bin/$$name; }; \
+	done
 	tar --format=ustar --owner=0 --group=0 --numeric-owner --sort=name \
 		-C build/initrd -cf $@ bin data etc expected usr
 
@@ -573,6 +580,11 @@ test-shell: iso
 		"box cat box/m.txt=Second line." \
 		"wc -l box/m.txt=m.txt" \
 		"nosuchcommand=Unknown command: nosuchcommand" \
+		"run /bin/helo{left}l=Hello from user mode!" \
+		"{up}=Hello from user mode!" \
+		"run /bin/hell{tab}=Hello from user mode!" \
+		"mkd{tab}box2=" \
+		"rmdir box2=" \
 		"run /bin/evtest=reading events" \
 		"{mouse_move 7 3}=rel 0 7" \
 		"a{up}q=key 103 1" \

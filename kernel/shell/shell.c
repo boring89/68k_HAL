@@ -14,7 +14,7 @@
 
 void shell_prompt(void)
 {
-    terminal_write("HAL> ");
+    terminal_write(SHELL_PROMPT);
 }
 
 void shell_init(void)

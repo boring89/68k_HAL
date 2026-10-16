@@ -8,6 +8,8 @@
 
 #include "kernel/console/color.h"
 
+#include <stdbool.h>
+
 /*
  * Text output with a cursor on the registered text display
  * (kernel/display/text_display.h). Does nothing without one.
@@ -61,6 +63,22 @@ void terminal_clear(void);
  * Without a display they do nothing (the size is then 80x25 and the
  * cursor is 0, 0).
  */
+
+/*
+ * While suspended, nothing shown reaches the mirror (the line editor redraws
+ * text that the mirror has already seen). Returns the previous state.
+ */
+bool terminal_set_mirror_suspended(bool suspended);
+
+/* True with a display (otherwise cursor and erase calls do nothing). */
+bool terminal_has_display(void);
+
+/*
+ * The last column of the line was written and the line has not broken yet:
+ * the cursor shows on that column but the next character goes to the start of
+ * the next line.
+ */
+bool terminal_cursor_pending(void);
 
 /* Send c to the mirror only, without showing it. */
 void terminal_mirror_raw(char c);

@@ -65,4 +65,8 @@ typedef struct
 void shell_dispatch(shell_command_t *cmd);
 
 
+/* The built-in commands, for completion. */
+int shell_command_count(void);
+const char *shell_command_name(int index);
+
 #endif

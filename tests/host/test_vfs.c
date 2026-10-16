@@ -242,6 +242,21 @@ static size_t add_entry(uint8_t *tar, size_t at, const char *name, const char *p
     return at + 512 + (length + 511) / 512 * 512;
 }
 
+/* A hard link entry: no data, the linkname field names the file it shares. */
+static size_t add_link(uint8_t *tar, size_t at, const char *name, const char *target)
+{
+    uint8_t *h = tar + at;
+
+    memset(h, 0, 512);
+    strcpy((char *)h, name);
+    strcpy((char *)h + 157, target);
+    sprintf((char *)h + 124, "%011o", 0);
+    h[156] = '1';
+    memcpy(h + 257, "ustar", 5);
+
+    return at + 512;
+}
+
 static size_t make_tar(uint8_t *tar)
 {
     size_t at = 0;
@@ -253,6 +268,8 @@ static size_t make_tar(uint8_t *tar)
     at = add_entry(tar, at, "bin/prog", "", '0', "ELF?");
     at = add_entry(tar, at, "deep/er/file", "", '0', "x");
     at = add_entry(tar, at, "name", "long/prefix", '0', "p");
+    at = add_link(tar, at, "bin/alias", "bin/prog");
+    at = add_link(tar, at, "bin/dangling", "bin/missing");
 
     return at + 1024;
 }
@@ -314,8 +331,18 @@ static void test_tarfs(void)
     while (vfs_readdir(f, &de) == 0)
         names++;
 
-    TEST_ASSERT_EQ_INT(3, names); /* . .. prog */
+    TEST_ASSERT_EQ_INT(5, names); /* . .. prog alias dangling */
     vfs_file_close(f);
+
+    /* A hard link has the contents of the file it names; one to a missing file is empty. */
+    TEST_ASSERT_EQ_INT(0, vfs_stat("/bin/alias", &st));
+    TEST_ASSERT_EQ_INT(4, (int)st.size);
+    TEST_ASSERT_EQ_INT(0, vfs_open("/bin/alias", VFS_O_RDONLY, 0, &f));
+    TEST_ASSERT_EQ_INT(4, vfs_read(f, buf, sizeof(buf)));
+    TEST_ASSERT(memcmp(buf, "ELF?", 4) == 0);
+    vfs_file_close(f);
+    TEST_ASSERT_EQ_INT(0, vfs_stat("/bin/dangling", &st));
+    TEST_ASSERT_EQ_INT(0, (int)st.size);
 
     /* Seeking and partial reads. */
     TEST_ASSERT_EQ_INT(0, vfs_open("/hello.txt", VFS_O_RDONLY, 0, &f));

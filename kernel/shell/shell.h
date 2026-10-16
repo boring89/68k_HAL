@@ -6,6 +6,9 @@
 #ifndef KERNEL_SHELL_SHELL_H
 #define KERNEL_SHELL_SHELL_H
 
+/* What is printed before every line. */
+#define SHELL_PROMPT "HAL> "
+
 void shell_init(void);
 
 void shell_execute(const char *input);

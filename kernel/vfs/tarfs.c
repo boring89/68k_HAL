@@ -17,7 +17,8 @@
 #define TAR_BLOCK 512
 #define TAR_NAME 0       /* 100 bytes */
 #define TAR_SIZE 124     /* 12 bytes, octal text */
-#define TAR_TYPE 156     /* 1 byte: '0' or NUL = file, '5' = directory */
+#define TAR_TYPE 156     /* 1 byte: '0' or NUL = file, '1' = hard link, '5' = directory */
+#define TAR_LINK 157     /* 100 bytes: the name of the file a hard link points to */
 #define TAR_MAGIC 257    /* "ustar" */
 #define TAR_PREFIX 345   /* 155 bytes, joined to the name with '/' */
 
@@ -372,7 +373,7 @@ vfs_fs_t *tarfs_create(const void *data, size_t size)
             if (file_size > size - data_at)
                 break;
 
-            if (type == '0' || type == 0 || type == '5')
+            if (type == '0' || type == 0 || type == '5' || type == '1')
             {
                 size_t name_length = trimmed_length(header + TAR_NAME, 100);
                 size_t prefix_length = trimmed_length(header + TAR_PREFIX, 155);
@@ -409,6 +410,33 @@ vfs_fs_t *tarfs_create(const void *data, size_t size)
                     entries[count].data = archive + data_at;
                     entries[count].size = type == '5' ? 0 : file_size;
                     entries[count].is_dir = type == '5';
+
+                    /* A hard link shares the contents of the file it names (that came earlier in the archive). */
+                    if (type == '1')
+                    {
+                        size_t link_length = trimmed_length(header + TAR_LINK, 100);
+                        const uint8_t *link = header + TAR_LINK;
+
+                        while (link_length >= 2 && link[0] == '.' && link[1] == '/')
+                        {
+                            link += 2;
+                            link_length -= 2;
+                        }
+
+                        entries[count].size = 0;
+
+                        for (unsigned int i = 0; i < count; i++)
+                        {
+                            const char *other = entries[i].path;
+
+                            if (!entries[i].is_dir && k_strlen(other) == link_length &&
+                                k_strncmp(other, (const char *)link, link_length) == 0)
+                            {
+                                entries[count].data = entries[i].data;
+                                entries[count].size = entries[i].size;
+                            }
+                        }
+                    }
                 }
 
                 if (name_length > 0 && !(name_length == 1 && name[0] == '.'))
