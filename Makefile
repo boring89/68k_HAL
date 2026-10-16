@@ -11,7 +11,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -114,10 +114,10 @@ $(BUILD)/kernel-gfx.elf: $(filter-out $(BOOT_OBJECT),$(OBJECTS)) $(BUILD)/boot_g
 clean:
 	rm -rf $(BUILD)
 
-iso: $(BUILD)/kernel.elf $(BUILD)/kernel-gfx.elf
+iso: $(BUILD)/kernel.elf $(BUILD)/kernel-gfx.elf $(INITRD)
 	rm -rf $(ISO_ROOT)
 	mkdir -p $(ISO_ROOT)/boot/grub
-	cp $(BUILD)/kernel.elf $(BUILD)/kernel-gfx.elf $(ISO_ROOT)/boot/
+	cp $(BUILD)/kernel.elf $(BUILD)/kernel-gfx.elf $(INITRD) $(ISO_ROOT)/boot/
 	cp grub.cfg $(ISO_ROOT)/boot/grub/
 	grub-mkrescue -o $(BUILD)/68k_HAL.iso $(ISO_ROOT)
 
@@ -152,10 +152,17 @@ HOST_LIB_SOURCES := \
 	kernel/lib/k_string.c \
 	kernel/lib/k_number.c \
 	kernel/lib/k_memory.c \
+	kernel/lib/k_time.c \
 	kernel/lib/ring_buffer.c \
 	kernel/memory/heap.c \
 	kernel/memory/pmm.c \
 	kernel/shell/parser.c \
+	kernel/user/elf.c \
+	kernel/user/region.c \
+	kernel/vfs/ramfs.c \
+	kernel/vfs/tarfs.c \
+	kernel/vfs/vfs.c \
+	kernel/user/stack.c \
 	kernel/terminal/terminal.c \
 	platform/pc/boot/hal_boot.c \
 	platform/pc/boot/multiboot.c \
@@ -336,6 +343,38 @@ test-sst: $(BUILD)/host/sst_run
 		python3 -I tools/sst_convert.py $$f | $(BUILD)/host/sst_run $$n || exit 1; \
 	done
 
+# ---------------------------------------------------------------------
+# C SDK and user programs (docs/userland.md). These live in build/sdk and
+# build/initrd whatever BUILD is.
+# ---------------------------------------------------------------------
+
+SDK_LIBC := build/sdk/sysroot/lib/librt68k.a
+USERLAND_SOURCES := $(wildcard userland/*.c)
+USERLAND_BINS := $(patsubst userland/%.c,build/initrd/bin/%,$(USERLAND_SOURCES))
+INITRD := build/initrd.tar
+
+# musl and the runtime helpers (downloads musl on the first run).
+sdk: $(SDK_LIBC)
+
+$(SDK_LIBC): tools/build_sdk.sh sdk/rt/divdi3.c
+	tools/build_sdk.sh
+
+build/initrd/bin/%: userland/%.c $(SDK_LIBC) tools/68khal-cc
+	mkdir -p $(dir $@)
+	tools/68khal-cc -O2 -Wall -Wextra $< -o $@ -lm
+
+# The program disk: bin/ (programs), data/ (files they read) and expected/
+# (what the self test compares their output with), packed as a ustar archive.
+initrd: $(INITRD)
+
+$(INITRD): $(USERLAND_BINS) $(wildcard userland/data/*) $(wildcard userland/expected/*)
+	rm -rf build/initrd/data build/initrd/expected
+	mkdir -p build/initrd/data build/initrd/expected
+	cp userland/data/* build/initrd/data/
+	cp userland/expected/* build/initrd/expected/
+	tar --format=ustar --owner=0 --group=0 --numeric-owner --sort=name \
+		-C build/initrd -cf $@ bin data expected
+
 # Kernel built with -DKERNEL_SELFTEST, booted directly by QEMU (no ISO).
 # QEMU exits with 33 on PASS (see kernel/test/selftest.c).
 QEMU_TEST_FLAGS := -display none -serial stdio -no-reboot -smp 4 \
@@ -354,11 +393,11 @@ $(BUILD)/test/ata_test.img: Makefile
 	@mkdir -p $(dir $@)
 	@python3 -I -c "import sys; open(sys.argv[1], 'wb').write(bytes((s * 13 + i) & 255 for s in range(300) for i in range(512)))" $@
 
-test-qemu: $(BUILD)/test/module_test.txt $(BUILD)/images/disk.img $(BUILD)/test/ata_test.img
+test-qemu: $(BUILD)/test/module_test.txt $(BUILD)/images/disk.img $(BUILD)/test/ata_test.img $(INITRD)
 	$(MAKE) --no-print-directory BUILD=$(BUILD)/test \
 		EXTRA_CFLAGS=-DKERNEL_SELFTEST $(BUILD)/test/kernel.elf
 	@timeout 10 qemu-system-i386 -kernel $(BUILD)/test/kernel.elf \
-		-initrd "$(BUILD)/test/module_test.txt testmod,$(BUILD)/images/disk.img disk" \
+		-initrd "$(BUILD)/test/module_test.txt testmod,$(BUILD)/images/disk.img disk,$(INITRD) initrd" \
 		-drive file=$(BUILD)/test/ata_test.img,format=raw,if=ide,index=0,media=disk $(QEMU_TEST_FLAGS); \
 	status=$$?; \
 	if [ $$status -eq 33 ]; then \
@@ -367,6 +406,14 @@ test-qemu: $(BUILD)/test/module_test.txt $(BUILD)/images/disk.img $(BUILD)/test/
 		echo "QEMU selftest: FAIL (exit status $$status)"; \
 		exit 1; \
 	fi
+
+# Boot the ISO (GRUB, with the initrd module), type shell commands and
+# check what the programs print on the serial port (tools/shell_test.py).
+test-shell: iso
+	python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
+		"run /bin/hello=Hello from user mode!" \
+		"run /bin/args a b=argv[2]: b" \
+		"run /bin/crash=before"
 
 # The source tree must pass every rule. Each tests/boundary/<rule>/ is a
 # fixture tree that breaks that rule, so the check must report <rule>.
@@ -381,4 +428,4 @@ test-boundary:
 	done
 	@echo "boundary check: PASS"
 
-test: test-boundary test-host test-qemu
+test: test-boundary test-host test-qemu test-shell

@@ -1,0 +1,33 @@
+#!/bin/sh
+#
+# Copyright (C) 2026 YuanChi Hsieh
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Compile and link a C program for 68k_HAL: a static 32-bit Linux ELF
+# using the musl C library built by tools/build_sdk.sh (make sdk).
+#
+# Usage: tools/68khal-cc [gcc options] file.c ... -o program
+#
+# With -c (compile only) no linking is done and the usual gcc options
+# apply. Everything else is passed on to the host gcc.
+
+sysroot=$(cd "$(dirname "$0")/.." && pwd)/build/sdk/sysroot
+
+[ -f "$sysroot/lib/libc.a" ] || { echo "68khal-cc: run 'make sdk' first" >&2; exit 1; }
+
+gcc_include=$(gcc -m32 -print-file-name=include)
+
+compile="-m32 -march=i686 -fno-pie -fno-stack-protector -nostdinc -isystem $sysroot/include -isystem $gcc_include"
+
+for arg in "$@"; do
+    case $arg in
+        -c|-S|-E)
+            exec gcc $compile "$@"
+            ;;
+    esac
+done
+
+exec gcc $compile -static -no-pie -nostdlib -Wl,-m,elf_i386 \
+    "$sysroot/lib/crt1.o" "$sysroot/lib/crti.o" \
+    "$@" \
+    -L"$sysroot/lib" -lc -lrt68k "$sysroot/lib/crtn.o"

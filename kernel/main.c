@@ -22,6 +22,7 @@
 #include "kernel/keyboard/keychar.h"
 
 #include "kernel/mac/machine.h"
+#include "kernel/user/process.h"
 #include "kernel/memory/memory.h"
 #include "kernel/memory/heap.h"
 #include "kernel/memory/pmm.h"
@@ -69,6 +70,9 @@ void kernel_main(void)
     if (volume_mount_any() == 0)
         kernel_log(LOG_INFO, "HFS volume mounted");
 
+    /* The file tree ("/", /tmp, /dev) and the mode switch for user programs. */
+    user_init();
+
     /* Graphics mode has no text output yet: show a test pattern instead. */
     hal_framebuffer_t framebuffer;
 
@@ -86,6 +90,7 @@ void kernel_main(void)
     keyboard_state_init();
 
     hal_cpu_enable_interrupts();
+    kernel_log(LOG_INFO, "Shell ready");
 
 #ifdef KERNEL_MAC_TEST
     /* make test-rom-qemu: run the Mac for a fixed time and report the screen. */

@@ -61,3 +61,27 @@ s64 __divmoddi4(s64 n, s64 d, s64 *rem)
     }
     return (n_negative != d_negative) ? -(s64)uq : (s64)uq;
 }
+
+
+u64 __umoddi3(u64 n, u64 d)
+{
+    u64 r;
+
+    __udivmoddi4(n, d, &r);
+    return r;
+}
+
+
+s64 __divdi3(s64 n, s64 d)
+{
+    return __divmoddi4(n, d, 0);
+}
+
+
+s64 __moddi3(s64 n, s64 d)
+{
+    s64 r;
+
+    __divmoddi4(n, d, &r);
+    return r;
+}

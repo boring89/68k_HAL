@@ -19,6 +19,9 @@
 #include "kernel/lib/k_string.h"
 #include "kernel/m68k/guest.h"
 #include "kernel/printf/printf.h"
+#include "kernel/user/console.h"
+#include "kernel/user/process.h"
+#include "kernel/vfs/vfs.h"
 #include "kernel/memory/heap.h"
 #include "kernel/memory/pmm.h"
 
@@ -400,6 +403,86 @@ static void test_boot_module(void)
     SELFTEST_ASSERT(found == 1);
 }
 
+/*
+ * User programs from the initrd (make initrd; skipped if the test run
+ * has none). Each one runs and its console output must equal
+ * /expected/<name>.txt; the same programs give the same output when
+ * run natively on a Linux host (see docs/userland.md).
+ */
+static const struct
+{
+    const char *name;
+    int status; /* expected exit status */
+} user_tests[] = {
+    {"hello", 0},
+    {"printf", 0},
+    {"malloc", 0},
+    {"files", 0},
+    {"sort", 0},
+    {"args", 3},
+    {"time", 0},
+    {"crash", 139}, /* 128 + SIGSEGV */
+};
+
+static void test_user_programs(void)
+{
+    vfs_stat_t stat;
+
+    if (vfs_stat("/bin/hello", &stat) != 0)
+    {
+        kernel_printf("  (no initrd: user programs skipped, stat %d)\n", (int)vfs_stat("/bin/hello", &stat));
+        return;
+    }
+
+    static char output[4096];
+    static char expected[4096];
+
+    for (unsigned int i = 0; i < sizeof(user_tests) / sizeof(user_tests[0]); i++)
+    {
+        char path[64];
+        const char *name = user_tests[i].name;
+
+        k_strcpy(path, "/bin/");
+        k_strcpy(path + 5, name);
+
+        const char *args[] = {path, "one", "two", NULL};
+        const char *no_args[] = {path, NULL};
+        static const char *const environment[] = {"PATH=/bin", NULL};
+
+        user_console_capture_start(output, sizeof(output));
+
+        int32_t status = user_run(path, k_strcmp(name, "args") == 0 ? args : no_args, environment);
+
+        user_console_capture_stop();
+
+        char expected_path[64];
+
+        k_strcpy(expected_path, "/expected/");
+        k_strcpy(expected_path + 10, name);
+        k_strcpy(expected_path + 10 + k_strlen(name), ".txt");
+
+        vfs_file_t *file;
+        int32_t length = 0;
+
+        if (vfs_open(expected_path, VFS_O_RDONLY, 0, &file) == 0)
+        {
+            length = vfs_read(file, expected, sizeof(expected) - 1);
+            vfs_file_close(file);
+        }
+
+        expected[length > 0 ? length : 0] = '\0';
+
+        if (status != user_tests[i].status || k_strcmp(output, expected) != 0)
+        {
+            kernel_printf("  %s: exit %d (want %d)\n--- got\n%s--- want\n%s---\n", name,
+                          (int)status, user_tests[i].status, output, expected);
+        }
+
+        SELFTEST_ASSERT(status == user_tests[i].status);
+        SELFTEST_ASSERT(k_strcmp(output, expected) == 0);
+    }
+}
+
 void selftest_abort(void)
 {
     selftest_platform_exit(0);
@@ -425,6 +508,7 @@ void selftest_run(void)
     SELFTEST_RUN(test_m68k_guest_program);
     SELFTEST_RUN(test_m68k_guest_divide_64);
     SELFTEST_RUN(test_m68k_guest_fline_exception);
+    SELFTEST_RUN(test_user_programs);
 
     selftest_arch_run();
     selftest_platform_run();

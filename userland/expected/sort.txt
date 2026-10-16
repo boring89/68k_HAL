@@ -1,0 +1,8 @@
+sorted: -50 -3 0 7 7 19 42 56 88 100
+bsearch: found
+upper: THE QUICK BROWN FOX
+strtol: 1234 -31 511
+strtod: 2.718
+strstr: needle here
+strtok: [alpha] [beta] [gamma]
+rand: 1

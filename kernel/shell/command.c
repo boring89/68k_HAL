@@ -19,6 +19,7 @@
 #include "kernel/memory/memory.h"
 #include "kernel/block/block.h"
 #include "kernel/fs/volume.h"
+#include "kernel/user/process.h"
 #include "hal/boot.h"
 #include "hal/clock.h"
 #include "hal/acpi.h"
@@ -79,6 +80,9 @@ static void cmd_cpuinfo(
     int argc,
     char **argv);
 static void cmd_acpi(
+    int argc,
+    char **argv);
+static void cmd_run(
     int argc,
     char **argv);
 static void cmd_mac(
@@ -162,7 +166,11 @@ static shell_command_entry_t commands[] =
         {COMMAND_ACPI,
          "acpi",
          "Display processors and interrupt controllers from the ACPI tables",
-         cmd_acpi}};
+         cmd_acpi},
+        {COMMAND_RUN,
+         "run",
+         "Run a program of the file tree (run <path> [arguments...])",
+         cmd_run}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -1012,5 +1020,46 @@ static void cmd_acpi(
     {
         write_number_line("I/O APIC id:    ", info->ioapic_id[i], 0);
         write_number_line("  at:           0x", info->ioapic_base[i], 1);
+    }
+}
+
+static void cmd_run(
+    int argc,
+    char **argv)
+{
+    if (argc < 2)
+    {
+        terminal_write_line("usage: run <path> [arguments...]");
+        return;
+    }
+
+    /* The program sees the path as argv[0], then the arguments. */
+    const char *args[SHELL_MAX_ARGS + 1];
+
+    for (int i = 1; i < argc; i++)
+        args[i - 1] = argv[i];
+
+    args[argc - 1] = NULL;
+
+    static const char *const environment[] = {
+        "PATH=/bin", "HOME=/tmp", "TERM=vt100", NULL};
+
+    int32_t status = user_run(argv[1], args, environment);
+    char number[16];
+
+    if (status < 0)
+    {
+        terminal_write(argv[1]);
+        terminal_write(": cannot run (error ");
+        k_utoa((unsigned int)-status, number);
+        terminal_write(number);
+        terminal_write_line(")");
+    }
+    else if (status != 0)
+    {
+        terminal_write("[exit ");
+        k_utoa((unsigned int)status, number);
+        terminal_write(number);
+        terminal_write_line("]");
     }
 }

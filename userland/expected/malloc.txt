@@ -1,0 +1,5 @@
+small blocks: 0 bad
+big block: 3472883712
+after realloc: 3472883712
+calloc: 0
+stack: 2917115392

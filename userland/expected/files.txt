@@ -1,0 +1,14 @@
+message: Hello from the program disk.
+message: Second line.
+size: 42 regular: 1
+tmp: 1 squared is 1
+tmp: 2 squared is 4
+tmp: 3 squared is 9
+tmp: 4 squared is 16
+tmp: 5 squared is 25
+piece: [squared]
+missing: No such file or directory
+read-only: Read-only file system
+entry: numbers.txt
+entries: 3
+removed: -1
