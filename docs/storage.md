@@ -43,7 +43,7 @@ GRUB 的 `module` 行（或 QEMU 的 `-initrd "檔案 名稱,檔案 名稱"`）�
 | 埠 | primary channel：資料 0x1F0、sector count 0x1F2、LBA 0x1F3–0x1F5、drive 0x1F6、狀態/命令 0x1F7、控制 0x3F6 |
 | 辨識 | 選 master，送 `IDENTIFY`（0xEC）；狀態 0 或 0xFF 表示沒有裝置；LBA mid/high 不為 0 表示是 ATAPI 或 SATA（略過）；從資料埠讀 256 字，字 60–61 是 LBA28 的扇區數 |
 | 讀取 | drive 暫存器放 `0xE0 | LBA 的 24–27 位元`，sector count、LBA 低中高，送 `READ SECTORS`（0x20）；每個扇區先等 400 ns（讀 4 次 alternate status）、等 BSY 清除與 DRQ 設定，再讀 256 字 |
-| 限制 | 只有 primary master、LBA28（最大 128 GiB）、唯讀；一次命令最多 255 個扇區（驅動自己分批）；輪詢，`nIEN` 關閉 IRQ 14 |
+| 限制 | 只有 primary master、LBA28（最大 128 GiB）；可寫（WRITE SECTORS＋FLUSH CACHE，`block_write`；`mac` 用它保存改動，見 `docs/mac.md` 第 12 節）；一次命令最多 255 個扇區（驅動自己分批）；輪詢，`nIEN` 關閉 IRQ 14 |
 
 註冊成 `ata0`。`hal_init` 結尾呼叫 `ata_init()`，沒有磁碟時什麼都不會發生。
 QEMU 的 `-cdrom` 掛在 secondary channel，所以不會被誤認。
