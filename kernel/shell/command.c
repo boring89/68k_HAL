@@ -17,6 +17,7 @@
 #include "kernel/m68k/demo.h"
 #include "kernel/memory/memory.h"
 #include "kernel/block/block.h"
+#include "kernel/fs/volume.h"
 #include "hal/boot.h"
 #include "hal/clock.h"
 
@@ -63,6 +64,12 @@ static void cmd_date(
     int argc,
     char **argv);
 static void cmd_disks(
+    int argc,
+    char **argv);
+static void cmd_ls(
+    int argc,
+    char **argv);
+static void cmd_cat(
     int argc,
     char **argv);
 
@@ -123,7 +130,15 @@ static shell_command_entry_t commands[] =
         {COMMAND_DISKS,
          "disks",
          "List block devices",
-         cmd_disks}};
+         cmd_disks},
+        {COMMAND_LS,
+         "ls",
+         "List a folder of the HFS volume (ls [path], folders separated by :)",
+         cmd_ls},
+        {COMMAND_CAT,
+         "cat",
+         "Show a text file of the HFS volume (cat <path>)",
+         cmd_cat}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -635,4 +650,218 @@ static void cmd_disks(
         terminal_write(buffer);
         terminal_write_line(" bytes");
     }
+}
+
+/*
+ * The shell splits its input at spaces, but HFS names can contain them:
+ * join the arguments back together with single spaces.
+ */
+static void join_args(
+    int argc,
+    char **argv,
+    char *path,
+    size_t size)
+{
+    size_t length = 0;
+
+    path[0] = '\0';
+
+    for (int i = 1; i < argc; i++)
+    {
+        size_t part = k_strlen(argv[i]);
+
+        if (length + part + 2 > size)
+            break;
+
+        if (i > 1)
+            path[length++] = ' ';
+
+        k_strcpy(path + length, argv[i]);
+        length += part;
+    }
+}
+
+/* Mac Roman names: show only what the text display can (printable ASCII). */
+static void write_mac_name(const char *name)
+{
+    char text[HFS_NAME_MAX + 1];
+    size_t i;
+
+    for (i = 0; name[i] != '\0' && i < HFS_NAME_MAX; i++)
+    {
+        unsigned char c = (unsigned char)name[i];
+
+        text[i] = (c >= 0x20 && c < 0x7F) ? (char)c : '?';
+    }
+
+    text[i] = '\0';
+    terminal_write(text);
+}
+
+/* A four-character code such as 'TEXT'. */
+static void write_type_code(uint32_t code)
+{
+    char text[5];
+
+    for (int i = 0; i < 4; i++)
+    {
+        unsigned char c = (unsigned char)(code >> (24 - 8 * i));
+
+        text[i] = (c >= 0x20 && c < 0x7F) ? (char)c : '?';
+    }
+
+    text[4] = '\0';
+    terminal_write(text);
+}
+
+static int ls_entry(
+    const hfs_entry_t *entry,
+    void *context)
+{
+    (void)context;
+
+    char buffer[16];
+
+    if (entry->is_folder)
+    {
+        terminal_write("d ");
+        write_mac_name(entry->name);
+        terminal_write("  ");
+        k_utoa(entry->valence, buffer);
+        terminal_write(buffer);
+        terminal_write_line(" items");
+
+        return 0;
+    }
+
+    terminal_write("f ");
+    write_mac_name(entry->name);
+    terminal_write("  ");
+    write_type_code(entry->file_type);
+    terminal_write(" ");
+    k_utoa(entry->data_length, buffer);
+    terminal_write(buffer);
+
+    if (entry->rsrc_length != 0)
+    {
+        terminal_write("+");
+        k_utoa(entry->rsrc_length, buffer);
+        terminal_write(buffer);
+        terminal_write("r");
+    }
+
+    terminal_newline();
+
+    return 0;
+}
+
+static hfs_volume_t *require_volume(void)
+{
+    hfs_volume_t *volume = volume_get();
+
+    if (volume == NULL)
+        terminal_write_line("No HFS volume (boot with a disk image module)");
+
+    return volume;
+}
+
+static void cmd_ls(
+    int argc,
+    char **argv)
+{
+    hfs_volume_t *volume = require_volume();
+    char path[64];
+    hfs_entry_t entry;
+
+    if (volume == NULL)
+        return;
+
+    join_args(argc, argv, path, sizeof(path));
+
+    if (hfs_lookup(volume, path, &entry) != 0)
+    {
+        terminal_write("Not found: ");
+        terminal_write_line(path);
+        return;
+    }
+
+    if (!entry.is_folder)
+    {
+        ls_entry(&entry, NULL);
+        return;
+    }
+
+    if (hfs_list(volume, entry.id, ls_entry, NULL) != 0)
+        terminal_write_line("Read error");
+}
+
+/* cat stops here so a big file does not flood the screen. */
+#define CAT_MAX_BYTES 8192
+
+static void cmd_cat(
+    int argc,
+    char **argv)
+{
+    hfs_volume_t *volume = require_volume();
+    char path[64];
+    hfs_entry_t entry;
+
+    if (volume == NULL)
+        return;
+
+    join_args(argc, argv, path, sizeof(path));
+
+    if (path[0] == '\0')
+    {
+        terminal_write_line("usage: cat <path>");
+        return;
+    }
+
+    if (hfs_lookup(volume, path, &entry) != 0)
+    {
+        terminal_write("Not found: ");
+        terminal_write_line(path);
+        return;
+    }
+
+    if (entry.is_folder)
+    {
+        terminal_write_line("Is a folder");
+        return;
+    }
+
+    uint32_t offset = 0;
+
+    while (offset < entry.data_length && offset < CAT_MAX_BYTES)
+    {
+        char chunk[65];
+        int got = hfs_read(volume, &entry, HFS_FORK_DATA, offset, chunk,
+                           sizeof(chunk) - 1);
+
+        if (got <= 0)
+        {
+            terminal_write_line("Read error");
+            return;
+        }
+
+        /* Mac text files end lines with CR; the other bytes that are not
+         * printable ASCII (Mac Roman above 0x7F, controls) show as '.'. */
+        for (int i = 0; i < got; i++)
+        {
+            unsigned char c = (unsigned char)chunk[i];
+
+            chunk[i] = c == '\r' ? '\n'
+                       : (c == '\n' || (c >= 0x20 && c < 0x7F)) ? (char)c
+                                                                : '.';
+        }
+
+        chunk[got] = '\0';
+        terminal_write(chunk);
+        offset += (uint32_t)got;
+    }
+
+    terminal_newline();
+
+    if (entry.data_length > CAT_MAX_BYTES)
+        terminal_write_line("... (truncated)");
 }

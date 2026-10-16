@@ -14,6 +14,7 @@
 #include "kernel/printf/printf.h"
 
 #include "kernel/block/ramdisk.h"
+#include "kernel/fs/volume.h"
 
 #include "kernel/input/event_buffer.h"
 
@@ -62,6 +63,10 @@ void kernel_main(void)
 
     /* Boot modules (hal/boot.h) become block devices ram0, ram1, ... */
     ramdisk_register_boot_modules();
+
+    /* The first HFS volume among them is what the ls and cat commands read. */
+    if (volume_mount_any() == 0)
+        kernel_log(LOG_INFO, "HFS volume mounted");
 
     /* Graphics mode has no text output yet: show a test pattern instead. */
     hal_framebuffer_t framebuffer;

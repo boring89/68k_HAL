@@ -40,6 +40,9 @@ char keyboard_keycode_to_ascii(
         case KEY_SPACE:
             return ' ';
 
+        case KEY_SEMICOLON:
+            return shift ? ':' : ';';
+
         case KEY_ENTER:
             return '\n';
 

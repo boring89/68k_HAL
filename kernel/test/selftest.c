@@ -14,6 +14,7 @@
 
 #include "kernel/block/block.h"
 #include "kernel/block/ramdisk.h"
+#include "kernel/fs/volume.h"
 #include "kernel/lib/k_memory.h"
 #include "kernel/lib/k_string.h"
 #include "kernel/m68k/guest.h"
@@ -218,6 +219,28 @@ static void test_block_ramdisk_module(void)
     SELFTEST_ASSERT(block_read(disk, 2, 1, blocks) == -1);
 }
 
+/* The second boot module is a disk with an HFS volume (tools/make_disk_image.py). */
+static void test_hfs_volume_mounted(void)
+{
+    hfs_volume_t *volume = volume_get();
+
+    SELFTEST_ASSERT(volume != 0);
+
+    if (volume == 0)
+        return;
+
+    hfs_entry_t entry;
+    char text[32];
+
+    SELFTEST_ASSERT(k_strcmp(volume->name, "TESTVOL") == 0);
+    SELFTEST_ASSERT(hfs_lookup(volume, "docs:deep:deeper:leaf", &entry) == 0);
+    SELFTEST_ASSERT(hfs_lookup(volume, "ReadMe", &entry) == 0);
+    SELFTEST_ASSERT(hfs_read(volume, &entry, HFS_FORK_DATA, 0, text,
+                             sizeof(text)) == 15);
+    SELFTEST_ASSERT(k_memcmp(text, "Hello from HFS\r", 15) == 0);
+    SELFTEST_ASSERT(hfs_lookup(volume, "Nothing", &entry) == -1);
+}
+
 /* The guest RAM is 8 MiB by default and can be resized. */
 static void test_m68k_guest_ram_size(void)
 {
@@ -351,6 +374,7 @@ void selftest_run(void)
     SELFTEST_RUN(test_boot_module);
     SELFTEST_RUN(test_hal_clock);
     SELFTEST_RUN(test_block_ramdisk_module);
+    SELFTEST_RUN(test_hfs_volume_mounted);
     SELFTEST_RUN(test_m68k_guest_ram_size);
     SELFTEST_RUN(test_m68k_guest_program);
     SELFTEST_RUN(test_m68k_guest_divide_64);

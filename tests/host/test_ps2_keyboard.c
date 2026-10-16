@@ -28,6 +28,7 @@ static void test_keymap(void)
     TEST_ASSERT_EQ_INT(KEY_1, keyboard_scancode_to_keycode(0x02));
     TEST_ASSERT_EQ_INT(KEY_ENTER, keyboard_scancode_to_keycode(0x1C));
     TEST_ASSERT_EQ_INT(KEY_SPACE, keyboard_scancode_to_keycode(0x39));
+    TEST_ASSERT_EQ_INT(KEY_SEMICOLON, keyboard_scancode_to_keycode(0x27));
 }
 
 static void test_keymap_unknown(void)

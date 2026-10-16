@@ -145,6 +145,7 @@ HOST_LIB_SOURCES := \
 	kernel/display/fb_pattern.c \
 	kernel/fs/apm.c \
 	kernel/fs/hfs/hfs.c \
+	kernel/fs/volume.c \
 	kernel/lib/k_string.c \
 	kernel/lib/k_number.c \
 	kernel/lib/k_memory.c \
@@ -199,7 +200,11 @@ $(BUILD)/images/hfs.img: tools/make_hfs_image.sh
 	mkdir -p $(dir $@)
 	tools/make_hfs_image.sh $@
 
-test-host: $(HOST_TESTS) $(M68K_TEST_BINS) $(BUILD)/images/apm.img $(BUILD)/images/hfs.img
+# The HFS volume inside an Apple Partition Map, like a real Mac disk.
+$(BUILD)/images/disk.img: $(BUILD)/images/hfs.img tools/make_disk_image.py
+	python3 -I tools/make_disk_image.py $< $@
+
+test-host: $(HOST_TESTS) $(M68K_TEST_BINS) $(BUILD)/images/apm.img $(BUILD)/images/hfs.img $(BUILD)/images/disk.img
 	@for t in $(HOST_TESTS); do ./$$t || exit 1; done
 
 # SingleStepTests 68000 data (https://github.com/SingleStepTests/680x0, put
@@ -225,11 +230,11 @@ $(BUILD)/test/module_test.txt: Makefile
 	@printf 'selftest module\n' > $@
 	@truncate -s 1024 $@
 
-test-qemu: $(BUILD)/test/module_test.txt
+test-qemu: $(BUILD)/test/module_test.txt $(BUILD)/images/disk.img
 	$(MAKE) --no-print-directory BUILD=$(BUILD)/test \
 		EXTRA_CFLAGS=-DKERNEL_SELFTEST $(BUILD)/test/kernel.elf
 	@timeout 10 qemu-system-i386 -kernel $(BUILD)/test/kernel.elf \
-		-initrd "$(BUILD)/test/module_test.txt testmod" $(QEMU_TEST_FLAGS); \
+		-initrd "$(BUILD)/test/module_test.txt testmod,$(BUILD)/images/disk.img disk" $(QEMU_TEST_FLAGS); \
 	status=$$?; \
 	if [ $$status -eq 33 ]; then \
 		echo "QEMU selftest: PASS"; \

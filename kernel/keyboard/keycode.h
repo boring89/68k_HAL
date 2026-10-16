@@ -57,6 +57,9 @@ typedef enum
     KEY_TAB,
     KEY_SPACE,
 
+    /* ';' and, with shift, ':' (the HFS path separator). */
+    KEY_SEMICOLON,
+
 
     KEY_LEFT_SHIFT,
     KEY_RIGHT_SHIFT,

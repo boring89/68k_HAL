@@ -129,6 +129,10 @@ keycode_t keyboard_scancode_to_keycode(
     case 0x39:
         return KEY_SPACE;
 
+        /* Set 1 scancode of the ';' key (OSDev Wiki "PS/2 Keyboard"). */
+    case 0x27:
+        return KEY_SEMICOLON;
+
     case 0x0E:
         return KEY_BACKSPACE;
 

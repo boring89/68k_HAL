@@ -142,7 +142,19 @@ hfs_read(&vol, &entry, HFS_FORK_DATA, off, buf, len)  // 讀 fork；也可讀 HF
 
 錯誤一律回傳 -1；讀取超過 fork 長度會被截斷。樹的走訪有「node 數上限」，被竄改成迴圈的磁碟會回傳錯誤。
 
-## 8. 測試
+## 8. shell 指令與開機掛載
+
+- 開機時 `kernel_main` 把每個 GRUB module 註冊成 ramdisk（`ram0`、`ram1`…），再呼叫
+  `volume_mount_any()`（`kernel/fs/volume.c`）：依序檢查每個區塊裝置，有 Apple Partition Map 就掛第一個
+  `Apple_HFS` 分割區，沒有就當成沒有分割區表的 HFS（MDB 在區塊 2）。成功時印 `HFS volume mounted`。
+- `ls [路徑]`：列出資料夾（`d 名稱  N items` / `f 名稱  類型 資料長度[+資源長度r]`），路徑是檔案時只印那一行。
+- `cat <路徑>`：印出資料 fork，CR（Mac 的換行）轉成換行，非 ASCII 位元組顯示為 `.`；最多 8192 位元組，之後印 `... (truncated)`。
+- 路徑用 `:` 分隔；shell 以空白切參數，所以指令會把參數用單一空白接回去（`cat Docs:Deep:Mixed Case Name` 可用，連續空白會被合併）。
+- 試用：`tools/boot_log.py --initrd "build/images/disk.img disk" --cmd ls --cmd "cat ReadMe"`（先執行 `make test-host`
+  產生映像）；或 `qemu-system-i386 -kernel build/kernel.elf -initrd "build/images/disk.img disk" -serial stdio`。
+- 為了能在鍵盤上輸入 `:`，加了 `KEY_SEMICOLON`（scancode set 1 的 0x27，shift 時為 `:`）；鍵盤其他標點目前都沒有（見 PLAN 的待決定）。
+
+## 9. 測試
 
 - `tests/host/test_apm.c`：用 `tools/make_apm_image.py` 合成的映像（`build/images/apm.img`）。
 - `tests/host/test_hfs.c`：用 `tools/make_hfs_image.sh` 以 hfsutils 建的磁碟（`build/images/hfs.img`，
@@ -153,7 +165,7 @@ hfs_read(&vol, &entry, HFS_FORK_DATA, off, buf, len)  // 讀 fork；也可讀 HF
 - **hfsutils 會把「目前的磁碟」記在 `~/.hcwd`**。腳本在暫時的 `HOME` 底下執行，不會動到你的 `~/.hcwd`。
   建置時需要 `hfsutils` 套件（`apt install hfsutils`；CI 也有裝）。
 
-## 9. 已知限制
+## 10. 已知限制
 
 - 只讀。不檢查 volume bitmap，不處理壞掉的 volume 的修復。
 - 名稱比較見第 4 節；查詢是線性的。
