@@ -609,6 +609,10 @@ static int32_t sys_mmap2(uint32_t addr, uint32_t length, uint32_t prot, uint32_t
     if (file != NULL && file->ops->mmap != NULL)
     {
         uintptr_t phys;
+        /* The offset in bytes must fit in 32 bits. */
+        if (pgoffset > 0xFFFFFu)
+            return -K_EINVAL;
+
         int32_t result = file->ops->mmap(file, length, pgoffset * PAGE, &phys);
 
         if (result != 0)

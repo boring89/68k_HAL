@@ -87,6 +87,7 @@ compiled by tcc: fib(20)=6765 1099511627 ok 6.28
 ```
 /        程式光碟（initrd，唯讀）：/bin、/data、/expected
 /tmp     RAM 檔案系統（可讀寫，重開機就消失）
+/proc    version、uptime、meminfo、cpuinfo（見 5.10）
 /dev     console（螢幕 + 序列埠輸出、鍵盤輸入）、tty、null、zero、urandom、fb0（圖形模式）、input/event0（鍵盤與滑鼠事件）
 /hfs     Mac 磁碟的 HFS volume（唯讀；資料叉；Mac 文字檔用 CR 換行）
 ```
@@ -202,6 +203,10 @@ shell 內建的 `ls`、`cat`、`echo`、`date` 是舊的（`ls`／`cat` 讀 HFS 
 ### 5.9 重導向與管線（一個一個跑的管線）
 
 shell 行裡的 `|`、`<`、`>`、`>>`（各自要用空白隔開）：`seq 20 | grep 1 | wc -l`、`seq 3 > /tmp/n.txt`、`wc -l < /tmp/n.txt`、`echo more >> /tmp/n.txt`。因為一次只能跑一個程式，管線是**依序**執行：前一段的標準輸出寫到 `/tmp/.pipe<n>`，下一段從那個檔案讀（`user_run_redirect`；結束後刪除）。對不需要即時互動的過濾器（grep、sort、wc、head…）結果相同；但前一段要先跑完才開始下一段（無限輸出的程式如 `yes | head` 不行），也不能互動。只有程式參與，內建指令不行（行裡有運算子時 `echo`、`cat` 等用 `/bin` 的版本）；最多 4 段。真正的管線需要 `fork`/`pipe`/多工（見 P6_PLAN 的「待決定」）。
+
+### 5.10 `/proc`
+
+`kernel/vfs/procfs.c`（通用：唯讀文字檔，內容在 `open` 時才產生，像 Linux 的 /proc；產生函式註冊在表裡）與 `kernel/user/procfiles.c`（實際的檔案）：`/proc/version`、`/proc/uptime`（「秒.百分之一秒 0.00」）、`/proc/meminfo`（MemTotal、MemFree、HeapUsed、HeapTotal，單位 kB）、`/proc/cpuinfo`（每個執行中的處理器一段，格式同 Linux）。內容在 `open` 的那一刻定格（讀到一半不會變）。box 的 `free`、`uptime` 讀它們（`free` 與 shell 內建的 `free` 同名，請打 `box free`）。
 
 ### 遇到 ENOSYS 時怎麼補
 

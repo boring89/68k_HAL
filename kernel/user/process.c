@@ -7,6 +7,7 @@
 
 #include "console.h"
 #include "fbdev.h"
+#include "procfiles.h"
 #include "elf.h"
 #include "stack.h"
 
@@ -591,5 +592,6 @@ void user_init(void)
     mount_or_warn("/", root != NULL ? root : ramfs_create());
     mount_or_warn("/tmp", ramfs_create());
     mount_or_warn("/dev", devfs_create());
+    mount_or_warn("/proc", procfiles_create());
     mount_or_warn("/hfs", hfsfs_create());
 }

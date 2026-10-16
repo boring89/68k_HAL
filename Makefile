@@ -159,6 +159,7 @@ HOST_LIB_SOURCES := \
 	kernel/fs/volume.c \
 	kernel/lib/k_string.c \
 	kernel/lib/k_number.c \
+	kernel/lib/k_snprintf.c \
 	kernel/lib/k_memory.c \
 	kernel/lib/k_time.c \
 	kernel/lib/ring_buffer.c \
@@ -173,6 +174,7 @@ HOST_LIB_SOURCES := \
 	kernel/sound/sound.c \
 	kernel/user/elf.c \
 	kernel/user/region.c \
+	kernel/vfs/procfs.c \
 	kernel/vfs/ramfs.c \
 	kernel/vfs/tarfs.c \
 	kernel/vfs/vfs.c \
@@ -580,6 +582,9 @@ test-shell: iso
 		"box cat box/m.txt=Second line." \
 		"wc -l box/m.txt=m.txt" \
 		"nosuchcommand=Unknown command: nosuchcommand" \
+		"box free=Mem:" \
+		"uptime=up 0:" \
+		"box cat /proc/cpuinfo=vendor_id" \
 		"seq 20 | grep 1 | wc -l=11" \
 		"seq 3 > nums.txt=" \
 		"echo more >> nums.txt=" \

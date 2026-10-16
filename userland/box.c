@@ -1334,6 +1334,73 @@ static int box_stat(int argc, char **argv)
     return status;
 }
 
+/* The number after "name:" in /proc/meminfo, in kB; -1 if it is not there. */
+static long meminfo_value(const char *text, const char *name)
+{
+    const char *line = strstr(text, name);
+
+    if (line == NULL)
+        return -1;
+
+    return strtol(line + strlen(name), NULL, 10);
+}
+
+static int box_free(int argc, char **argv)
+{
+    char text[1024];
+    int fd = open("/proc/meminfo", O_RDONLY);
+
+    (void)argc;
+    (void)argv;
+
+    if (fd < 0)
+        return fail("/proc/meminfo");
+
+    ssize_t n = read(fd, text, sizeof(text) - 1);
+
+    close(fd);
+
+    if (n < 0)
+        return fail("/proc/meminfo");
+
+    text[n] = '\0';
+
+    long total = meminfo_value(text, "MemTotal:");
+    long available = meminfo_value(text, "MemFree:");
+
+    printf("%12s%12s%12s\n", "total", "used", "free");
+    printf("Mem:%8ld%12ld%12ld\n", total, total - available, available);
+
+    return 0;
+}
+
+static int box_uptime(int argc, char **argv)
+{
+    char text[64];
+    int fd = open("/proc/uptime", O_RDONLY);
+
+    (void)argc;
+    (void)argv;
+
+    if (fd < 0)
+        return fail("/proc/uptime");
+
+    ssize_t n = read(fd, text, sizeof(text) - 1);
+
+    close(fd);
+
+    if (n < 0)
+        return fail("/proc/uptime");
+
+    text[n] = '\0';
+
+    long seconds = strtol(text, NULL, 10);
+
+    printf("up %ld:%02ld:%02ld\n", seconds / 3600, seconds / 60 % 60, seconds % 60);
+
+    return 0;
+}
+
 static int box_clear(int argc, char **argv)
 {
     (void)argc;
@@ -1356,7 +1423,7 @@ static const struct
     {"rmdir", box_rmdir},       {"seq", box_seq},     {"sleep", box_sleep},   {"sort", box_sort},
     {"stat", box_stat},         {"tail", box_tail},   {"tee", box_tee},       {"touch", box_touch},
     {"true", box_true},         {"uname", box_uname}, {"uniq", box_uniq},     {"wc", box_wc},
-    {"echo", box_echo},
+    {"echo", box_echo},         {"free", box_free},   {"uptime", box_uptime},
 };
 
 #define APPLET_COUNT ((int)(sizeof(applets) / sizeof(applets[0])))
