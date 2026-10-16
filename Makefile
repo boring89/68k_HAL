@@ -159,6 +159,7 @@ HOST_LIB_SOURCES := \
 	kernel/pci/pci_names.c \
 	kernel/memory/pmm.c \
 	kernel/shell/parser.c \
+	kernel/sound/sound.c \
 	kernel/user/elf.c \
 	kernel/user/region.c \
 	kernel/vfs/ramfs.c \
@@ -391,6 +392,8 @@ $(INITRD): $(USERLAND_BINS) $(wildcard userland/data/*) $(wildcard userland/expe
 # QEMU exits with 33 on PASS (see kernel/test/selftest.c).
 QEMU_TEST_FLAGS := -display none -serial stdio -no-reboot -smp 4 \
 	-netdev user,id=n0 -device e1000,netdev=n0 \
+	-audiodev wav,id=snd0,path=$(BUILD)/test/sound.wav \
+	-device intel-hda -device hda-output,audiodev=snd0 \
 	-device isa-debug-exit,iobase=0xf4,iosize=0x04
 
 # Boot module for the selftest: -initrd "<file> <name>". Fixed content, so
@@ -415,6 +418,7 @@ test-qemu: $(BUILD)/test/module_test.txt $(BUILD)/images/disk.img $(BUILD)/test/
 	status=$$?; \
 	if [ $$status -eq 33 ]; then \
 		echo "QEMU selftest: PASS"; \
+		python3 -I tools/check_wav.py $(BUILD)/test/sound.wav 440 || exit 1; \
 	else \
 		echo "QEMU selftest: FAIL (exit status $$status)"; \
 		exit 1; \

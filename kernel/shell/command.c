@@ -26,6 +26,7 @@
 #include "hal/cpu.h"
 #include "hal/pci.h"
 #include "kernel/net/net.h"
+#include "kernel/sound/sound.h"
 #include "kernel/pci/pci_names.h"
 
 static void cmd_help(
@@ -101,6 +102,9 @@ static void cmd_ping(
     int argc,
     char **argv);
 static void cmd_dns(
+    int argc,
+    char **argv);
+static void cmd_beep(
     int argc,
     char **argv);
 static void cmd_mac(
@@ -208,7 +212,11 @@ static shell_command_entry_t commands[] =
         {COMMAND_DNS,
          "dns",
          "Look up the address of a name (dns <name>)",
-         cmd_dns}};
+         cmd_dns},
+        {COMMAND_BEEP,
+         "beep",
+         "Play a tone (beep [Hz [milliseconds]])",
+         cmd_beep}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -1332,4 +1340,27 @@ static void cmd_dns(
         terminal_write_line("no such name");
     else
         terminal_write_line("dns: no answer (is the network up? run dhcp)");
+}
+
+static void cmd_beep(
+    int argc,
+    char **argv)
+{
+    int frequency = 440;
+    int milliseconds = 300;
+
+    if (argc > 1)
+        k_atoi(argv[1], &frequency);
+
+    if (argc > 2)
+        k_atoi(argv[2], &milliseconds);
+
+    if (frequency < 20 || frequency > 20000 || milliseconds < 1 || milliseconds > 10000)
+    {
+        terminal_write_line("usage: beep [20..20000 Hz [1..10000 ms]]");
+        return;
+    }
+
+    if (sound_beep((uint32_t)frequency, (uint32_t)milliseconds, 50) != 0)
+        terminal_write_line("No sound card");
 }

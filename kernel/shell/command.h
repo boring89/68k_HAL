@@ -34,7 +34,8 @@ typedef enum
     COMMAND_NET,
     COMMAND_DHCP,
     COMMAND_PING,
-    COMMAND_DNS
+    COMMAND_DNS,
+    COMMAND_BEEP
 
 } shell_command_id_t;
 

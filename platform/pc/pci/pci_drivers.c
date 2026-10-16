@@ -6,6 +6,7 @@
 #include "hal/pci.h"
 
 #include "drivers/e1000/e1000.h"
+#include "drivers/hda/hda.h"
 
 #include "kernel/log/log.h"
 #include "kernel/printf/printf.h"
@@ -17,6 +18,7 @@
  */
 static const hal_pci_driver_t *const drivers[] = {
     &e1000_pci_driver,
+    &hda_pci_driver,
 };
 
 static int matches(const hal_pci_driver_t *driver, const hal_pci_device_t *device)

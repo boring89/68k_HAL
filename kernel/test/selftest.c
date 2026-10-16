@@ -20,6 +20,7 @@
 #include "kernel/m68k/guest.h"
 #include "kernel/net/net.h"
 #include "kernel/printf/printf.h"
+#include "kernel/sound/sound.h"
 #include "kernel/user/console.h"
 #include "kernel/user/process.h"
 #include "kernel/vfs/vfs.h"
@@ -488,6 +489,17 @@ static void test_user_programs(void)
 }
 
 /*
+ * test-qemu gives the machine an HDA sound card whose output QEMU records in
+ * build/test/sound.wav; tools/check_wav.py then checks that file for the
+ * tone played here (440 Hz, 500 ms, then 300 ms of silence).
+ */
+static void test_sound(void)
+{
+    SELFTEST_ASSERT(sound_get() != NULL);
+    SELFTEST_ASSERT(sound_beep(440, 500, 60) == 0);
+}
+
+/*
  * test-qemu gives the machine an e1000 card on QEMU's user-mode network
  * (slirp): DHCP hands out 10.0.2.15, the gateway 10.0.2.2 answers ping,
  * and 10.0.2.3 is a DNS server that forwards to the host's resolver.
@@ -605,6 +617,7 @@ void selftest_run(void)
     SELFTEST_RUN(test_m68k_guest_divide_64);
     SELFTEST_RUN(test_m68k_guest_fline_exception);
     SELFTEST_RUN(test_net);
+    SELFTEST_RUN(test_sound);
     SELFTEST_RUN(test_user_programs);
     SELFTEST_RUN(test_user_compiler);
 
