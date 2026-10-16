@@ -10,19 +10,24 @@
 #include "emu/m68k/vm.h"
 #include "kernel/lib/k_memory.h"
 
-/*
- * VIA1 (MOS 6522) register numbers; the registers sit 0x200 bytes apart
- * (Guide to the Macintosh Family Hardware, "VIA registers").
- */
-#define VIA_ORB 0
-#define VIA_ORA 1
-#define VIA_DDRB 2
-#define VIA_DDRA 3
-#define VIA_ORA_NH 15
+#define IWM_BASE 0x50F16000u
+#define IWM_SPAN 0x2000u
 
 #define VIA1_BASE 0x50F00000u
 #define VIA_SPAN 0x2000u
 #define VIA_REG_SHIFT 9
+#define VIA_REG_MASK 0xF
+#define VIA_REG_ORA 1
+#define VIA_REG_DDRA 3
+
+/* CPU 25 MHz (Mac IIci); the VIA clock is 783360 Hz, about CPU / 32. The ROM
+ * counts "Ticks" with a 60 Hz interrupt on VIA1 CA1 (Guide to the Macintosh
+ * Family Hardware, ch. 3). */
+#define CPU_PER_VIA 32u
+#define CPU_HZ 25000000u
+#define TICK_HZ 60u
+#define IRQ_LEVEL_VIA1 1
+#define TIME_SLICE 2000     /* CPU cycles between device updates */
 
 /* Port A bit 4 of VIA1 is the ROM overlay line (vOverlay): the ROM maps
  * itself to address 0 until software drives that pin low. */
@@ -54,22 +59,38 @@ static void bswap_write(uint8_t *p, int size, uint32_t value)
 static void log_unimpl(mac_t *mac, uint32_t addr, int size, bool write,
                        uint32_t value)
 {
-    mac_access_t *a = &mac->unimpl[mac->unimpl_total % MAC_UNIMPL_LOG_SIZE];
+    uint32_t pc = m68k_vm_get_reg(M68K_VM_REG_PC);
+    mac_access_t *a;
 
+    mac->unimpl_total++;
+    for (uint32_t i = 0; i < mac->unimpl_used; i++)
+    {
+        a = &mac->unimpl[i];
+        if (a->addr == addr && a->pc == pc && a->write == write)
+        {
+            a->count++;
+            return;
+        }
+    }
+    if (mac->unimpl_used >= MAC_UNIMPL_LOG_SIZE)
+    {
+        return;     /* the log keeps the first distinct accesses */
+    }
+    a = &mac->unimpl[mac->unimpl_used++];
     a->addr = addr;
-    a->pc = m68k_vm_get_reg(M68K_VM_REG_PC);
+    a->pc = pc;
     a->value = value;
     a->size = (uint8_t)size;
     a->write = write;
-    mac->unimpl_total++;
+    a->count = 1;
 }
 
 
 static void via1_update_overlay(mac_t *mac)
 {
     /* The line is pulled up; it only goes low when driven as an output. */
-    bool driven_low = (mac->via1_reg[VIA_DDRA] & VIA1_A_OVERLAY) &&
-                      !(mac->via1_reg[VIA_ORA] & VIA1_A_OVERLAY);
+    bool driven_low = (mac->via1.ddra & VIA1_A_OVERLAY) &&
+                      !(mac->via1.ora & VIA1_A_OVERLAY);
 
     mac->overlay = !driven_low;
 }
@@ -80,25 +101,23 @@ static uint32_t io_access(mac_t *mac, uint32_t addr, bool write, uint32_t value)
 {
     if (addr >= VIA1_BASE && addr < VIA1_BASE + VIA_SPAN)
     {
-        uint32_t reg = (addr - VIA1_BASE) >> VIA_REG_SHIFT;
+        uint32_t reg = ((addr - VIA1_BASE) >> VIA_REG_SHIFT) & VIA_REG_MASK;
 
-        if (reg == VIA_ORA_NH)
-        {
-            reg = VIA_ORA;
-        }
         if (write)
         {
-            mac->via1_reg[reg] = value & 0xFF;
-            via1_update_overlay(mac);
+            mac_via_write(&mac->via1, reg, value);
+            if (reg == VIA_REG_ORA || reg == VIA_REG_DDRA)
+            {
+                via1_update_overlay(mac);
+            }
             return 0;
         }
-        if (reg == VIA_ORA)
-        {
-            /* Output pins read back what was written, inputs read high. */
-            return ((mac->via1_reg[VIA_ORA] & mac->via1_reg[VIA_DDRA]) |
-                    ~mac->via1_reg[VIA_DDRA]) & 0xFF;
-        }
-        return mac->via1_reg[reg];
+        return mac_via_read(&mac->via1, reg);
+    }
+
+    if (addr >= IWM_BASE && addr < IWM_BASE + IWM_SPAN)
+    {
+        return mac_iwm_access(&mac->iwm, addr - IWM_BASE, write, value);
     }
 
     log_unimpl(mac, addr, 1, write, value);
@@ -198,6 +217,179 @@ static void bus_write(void *ctx, uint32_t addr, int size, uint32_t value)
 }
 
 
+/*
+ * UniversalInfo: the ROM's table of Macintosh models, found through the
+ * list of offsets at 0x408032C0 (GetHardwareInfo, ROM offset 0x2F18). Field
+ * offsets inside an entry, as read from that routine:
+ *   +0  offset of the address map   +16 hardware config flags
+ *   +18 product kind (word)         +24 address map flags
+ *   +28 ROM flags
+ */
+#define UINFO_LIST 0x408032C4u
+#define UINFO_MAP 0
+#define UINFO_HWCFG 16
+#define UINFO_KIND 18
+#define UINFO_MAPFLAGS 24
+#define UINFO_ROMFLAGS 28
+#define PRODUCT_KIND_IICI 0x0505   /* ID byte 5 (IIci), hardware set 5 */
+#define HWCFG_FPU_PRESENT 0x00000010u   /* only used if an FPU is emulated */
+
+#define BOOT_STACK 0x10000u
+#define BOOT_GLOBS_SIZE 0x1C
+#define RAM_SCRATCH_TOP 0x1000u
+
+/* RESET: what the ROM's hardware detection would have produced. */
+static void emul_reset(mac_t *mac)
+{
+    uint32_t list = UINFO_LIST;
+    uint32_t entry = 0;
+    uint32_t globs = mac->ram_size - BOOT_GLOBS_SIZE;
+
+    for (;;)
+    {
+        uint32_t off = m68k_vm_read32(list);
+
+        if (off == 0)
+        {
+            return;     /* model not found: leave the registers alone */
+        }
+        if (m68k_vm_read16(list + off + UINFO_KIND) == PRODUCT_KIND_IICI)
+        {
+            entry = list + off;
+            break;
+        }
+        list += 4;
+    }
+
+    /* The skipped VIA setup would have switched the ROM overlay off. */
+    mac->via1.ddra = VIA1_A_OVERLAY;
+    mac->via1.ora = 0;
+    via1_update_overlay(mac);
+    for (uint32_t a = mac->ram_size - RAM_SCRATCH_TOP; a < mac->ram_size; a++)
+    {
+        mac->ram[a] = 0;
+    }
+    /* Boot globals: RAM bank base and size, end of bank table, terminator. */
+    mac_bus_write(mac, globs + 0x00, 4, 0);
+    mac_bus_write(mac, globs + 0x04, 4, mac->ram_size);
+    mac_bus_write(mac, globs + 0x08, 4, 0xFFFFFFFF);
+    mac_bus_write(mac, globs + 0x0C, 4, 0);
+
+    m68k_vm_set_reg(M68K_VM_REG_D0, m68k_vm_read32(entry + UINFO_MAPFLAGS));
+    m68k_vm_set_reg(M68K_VM_REG_D0 + 1, m68k_vm_read32(entry + UINFO_ROMFLAGS));
+    m68k_vm_set_reg(M68K_VM_REG_D0 + 2,
+                    m68k_vm_read32(entry + UINFO_HWCFG) & ~HWCFG_FPU_PRESENT);
+    m68k_vm_set_reg(M68K_VM_REG_A0, entry + m68k_vm_read32(entry + UINFO_MAP));
+    m68k_vm_set_reg(M68K_VM_REG_A0 + 1, entry);
+    m68k_vm_set_reg(M68K_VM_REG_A0 + 6, globs);
+    m68k_vm_set_reg(M68K_VM_REG_A0 + 7, BOOT_STACK);
+}
+
+
+/*
+ * CLKNOMEM: the clock chip protocol, answered without the chip. The command
+ * is in D1: bit 7 = read, bits 6-2 = register. Registers 0-7 are the four
+ * bytes of the seconds counter (twice); 8-11 and 16-31 are parameter RAM;
+ * the "extended" command (bits 6-3 = 0111) addresses all 256 bytes of it
+ * (Inside Macintosh: Devices, "Clock chip"; Guide to the Macintosh Family
+ * Hardware, "Real-time clock").
+ */
+/* Parameter RAM byte 0x8A holds the Memory control panel's addressing mode
+ * (bit 0 = 32-bit). The value follows Basilisk II's behavior. */
+#define XPRAM_ADDRESSING 0x8A
+#define XPRAM_32BIT 0x05
+
+#define CLK_READ 0x80
+#define CLK_EXT_MASK 0x78
+#define CLK_EXT 0x38
+
+static void emul_clknomem(mac_t *mac)
+{
+    uint32_t cmd = m68k_vm_get_reg(M68K_VM_REG_D0 + 1);
+    uint32_t data = m68k_vm_get_reg(M68K_VM_REG_D0 + 2);
+    bool read = (cmd & CLK_READ) != 0;
+    uint8_t *cell = NULL;
+    uint8_t secs[4];
+
+    if ((cmd & CLK_EXT_MASK) == CLK_EXT)
+    {
+        cell = &mac->xpram[((cmd & 7) << 5) | ((cmd >> 10) & 0x1F)];
+    }
+    else
+    {
+        uint32_t reg = (cmd >> 2) & 0x1F;
+
+        if (reg < 8)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                secs[i] = (uint8_t)(mac->rtc_seconds >> (8 * i));
+            }
+            if (read)
+            {
+                data = secs[reg & 3];
+            }
+        }
+        else if (reg >= 0x10)
+        {
+            cell = &mac->xpram[reg];
+        }
+        else if (reg <= 0x0B)
+        {
+            cell = &mac->xpram[0x10 + reg - 8];     /* pre-extended cells */
+        }
+    }
+
+    if (cell == &mac->xpram[XPRAM_ADDRESSING])
+    {
+        /* The model only runs in 32-bit mode; whatever the ROM writes here,
+         * keep telling it that 32-bit addressing is selected. */
+        *cell = XPRAM_32BIT;
+    }
+    if (cell != NULL)
+    {
+        if (read)
+        {
+            data = *cell;
+        }
+        else
+        {
+            *cell = (uint8_t)data;
+            if (cell == &mac->xpram[XPRAM_ADDRESSING])
+            {
+                *cell = XPRAM_32BIT;
+            }
+        }
+    }
+    m68k_vm_set_reg(M68K_VM_REG_D0 + 2, data & 0xFF);
+    m68k_vm_set_reg(M68K_VM_REG_D0 + 1, data & 0xFF);
+    m68k_vm_set_reg(M68K_VM_REG_D0, 0);
+}
+
+
+static void emul_op(mac_t *mac, uint32_t pc, uint16_t op)
+{
+    switch (op)
+    {
+    case MAC_EMUL_OP_RESET:
+        emul_reset(mac);
+        break;
+    case MAC_EMUL_OP_HWINFO:
+        if ((m68k_vm_get_reg(M68K_VM_REG_D0 + 2) & 0xFF) == 0)
+        {
+            m68k_vm_set_reg(M68K_VM_REG_D0 + 2, PRODUCT_KIND_IICI);
+        }
+        break;
+    case MAC_EMUL_OP_CLKNOMEM:
+        emul_clknomem(mac);
+        break;
+    default:
+        log_unimpl(mac, pc, 2, false, op);
+        break;
+    }
+}
+
+
 static void insn_hook(void *ctx, uint32_t pc)
 {
     mac_t *mac = ctx;
@@ -205,11 +397,46 @@ static void insn_hook(void *ctx, uint32_t pc)
     mac->insn_count++;
     if (mac->trace_enabled)
     {
+        /* Remember which ROM blocks run, in the order they are first used. */
+        uint32_t block = pc >> MAC_FLOW_SHIFT;
+
+        if (pc >= MAC_ROM_BASE && pc < MAC_ROM_END &&
+            mac->flow_count < MAC_FLOW_SIZE &&
+            block != mac->flow_block[mac->flow_count ? mac->flow_count - 1 : 0])
+        {
+            bool seen = false;
+
+            for (uint32_t i = 0; i < mac->flow_count && !seen; i++)
+            {
+                seen = mac->flow_block[i] == block;
+            }
+            if (!seen)
+            {
+                mac->flow_block[mac->flow_count] = block;
+                mac->flow_insn[mac->flow_count++] = mac->insn_count;
+            }
+        }
         mac_trace_t *t = &mac->trace[mac->trace_next % MAC_TRACE_SIZE];
 
         t->pc = pc;
         t->opcode = (uint16_t)m68k_vm_read16(pc);
         mac->trace_next++;
+    }
+
+    uint16_t opcode = (uint16_t)m68k_vm_read16(pc);
+
+    if ((opcode & 0xFFC0) == 0xF000 && mac->trace_enabled)
+    {
+        /* PMMU general instruction (coprocessor id 0): remember it. */
+        mac->pmmu_pc[mac->pmmu_total % 16] = pc;
+        mac->pmmu_ext[mac->pmmu_total % 16] = (uint16_t)m68k_vm_read16(pc + 2);
+        mac->pmmu_total++;
+    }
+
+    if (opcode >= MAC_EMUL_OP_BASE && opcode <= MAC_EMUL_OP_LAST)
+    {
+        emul_op(mac, pc, opcode);
+        m68k_vm_set_reg(M68K_VM_REG_PC, pc + 2);
     }
 }
 
@@ -239,27 +466,73 @@ int mac_init(mac_t *mac, uint8_t *ram, uint32_t ram_size,
     bus.ctx = mac;
     m68k_vm_set_bus(&bus);
     m68k_vm_set_insn_hook(insn_hook, mac);
+    m68k_vm_set_aline_traps(false);    /* the ROM has its own trap dispatcher */
     return 0;
 }
 
 
 int mac_reset(mac_t *mac)
 {
-    k_memset(mac->via1_reg, 0, sizeof mac->via1_reg);
+    k_memset(&mac->via1, 0, sizeof mac->via1);
+    mac->via1.in_a = 0xFF;
+    mac->via1.in_b = 0xFF;
+    mac->cycles = 0;
+    mac->via_cycles = 0;
+    mac->next_tick = CPU_HZ / TICK_HZ;
+    k_memset(&mac->iwm, 0, sizeof mac->iwm);
     mac->overlay = true;
     mac->insn_count = 0;
+    mac->flow_count = 0;
+    mac->pmmu_total = 0;
     mac->trace_next = 0;
     mac->unimpl_total = 0;
+    mac->unimpl_used = 0;
     m68k_vm_reset_cpu();
     mac->insn_count = 0;    /* the reset itself runs one instruction */
     return 0;
 }
 
 
+/* Let time pass for the chips after the CPU ran 'used' cycles. */
+static void advance_devices(mac_t *mac, int used)
+{
+    uint64_t via_now;
+
+    mac->cycles += (uint64_t)used;
+    via_now = mac->cycles / CPU_PER_VIA;
+    if (via_now > mac->via_cycles / CPU_PER_VIA)
+    {
+        mac_via_advance(&mac->via1,
+                        (uint32_t)(via_now - mac->via_cycles / CPU_PER_VIA));
+    }
+    mac->via_cycles = mac->cycles;
+
+    while (mac->cycles >= mac->next_tick)
+    {
+        mac_via_set_flag(&mac->via1, VIA_INT_CA1);
+        mac->next_tick += CPU_HZ / TICK_HZ;
+    }
+    m68k_vm_set_irq(mac_via_irq(&mac->via1) ? IRQ_LEVEL_VIA1 : 0);
+}
+
+
 int mac_run(mac_t *mac, int cycles)
 {
-    (void)mac;
-    return m68k_vm_run(cycles);
+    int used = 0;
+
+    while (used < cycles && !m68k_vm_halted())
+    {
+        int slice = cycles - used < TIME_SLICE ? cycles - used : TIME_SLICE;
+        int ran = m68k_vm_run(slice);
+
+        if (ran <= 0)
+        {
+            ran = 1;
+        }
+        used += ran;
+        advance_devices(mac, ran);
+    }
+    return used;
 }
 
 

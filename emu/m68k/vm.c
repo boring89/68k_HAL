@@ -40,6 +40,7 @@ static bool vm_core_initialized;
 static m68k_vm_write_watch_t vm_write_watch;
 static m68k_vm_bus_t vm_bus;
 static bool vm_has_bus;
+static bool vm_aline_intercept = true;
 static m68k_vm_insn_hook_t vm_insn_hook;
 static void *vm_insn_hook_ctx;
 
@@ -184,7 +185,7 @@ static void raise_line_f(uint32_t pc)
 
 static bool is_line_a(uint16_t opcode)
 {
-    return (opcode & OPCODE_LINE_MASK) == OPCODE_LINE_A;
+    return vm_aline_intercept && (opcode & OPCODE_LINE_MASK) == OPCODE_LINE_A;
 }
 
 
@@ -269,6 +270,12 @@ int m68k_vm_reset_cpu(void)
 }
 
 
+void m68k_vm_set_aline_traps(bool intercept)
+{
+    vm_aline_intercept = intercept;
+}
+
+
 void m68k_vm_set_irq(int level)
 {
     m68k_set_irq(level);
@@ -291,6 +298,7 @@ int m68k_vm_init(uint8_t *ram, uint32_t size, m68k_vm_cpu_t cpu)
     vm_ram = ram;
     vm_ram_size = size;
     vm_halted = false;
+    vm_aline_intercept = true;
     m68k_trap_init();
 
     if (!vm_core_initialized)

@@ -60,6 +60,13 @@ void m68k_vm_set_bus(const m68k_vm_bus_t *bus);
 typedef void (*m68k_vm_insn_hook_t)(void *ctx, uint32_t pc);
 void m68k_vm_set_insn_hook(m68k_vm_insn_hook_t hook, void *ctx);
 
+/*
+ * By default A-line opcodes are consumed by the trap table (trap.h). A
+ * guest that has its own trap dispatcher (the Mac ROM) wants the CPU to take
+ * the line-A exception instead: pass false.
+ */
+void m68k_vm_set_aline_traps(bool intercept);
+
 /* Reset the CPU, which loads SSP and PC from the vectors at address 0 and 4
  * as the bus presents them. Unlike m68k_vm_reset() it writes nothing. */
 int m68k_vm_reset_cpu(void);

@@ -109,6 +109,66 @@ static void test_unimplemented_io_is_logged(void)
     TEST_ASSERT_EQ_INT(0, mac_bus_read(&mac, 0xA0000000u, 4));
     TEST_ASSERT_EQ_INT(4, mac_unimpl_total(&mac));
     TEST_ASSERT_EQ_INT(0x50F12340, mac.unimpl[0].addr);
+    TEST_ASSERT_EQ_INT(4, mac.unimpl_used);
+}
+
+static void test_via_timer_and_interrupts(void)
+{
+    mac_via_t via = { 0 };
+
+    /* Enable T1 interrupt, start a 100-tick one-shot timer. */
+    mac_via_write(&via, 14, 0x80 | VIA_INT_T1);
+    mac_via_write(&via, 4, 100);
+    mac_via_write(&via, 5, 0);
+    TEST_ASSERT(!mac_via_irq(&via));
+
+    mac_via_advance(&via, 50);
+    TEST_ASSERT_EQ_INT(50, mac_via_read(&via, 4));
+    TEST_ASSERT(!mac_via_irq(&via));
+
+    mac_via_advance(&via, 60);
+    TEST_ASSERT(mac_via_irq(&via));
+    TEST_ASSERT(mac_via_read(&via, 13) & 0x80);
+
+    /* Reading the low counter byte clears the flag. */
+    mac_via_read(&via, 4);
+    TEST_ASSERT(!mac_via_irq(&via));
+
+    /* A masked source does not raise the IRQ line but shows in IFR. */
+    mac_via_set_flag(&via, VIA_INT_CA1);
+    TEST_ASSERT(!mac_via_irq(&via));
+    TEST_ASSERT(mac_via_read(&via, 13) & VIA_INT_CA1);
+    mac_via_write(&via, 13, VIA_INT_CA1);
+    TEST_ASSERT(!(mac_via_read(&via, 13) & VIA_INT_CA1));
+}
+
+static void test_via_ports(void)
+{
+    mac_via_t via = { 0 };
+
+    via.in_a = 0xFF;
+    mac_via_write(&via, 3, 0x0F);       /* low nibble output */
+    mac_via_write(&via, 1, 0x05);
+    TEST_ASSERT_EQ_INT(0xF5, mac_via_read(&via, 1));
+}
+
+static void test_iwm_mode_readback(void)
+{
+    mac_iwm_t iwm = { 0 };
+
+    /* Lines 6 (Q6) and 7 (Q7) on, then write the mode register. */
+    mac_iwm_access(&iwm, 13 * 0x200, false, 0);
+    mac_iwm_access(&iwm, 15 * 0x200, true, 0x17);
+    /* Q7 off: status register shows the mode bits and the sense line. */
+    TEST_ASSERT_EQ_INT(0x80 | 0x17, mac_iwm_access(&iwm, 14 * 0x200, false, 0));
+}
+
+static void test_rom_patch_rejects_other_roms(void)
+{
+    static uint8_t other[0x80000];
+
+    TEST_ASSERT_EQ_INT(-1, mac_rom_patch(other, sizeof other));
+    TEST_ASSERT_EQ_INT(-1, mac_rom_patch(other, 0x1000));
 }
 
 int main(void)
@@ -117,6 +177,10 @@ int main(void)
     TEST_RUN(test_overlay_and_rom_mirror);
     TEST_RUN(test_run_clears_overlay);
     TEST_RUN(test_unimplemented_io_is_logged);
+    TEST_RUN(test_via_timer_and_interrupts);
+    TEST_RUN(test_via_ports);
+    TEST_RUN(test_iwm_mode_readback);
+    TEST_RUN(test_rom_patch_rejects_other_roms);
 
     return TEST_REPORT("mac");
 }

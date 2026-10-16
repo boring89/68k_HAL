@@ -32,6 +32,8 @@
 
 #define MAC_UNIMPL_LOG_SIZE 64
 #define MAC_TRACE_SIZE 4096
+#define MAC_FLOW_SIZE 1024       /* ROM blocks remembered in first-seen order */
+#define MAC_FLOW_SHIFT 6         /* block = 64 bytes */
 
 typedef struct
 {
@@ -40,6 +42,7 @@ typedef struct
     uint32_t value;     /* value written; 0 for reads */
     uint8_t size;
     bool write;
+    uint32_t count;     /* times this exact access (address, pc, r/w) happened */
 } mac_access_t;
 
 typedef struct
@@ -47,6 +50,25 @@ typedef struct
     uint32_t pc;
     uint16_t opcode;
 } mac_trace_t;
+
+/* MOS 6522 VIA (see via.c). */
+typedef struct
+{
+    uint8_t ora, orb, ddra, ddrb;
+    uint8_t acr, pcr, ifr, ier, sr;
+    uint16_t t1_latch, t2_latch;
+    uint16_t t1_counter, t2_counter;
+    bool t1_running;            /* T1 has been started and not yet timed out */
+    bool t2_running;
+    uint8_t in_a, in_b;         /* levels the outside world drives on the pins */
+} mac_via_t;
+
+/* Apple IWM floppy controller, reduced to what the ROM's probe needs. */
+typedef struct
+{
+    uint8_t lines;      /* bit n = state of IWM line n (see iwm.c) */
+    uint8_t mode;       /* mode register, 5 bits */
+} mac_iwm_t;
 
 typedef struct
 {
@@ -62,10 +84,25 @@ typedef struct
     uint32_t insn_count;
     mac_trace_t trace[MAC_TRACE_SIZE];
     uint32_t trace_next;        /* total entries written, ring index = % size */
+    uint32_t flow_block[MAC_FLOW_SIZE];     /* ROM block numbers, first-seen order */
+    uint32_t flow_insn[MAC_FLOW_SIZE];      /* instruction count at first sight */
+    uint32_t flow_count;
+    uint32_t pmmu_pc[16];       /* the last PMMU instructions: address, */
+    uint16_t pmmu_ext[16];      /* extension word */
+    uint32_t pmmu_total;
     mac_access_t unimpl[MAC_UNIMPL_LOG_SIZE];
-    uint32_t unimpl_total;
+    uint32_t unimpl_total;      /* all accesses */
+    uint32_t unimpl_used;       /* distinct entries in unimpl[] */
 
-    uint32_t via1_reg[16];      /* raw register file of VIA1 (see mac.c) */
+    uint8_t xpram[256];         /* parameter RAM kept by the clock chip */
+    uint32_t rtc_seconds;       /* seconds since 1 Jan 1904, set by the host */
+
+    mac_iwm_t iwm;
+
+    mac_via_t via1;
+    uint64_t cycles;            /* CPU cycles since reset */
+    uint64_t via_cycles;        /* part of 'cycles' already given to the VIAs */
+    uint64_t next_tick;         /* cycle of the next 60 Hz tick */
 } mac_t;
 
 /*
@@ -74,6 +111,42 @@ typedef struct
  */
 int mac_init(mac_t *mac, uint8_t *ram, uint32_t ram_size,
              const uint8_t *rom, uint32_t rom_size);
+
+/*
+ * Patch a private copy of the Mac IIci ROM (checksum 368CADFE) so that it
+ * skips the hardware probing and calls into this model instead; see
+ * emu/mac/rom_patch.c. 'rom' is modified in place. Returns 0, or -1 if the
+ * ROM is not the supported one.
+ */
+int mac_rom_patch(uint8_t *rom, uint32_t size);
+
+/* Emulated opcodes ($71xx are illegal 68k instructions, so no real code
+ * uses them; the patched ROM places them where native code must run). */
+#define MAC_EMUL_OP_BASE 0x7100
+#define MAC_EMUL_OP_LAST 0x7139
+#define MAC_EMUL_OP_RESET 0x7103
+#define MAC_EMUL_OP_CLKNOMEM 0x7104
+#define MAC_EMUL_OP_HWINFO 0x7105
+
+/* VIA registers: 'reg' is 0-15. */
+uint32_t mac_via_read(mac_via_t *via, uint32_t reg);
+void mac_via_write(mac_via_t *via, uint32_t reg, uint32_t value);
+/* Advance the timers by 'ticks' VIA clock cycles. */
+void mac_via_advance(mac_via_t *via, uint32_t ticks);
+/* Raise an interrupt flag (VIA_INT_*). */
+void mac_via_set_flag(mac_via_t *via, uint8_t mask);
+/* True while the IRQ output is active. */
+bool mac_via_irq(const mac_via_t *via);
+
+#define VIA_INT_CA2 0x01
+#define VIA_INT_CA1 0x02
+#define VIA_INT_SR 0x04
+#define VIA_INT_T2 0x20
+#define VIA_INT_T1 0x40
+
+/* IWM registers: one byte access at 'offset' from 0x50F16000. */
+uint32_t mac_iwm_access(mac_iwm_t *iwm, uint32_t offset, bool write,
+                        uint32_t value);
 
 /* Power-on reset: overlay on, CPU reads SSP/PC from the ROM. */
 int mac_reset(mac_t *mac);
