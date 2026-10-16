@@ -24,6 +24,13 @@
 #define SR_SUPERVISOR 0x2000
 #define SR_TRACE 0x8000
 
+/*
+ * F-line opcodes carry a coprocessor id in bits 11-9 (M68030 User's Manual,
+ * 6.1): 0 is the on-chip PMMU, which Musashi emulates; 1 is the FPU, which
+ * the guest does not have. Any other id is also treated as absent.
+ */
+#define OPCODE_CPID_MASK 0x0E00
+
 #define MAX_TRAP_CHAIN 65536
 
 static uint8_t *vm_ram;
@@ -31,10 +38,18 @@ static uint32_t vm_ram_size;
 static bool vm_halted;
 static bool vm_core_initialized;
 static m68k_vm_write_watch_t vm_write_watch;
+static m68k_vm_bus_t vm_bus;
+static bool vm_has_bus;
+static m68k_vm_insn_hook_t vm_insn_hook;
+static void *vm_insn_hook_ctx;
 
 
 uint32_t m68k_vm_read8(uint32_t addr)
 {
+    if (vm_has_bus)
+    {
+        return vm_bus.read(vm_bus.ctx, addr, 1);
+    }
     if (addr >= vm_ram_size)
     {
         return 0;
@@ -45,18 +60,31 @@ uint32_t m68k_vm_read8(uint32_t addr)
 
 uint32_t m68k_vm_read16(uint32_t addr)
 {
+    if (vm_has_bus)
+    {
+        return vm_bus.read(vm_bus.ctx, addr, 2);
+    }
     return (m68k_vm_read8(addr) << 8) | m68k_vm_read8(addr + 1);
 }
 
 
 uint32_t m68k_vm_read32(uint32_t addr)
 {
+    if (vm_has_bus)
+    {
+        return vm_bus.read(vm_bus.ctx, addr, 4);
+    }
     return (m68k_vm_read16(addr) << 16) | m68k_vm_read16(addr + 2);
 }
 
 
 void m68k_vm_write8(uint32_t addr, uint32_t value)
 {
+    if (vm_has_bus)
+    {
+        vm_bus.write(vm_bus.ctx, addr, 1, value);
+        return;
+    }
     if (addr < vm_ram_size)
     {
         vm_ram[addr] = (uint8_t)value;
@@ -70,6 +98,11 @@ void m68k_vm_write8(uint32_t addr, uint32_t value)
 
 void m68k_vm_write16(uint32_t addr, uint32_t value)
 {
+    if (vm_has_bus)
+    {
+        vm_bus.write(vm_bus.ctx, addr, 2, value);
+        return;
+    }
     m68k_vm_write8(addr, value >> 8);
     m68k_vm_write8(addr + 1, value);
 }
@@ -77,6 +110,11 @@ void m68k_vm_write16(uint32_t addr, uint32_t value)
 
 void m68k_vm_write32(uint32_t addr, uint32_t value)
 {
+    if (vm_has_bus)
+    {
+        vm_bus.write(vm_bus.ctx, addr, 4, value);
+        return;
+    }
     m68k_vm_write16(addr, value >> 16);
     m68k_vm_write16(addr + 2, value);
 }
@@ -144,6 +182,19 @@ static void raise_line_f(uint32_t pc)
 }
 
 
+static bool is_line_a(uint16_t opcode)
+{
+    return (opcode & OPCODE_LINE_MASK) == OPCODE_LINE_A;
+}
+
+
+static bool is_absent_coprocessor(uint16_t opcode)
+{
+    return (opcode & OPCODE_LINE_MASK) == OPCODE_LINE_F &&
+           (opcode & OPCODE_CPID_MASK) != 0;
+}
+
+
 /*
  * Called by Musashi before every instruction (see m68kconf.h).
  *
@@ -155,14 +206,20 @@ static void raise_line_f(uint32_t pc)
  */
 void m68k_vm_instr_hook(unsigned int pc)
 {
+    if (vm_insn_hook != NULL)
+    {
+        vm_insn_hook(vm_insn_hook_ctx, pc);
+        pc = m68k_get_reg(NULL, M68K_REG_PC);
+    }
+
     uint16_t opcode = (uint16_t)m68k_vm_read16(pc);
 
     for (uint32_t i = 0;
-         ((opcode & OPCODE_LINE_MASK) == OPCODE_LINE_A ||
-          (opcode & OPCODE_LINE_MASK) == OPCODE_LINE_F) && i < MAX_TRAP_CHAIN;
+         (is_line_a(opcode) || is_absent_coprocessor(opcode)) &&
+         i < MAX_TRAP_CHAIN;
          i++)
     {
-        if ((opcode & OPCODE_LINE_MASK) == OPCODE_LINE_F)
+        if (is_absent_coprocessor(opcode))
         {
             raise_line_f(pc);
             pc = m68k_get_reg(NULL, M68K_REG_PC);
@@ -182,6 +239,39 @@ void m68k_vm_instr_hook(unsigned int pc)
         vm_halted = true;
         m68k_end_timeslice();
     }
+}
+
+
+void m68k_vm_set_bus(const m68k_vm_bus_t *bus)
+{
+    vm_has_bus = bus != NULL;
+    if (bus != NULL)
+    {
+        vm_bus = *bus;
+    }
+}
+
+
+void m68k_vm_set_insn_hook(m68k_vm_insn_hook_t hook, void *ctx)
+{
+    vm_insn_hook = hook;
+    vm_insn_hook_ctx = ctx;
+}
+
+
+int m68k_vm_reset_cpu(void)
+{
+    vm_halted = false;
+    m68k_trap_clear_log();
+    m68k_pulse_reset();
+    m68k_execute(1);
+    return 0;
+}
+
+
+void m68k_vm_set_irq(int level)
+{
+    m68k_set_irq(level);
 }
 
 

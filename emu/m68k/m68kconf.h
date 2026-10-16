@@ -18,8 +18,8 @@
 /* 68040 support is not needed (target is 68030) and pulls in more FPU code. */
 #define M68K_EMULATE_040            0
 
-/* No PMMU; Mac OS 7-era software does not require it for our purposes. */
-#define M68K_EMULATE_PMMU           0
+/* 68030 on-chip PMMU: the Mac ROM programs TC/CRP/TT registers (emu/mac). */
+#define M68K_EMULATE_PMMU           1
 
 /* Raise address errors on odd word/long accesses (68000 behavior). */
 #define M68K_EMULATE_ADDRESS_ERROR  1

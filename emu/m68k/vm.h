@@ -36,6 +36,37 @@ typedef enum
 } m68k_vm_reg_t;
 
 
+/*
+ * Optional memory bus. When set, every guest access (by the CPU or by
+ * the m68k_vm_read and m68k_vm_write functions) goes through it instead of the flat RAM array, so a
+ * machine can map RAM, ROM and devices at its own addresses. 'size' is 1, 2
+ * or 4 bytes; the bus must handle unaligned and out-of-range addresses
+ * itself. Pass NULL to go back to flat RAM.
+ */
+typedef struct
+{
+    uint32_t (*read)(void *ctx, uint32_t addr, int size);
+    void (*write)(void *ctx, uint32_t addr, int size, uint32_t value);
+    void *ctx;
+} m68k_vm_bus_t;
+
+void m68k_vm_set_bus(const m68k_vm_bus_t *bus);
+
+/*
+ * Optional hook called before every instruction with its address. It may
+ * inspect or change the guest state, including PC (to skip or replace the
+ * instruction). Pass NULL to remove it.
+ */
+typedef void (*m68k_vm_insn_hook_t)(void *ctx, uint32_t pc);
+void m68k_vm_set_insn_hook(m68k_vm_insn_hook_t hook, void *ctx);
+
+/* Reset the CPU, which loads SSP and PC from the vectors at address 0 and 4
+ * as the bus presents them. Unlike m68k_vm_reset() it writes nothing. */
+int m68k_vm_reset_cpu(void);
+
+/* Raise interrupt priority level 'level' (0 = none, 1..7). */
+void m68k_vm_set_irq(int level);
+
 /* Attach guest RAM and select the CPU model. Returns 0, or -1 on bad args. */
 int m68k_vm_init(uint8_t *ram, uint32_t size, m68k_vm_cpu_t cpu);
 
