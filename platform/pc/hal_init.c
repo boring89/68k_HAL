@@ -14,6 +14,7 @@
 #include "platform/pc/acpi/acpi.h"
 #include "platform/pc/boot/multiboot.h"
 #include "platform/pc/interrupt/pic.h"
+#include "platform/pc/smp/smp.h"
 #include "platform/pc/video/framebuffer.h"
 #include "platform/pc/timer/pit.h"
 #include "platform/pc/timer/tsc.h"
@@ -160,6 +161,8 @@ void hal_init(void)
         kernel_printf("TSC: %u kHz\n", tsc_khz());
     else
         kernel_log(LOG_WARN, "No usable TSC");
+
+    kernel_printf("CPUs online: %u\n", smp_start());
 
     if (ps2_mouse_init() == 0)
         kernel_log(LOG_INFO, "PS/2 mouse initialized");

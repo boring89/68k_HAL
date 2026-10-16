@@ -53,6 +53,15 @@ static void test_acpi_tables(void)
     SELFTEST_ASSERT(info->ioapic_count >= 1);
 }
 
+/* test-qemu starts QEMU with -smp 4: every processor must have reported. */
+static void test_smp_processors_online(void)
+{
+    const hal_acpi_info_t *info = hal_acpi_info();
+
+    SELFTEST_ASSERT(info != NULL && info->cpu_count == 4);
+    SELFTEST_ASSERT(hal_cpu_online_count() == 4);
+}
+
 /* The nanosecond clock must agree with the PIT ticks it was calibrated on. */
 static void test_hal_timer_ns(void)
 {
@@ -238,6 +247,7 @@ void selftest_platform_run(void)
     SELFTEST_RUN(test_hal_timer_frequency);
     SELFTEST_RUN(test_hal_timer_ns);
     SELFTEST_RUN(test_acpi_tables);
+    SELFTEST_RUN(test_smp_processors_online);
     SELFTEST_RUN(test_hal_irq_register_rejects);
     SELFTEST_RUN(test_pic_boot_mask);
     SELFTEST_RUN(test_ps2_mouse_irq);

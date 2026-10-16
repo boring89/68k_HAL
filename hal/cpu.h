@@ -77,6 +77,14 @@ typedef struct
  */
 void hal_cpu_init(void);
 
+/*
+ * Number of processors that are running, the boot CPU included (1 if the
+ * machine has one or the others could not be started). The extra ones
+ * only report and halt; the kernel runs on the boot CPU. Implemented by
+ * the platform (platform/<platform>/smp/smp.c).
+ */
+unsigned int hal_cpu_online_count(void);
+
 /* The result of hal_cpu_init(). */
 const hal_cpu_info_t *hal_cpu_info(void);
 

@@ -338,7 +338,7 @@ test-sst: $(BUILD)/host/sst_run
 
 # Kernel built with -DKERNEL_SELFTEST, booted directly by QEMU (no ISO).
 # QEMU exits with 33 on PASS (see kernel/test/selftest.c).
-QEMU_TEST_FLAGS := -display none -serial stdio -no-reboot \
+QEMU_TEST_FLAGS := -display none -serial stdio -no-reboot -smp 4 \
 	-device isa-debug-exit,iobase=0xf4,iosize=0x04
 
 # Boot module for the selftest: -initrd "<file> <name>". Fixed content, so
