@@ -240,7 +240,7 @@ menuentry "mac" {
 
 **一秒中斷與時鐘**：模型現在每數 60 個 60 Hz tick 就讓 `rtc_seconds` 加 1，並在 VIA1 的 CA2（時鐘晶片的「每秒中斷」，Guide to the Macintosh Family Hardware）設旗標。System 的 `Time` 全域變數靠這個中斷前進，所以選單列的時鐘會走（以前時鐘是凍結的）。
 
-**實時節流**（`kernel/mac/machine.c` 的 `pace`）：互動執行（`mac` 指令，不是測試）時，每個 frame（416000 個 CPU 週期 = 16.64 ms 的 Mac 時間）結束後等到實際時間也過了 16.64 ms 才跑下一個 frame；所以 Mac 的 60 Hz、一秒中斷、聲音速度都和真實時間一致（實測 600 frames = 9984 ms）。主機太慢時就全速跑、不追趕；停頓超過 100 ms 就重新對時。互動執行也用真實的 UTC 時間當 Mac 的起始時間（Mac 的紀元是 1904-01-01，與 Unix 紀元差 2082844800 秒）；測試仍用固定日期，結果可重複。每 600 個 frame 在 serial 印 `mac: 600 frames, 9984 ms`。
+**實時節流**（`kernel/mac/machine.c` 的 `pace`）：互動執行（`mac` 指令，不是測試）時，每個 frame（416000 個 CPU 週期 = 16.64 ms 的 Mac 時間）結束後等到實際時間也過了 16.64 ms 才跑下一個 frame；所以 Mac 的 60 Hz、一秒中斷、聲音速度都和真實時間一致（實測 600 frames = 9984 ms）。主機太慢時就全速跑、不追趕；停頓超過 100 ms 就重新對時。互動執行也用真實的 UTC 時間當 Mac 的起始時間（Mac 的紀元是 1904-01-01，與 Unix 紀元差 2082844800 秒）；測試仍用固定日期，結果可重複。每 600 個 frame 在 serial 印 `mac: 600 frames, 9984 ms, clock 3750000000`（最後是 Mac 的 `Time` 全域變數）。`make test-mac-clock`（本機）檢查 frame 速率在 60.1/s 的 3% 內，且 Mac 的時鐘與真實 UTC 相差不到 5 秒（實測落後約 2.5 秒：開機初期 VIA 的一秒中斷還沒啟用，那幾秒系統沒有計到）。
 
 **ATA 寫入**：`block_write` 與 ATA 驅動的 WRITE SECTORS（PIO）＋FLUSH CACHE。`mac` 指令的磁碟選擇：
 - 有 boot module `mac_disk`：記憶體覆蓋層（改動只留在記憶體，原本的行為）。

@@ -527,10 +527,15 @@ int mac_machine_run(uint32_t frames)
         {
             pace(&paced_start, frame);
 
-            /* A report every 600 frames (10 s): how the Mac's time compares with ours. */
+            /*
+             * A report every 600 frames (10 s): how the Mac's time compares with ours
+             * (frames and real milliseconds), and what its clock says (the Time
+             * global, low memory 0x20C: seconds since 1904).
+             */
             if (frame % 600 == 0)
-                kernel_printf("mac: %u frames, %u ms\n", frame,
-                              (unsigned int)((hal_timer_ns() - paced_start) / 1000000u));
+                kernel_printf("mac: %u frames, %u ms, clock %u\n", frame,
+                              (unsigned int)((hal_timer_ns() - paced_start) / 1000000u),
+                              (unsigned int)mac_bus_read(mac, 0x20C, 4));
         }
     }
     if (mac_render(mac, pixels) == 0)

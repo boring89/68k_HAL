@@ -11,7 +11,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: test-video test-mac-sound test-mac-persist sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -320,6 +320,19 @@ test-mac-persist:
 		hls -la ":Desktop Folder" | grep -q "untitled folder"); then \
 		echo "test-mac-persist: PASS (the new folder is on the disk)"; \
 	else echo "test-mac-persist: FAIL (no new folder on the disk)"; exit 1; fi
+
+# The Mac's real-time behaviour: the normal kernel with the Mac modules runs
+# the Mac for a while; its frames must follow the real clock and its own clock
+# (the system's Time global) must show the real time. Local only.
+test-mac-clock: $(BUILD)/kernel.elf
+	@if [ ! -f "$(MAC_ROM)" ] || [ ! -f "$(MAC_DISK)" ]; then \
+		echo "test-mac-clock: SKIP (no ROM or disk; set MAC_ROM and MAC_DISK)"; exit 0; fi; \
+	rm -rf $(BUILD)/mac/clock; mkdir -p $(BUILD)/mac/clock/boot/grub; \
+	cp $(BUILD)/kernel.elf $(BUILD)/mac/clock/boot/; \
+	cp "$(MAC_ROM)" $(BUILD)/mac/clock/mac_rom; cp "$(MAC_DISK)" $(BUILD)/mac/clock/mac_disk; \
+	printf 'set default=0\nset timeout=0\nmenuentry "mac" {\n  multiboot /boot/kernel.elf\n  module /mac_rom mac_rom\n  module /mac_disk mac_disk\n  boot\n}\n' > $(BUILD)/mac/clock/boot/grub/grub.cfg; \
+	grub-mkrescue -o $(BUILD)/mac/clock.iso $(BUILD)/mac/clock > /dev/null 2>&1 || exit 1; \
+	python3 -I tools/mac_clock_check.py $(BUILD)/mac/clock.iso
 
 # A screenshot of the Mac running in the kernel under QEMU (GRUB graphics
 # mode, 640x480): build/mac/qemu_screen.ppm. MAC_SHOT_FRAMES frames (about
