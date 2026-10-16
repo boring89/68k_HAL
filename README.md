@@ -65,10 +65,11 @@ The goal is to preserve the simplicity, usability, and software philosophy of th
 | `xorriso` | `xorriso` | Used by `grub-mkrescue` to write the ISO |
 | `mformat` | `mtools` | Used by `grub-mkrescue` to build the EFI image |
 | `qemu-system-i386` | `qemu-system-x86` | Run the kernel and the in-kernel self tests |
-| `python3` (optional) | `python3` | `tools/boot_log.py`: capture and compare boot logs when refactoring |
+| `python3` | `python3` | Generate the test disk images (`tools/make_*_image.py`); also the optional `tools/boot_log.py` and `tools/fb_check.py` |
+| `hformat`, `hcopy`, ... | `hfsutils` | Build the HFS test volume (`tools/make_hfs_image.sh`). It keeps its "current volume" in `~/.hcwd`; the script uses a temporary `HOME` so yours is untouched |
 
 ```bash
-sudo apt install build-essential nasm binutils binutils-m68k-linux-gnu grub2-common grub-pc-bin xorriso mtools qemu-system-x86
+sudo apt install build-essential nasm binutils binutils-m68k-linux-gnu grub2-common grub-pc-bin xorriso mtools qemu-system-x86 python3 hfsutils
 ```
 
 ### Commands
