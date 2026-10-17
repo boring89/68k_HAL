@@ -141,6 +141,9 @@ int multiboot2_init(uint32_t address);
 const char *multiboot_cmdline(void);
 
 /* Start and size of the raw Multiboot2 tag list, or 0 for Multiboot 1. */
+/* Physical address of the multiboot_info_t that multiboot_get_info returns (a built one for Multiboot2). */
+uint32_t multiboot_info_phys(void);
+
 uint32_t multiboot_raw_base(void);
 uint32_t multiboot_raw_size(void);
 

@@ -5,6 +5,8 @@
 
 #include "multiboot.h"
 
+#include "hal/mmu.h"
+
 #include "kernel/lib/k_memory.h"
 
 #include <stddef.h>
@@ -14,6 +16,27 @@
     (sizeof(multiboot_mmap_entry_t) - sizeof(uint32_t))
 
 static const multiboot_info_t *multiboot_info;
+
+/*
+ * Every address in the boot structures is physical. hal_phys_to_virt gives the pointer to read it
+ * (the same address on a 32-bit kernel and on the host tests; the direct map on a 64-bit kernel).
+ */
+#define BOOT_PTR(address) ((const void *)hal_phys_to_virt(address))
+
+/*
+ * The physical address of an object in the kernel image (the tables multiboot2_init builds):
+ * HAL_KERNEL_OFFSET is how far above its physical address a 64-bit kernel is linked.
+ */
+static uint32_t image_phys(const void *object)
+{
+#ifdef HAL_KERNEL_OFFSET
+    return (uint32_t)((uintptr_t)object - HAL_KERNEL_OFFSET);
+#else
+    return (uint32_t)(uintptr_t)object;
+#endif
+}
+
+static uint32_t info_phys;
 
 /*
  * The kernel command line, copied: the loader's memory is not mapped once paging is on, and
@@ -60,7 +83,8 @@ static uintptr_t mmap_end;
 
 void multiboot_init(uint32_t address)
 {
-    multiboot_info = (const multiboot_info_t *)(uintptr_t)address;
+    multiboot_info = (const multiboot_info_t *)BOOT_PTR(address);
+    info_phys = address;
 
     raw_base = 0;
     raw_size = 0;
@@ -72,11 +96,11 @@ void multiboot_init(uint32_t address)
 
     /* flags bit 2 (Multiboot 0.6.96 3.3): the cmdline field points at a string. */
     if ((multiboot_info->flags & (1u << 2)) && multiboot_info->cmdline != 0)
-        copy_cmdline((const char *)(uintptr_t)multiboot_info->cmdline, CMDLINE_MAX);
+        copy_cmdline((const char *)BOOT_PTR(multiboot_info->cmdline), CMDLINE_MAX);
 
     if (multiboot_info->flags & MULTIBOOT_INFO_MEM_MAP)
     {
-        mmap_start = multiboot_info->mmap_addr;
+        mmap_start = (uintptr_t)BOOT_PTR(multiboot_info->mmap_addr);
         mmap_end = mmap_start + multiboot_info->mmap_length;
     }
 }
@@ -181,13 +205,14 @@ typedef struct
 
 int multiboot2_init(uint32_t address)
 {
-    const uint8_t *base = (const uint8_t *)(uintptr_t)address;
+    const uint8_t *base = (const uint8_t *)BOOT_PTR(address);
     uint32_t total = ((const uint32_t *)base)[0];
 
     k_memset(&synth_info, 0, sizeof(synth_info));
 
     raw_base = address;
     raw_size = total;
+    info_phys = image_phys(&synth_info);
     rsdp_copy = NULL;
     cmdline_present = false;
     colors_known = false;
@@ -253,7 +278,7 @@ int multiboot2_init(uint32_t address)
                 synth_modules[module_count].mod_start = ((const uint32_t *)body)[0];
                 synth_modules[module_count].mod_end = ((const uint32_t *)body)[1];
                 synth_modules[module_count].string =
-                    body_size > 8 ? (uint32_t)(uintptr_t)(body + 8) : 0;
+                    body_size > 8 ? address + (uint32_t)(body + 8 - base) : 0;
                 synth_modules[module_count].reserved = 0;
                 module_count++;
             }
@@ -297,7 +322,7 @@ int multiboot2_init(uint32_t address)
     if (mmap_count > 0)
     {
         synth_info.flags |= MULTIBOOT_INFO_MEM_MAP;
-        synth_info.mmap_addr = (uint32_t)(uintptr_t)synth_mmap;
+        synth_info.mmap_addr = image_phys(synth_mmap);
         synth_info.mmap_length =
             mmap_count * (uint32_t)sizeof(multiboot_mmap_entry_t);
         mmap_start = (uintptr_t)synth_mmap;
@@ -308,10 +333,15 @@ int multiboot2_init(uint32_t address)
     {
         synth_info.flags |= MULTIBOOT_INFO_MODS;
         synth_info.mods_count = module_count;
-        synth_info.mods_addr = (uint32_t)(uintptr_t)synth_modules;
+        synth_info.mods_addr = image_phys(synth_modules);
     }
 
     return 0;
+}
+
+uint32_t multiboot_info_phys(void)
+{
+    return info_phys;
 }
 
 uint32_t multiboot_raw_base(void)

@@ -12,6 +12,7 @@
 #include "hal/clock.h"
 #include "hal/cpu.h"
 #include "hal/framebuffer.h"
+#include "hal/mmu.h"
 #include "hal/timer.h"
 #include "kernel/lib/k_time.h"
 #include "kernel/block/block.h"
@@ -420,7 +421,7 @@ int mac_machine_run(uint32_t frames)
     }
 
     /* The ROM is patched in a copy: the module is read-only. */
-    k_memcpy(rom, (const void *)(uintptr_t)rom_module.base, ROM_SIZE);
+    k_memcpy(rom, hal_phys_to_virt(rom_module.base), ROM_SIZE);
     if (mac_rom_patch(rom, ROM_SIZE) != 0)
     {
         kernel_printf("%s\n", "mac: mac_rom is not a Mac IIci ROM (368CADFE)");
@@ -431,7 +432,7 @@ int mac_machine_run(uint32_t frames)
 
     if (disk_in_memory)
     {
-        ov->image = (const uint8_t *)(uintptr_t)disk_module.base;
+        ov->image = (const uint8_t *)hal_phys_to_virt(disk_module.base);
         ov->blocks = (uint32_t)(disk_module.length / BLOCK_SIZE);
         ov->slot = kmalloc((size_t)ov->blocks * sizeof(uint16_t));
         if (ov->slot == NULL)

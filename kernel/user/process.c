@@ -60,7 +60,7 @@ static int32_t map_page(uint32_t virt)
         return -K_ENOMEM;
     }
 
-    k_memset((void *)virt, 0, PAGE);
+    k_memset((void *)(uintptr_t)virt, 0, PAGE);
 
     return 0;
 }
@@ -919,7 +919,7 @@ void user_init(void)
 
     if (boot_module_find("initrd", &module) != NULL)
     {
-        root = tarfs_create((const void *)(uintptr_t)module.base, (size_t)module.length);
+        root = tarfs_create(hal_phys_to_virt(module.base), (size_t)module.length);
 
         if (root == NULL)
             kernel_log(LOG_WARN, "initrd is not a tar archive");

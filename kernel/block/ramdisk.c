@@ -7,6 +7,7 @@
 #include "block.h"
 
 #include "hal/boot.h"
+#include "hal/mmu.h"
 
 #include "kernel/lib/k_memory.h"
 
@@ -75,7 +76,7 @@ unsigned int ramdisk_register_boot_modules(void)
         slot->name[3] = (char)('0' + i);
         slot->name[4] = '\0';
 
-        if (ramdisk_register(slot->name, (const void *)(uintptr_t)module.base,
+        if (ramdisk_register(slot->name, hal_phys_to_virt(module.base),
                              (size_t)module.length) == 0)
             registered++;
     }

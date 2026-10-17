@@ -56,7 +56,7 @@ void idt_init(void)
     }
 
     idtr.limit = sizeof(idt) - 1;
-    idtr.base = (uint32_t)&idt;
+    idtr.base = (uint32_t)(uintptr_t)&idt;
 
     for (int i = 0; i < ISR_EXCEPTION_COUNT; i++)
         idt_set_gate(i, isr_stub_table[i]);

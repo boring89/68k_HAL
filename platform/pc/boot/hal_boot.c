@@ -7,6 +7,8 @@
 
 #include "multiboot.h"
 
+#include "hal/mmu.h"
+
 #include <stddef.h>
 
 /* Multiboot memory map types are the ACPI types, so they pass through. */
@@ -42,12 +44,12 @@ static const multiboot_module_t *module_table(void)
     if (!(mbi->flags & MULTIBOOT_INFO_MODS) || mbi->mods_count == 0)
         return NULL;
 
-    return (const multiboot_module_t *)(uintptr_t)mbi->mods_addr;
+    return (const multiboot_module_t *)hal_phys_to_virt(mbi->mods_addr);
 }
 
 static size_t string_size(uint32_t address)
 {
-    const char *str = (const char *)(uintptr_t)address;
+    const char *str = (const char *)hal_phys_to_virt(address);
     size_t length = 0;
 
     while (str[length] != '\0')
@@ -71,7 +73,7 @@ int hal_boot_module(unsigned int index, hal_boot_module_t *module)
     module->base = table[index].mod_start;
     module->length = table[index].mod_end - table[index].mod_start;
     module->name = table[index].string != 0
-                       ? (const char *)(uintptr_t)table[index].string
+                       ? (const char *)hal_phys_to_virt(table[index].string)
                        : "";
 
     return 0;
@@ -94,7 +96,7 @@ int hal_boot_reserved_region(unsigned int index, hal_memory_region_t *region)
 
     if (index == 0)
     {
-        region->base = (uintptr_t)mbi;
+        region->base = multiboot_info_phys();
         region->length = sizeof(*mbi);
         return 0;
     }

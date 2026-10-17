@@ -608,13 +608,13 @@ static void test_boot_module(void)
 
         found++;
         SELFTEST_ASSERT(module.length == module_size);
-        SELFTEST_ASSERT(k_memcmp((const void *)(uintptr_t)module.base,
+        SELFTEST_ASSERT(k_memcmp(hal_phys_to_virt(module.base),
                                  expected, sizeof(expected) - 1) == 0);
 
         /* Read-only mapping, and its frames must not be handed out. */
         uintptr_t phys = 0;
 
-        SELFTEST_ASSERT(hal_mmu_get_phys((uintptr_t)module.base, &phys) == 0);
+        SELFTEST_ASSERT(hal_mmu_get_phys((uintptr_t)hal_phys_to_virt(module.base), &phys) == 0);
         SELFTEST_ASSERT(pmm_is_frame_used(module.base & ~0xFFFu) == 1);
     }
 
