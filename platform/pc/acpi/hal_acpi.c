@@ -8,6 +8,7 @@
 #include "acpi.h"
 #include "acpi_parse.h"
 
+#include "platform/pc/boot/multiboot.h"
 #include "platform/pc/vmap/vmap.h"
 
 #include "kernel/log/log.h"
@@ -32,6 +33,12 @@ const hal_acpi_info_t *hal_acpi_info(void)
 
 static const acpi_rsdp_t *find_rsdp(void)
 {
+    /* A Multiboot2 loader hands over a copy (the only way under UEFI). */
+    const acpi_rsdp_t *given = multiboot_rsdp();
+
+    if (given != NULL && acpi_rsdp_valid(given))
+        return given;
+
     for (uintptr_t address = BIOS_AREA_START; address < BIOS_AREA_END; address += 16)
     {
         const acpi_rsdp_t *rsdp = (const acpi_rsdp_t *)address;

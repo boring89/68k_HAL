@@ -335,6 +335,103 @@ static void test_framebuffer_usable(void)
     TEST_ASSERT(!multiboot_framebuffer_usable());
 }
 
+/* Append one Multiboot2 tag (8-byte aligned) at pos; returns the next position. */
+static uint8_t *put_tag(uint8_t *pos, uint32_t type, const void *body, uint32_t body_size)
+{
+    uint32_t header[2] = {type, 8 + body_size};
+
+    memcpy(pos, header, 8);
+    if (body_size != 0)
+        memcpy(pos + 8, body, body_size);
+    return pos + ((8 + body_size + 7) & ~7u);
+}
+
+static void test_multiboot2_tags(void)
+{
+    reset();
+
+    uint8_t *pos = area + 8;
+    uint8_t mmap_body[8 + 2 * 24] = {0};
+    uint32_t entry_size = 24;
+    uint64_t e0[3] = {0x0, 0x9FC00, 1 | ((uint64_t)0 << 32)};
+    uint64_t e1[3] = {0x100000, 0x7EE00000, 1};
+
+    memcpy(mmap_body, &entry_size, 4);
+    memcpy(mmap_body + 8, e0, 24);
+    memcpy(mmap_body + 32, e1, 24);
+    pos = put_tag(pos, 6, mmap_body, sizeof(mmap_body));
+
+    uint8_t module_body[8 + 7] = {0};
+    uint32_t range[2] = {0x200000, 0x300000};
+
+    memcpy(module_body, range, 8);
+    memcpy(module_body + 8, "initrd", 7);
+    pos = put_tag(pos, 3, module_body, sizeof(module_body));
+
+    uint8_t fb_body[22] = {0};
+    uint64_t fb_addr = 0xFD000000u;
+    uint32_t fb_dims[3] = {7680, 1920, 1080};
+
+    memcpy(fb_body, &fb_addr, 8);
+    memcpy(fb_body + 8, fb_dims, 12);
+    fb_body[20] = 32;
+    fb_body[21] = 1;
+    pos = put_tag(pos, 8, fb_body, sizeof(fb_body));
+
+    uint8_t rsdp[20] = {'R', 'S', 'D', ' ', 'P', 'T', 'R', ' '};
+
+    pos = put_tag(pos, 14, rsdp, sizeof(rsdp));
+    pos = put_tag(pos, 0, NULL, 0);
+
+    uint32_t total = (uint32_t)(pos - area);
+
+    memcpy(area, &total, 4);
+    TEST_ASSERT_EQ_INT(0, multiboot2_init(addr32(area)));
+
+    TEST_ASSERT_EQ_INT(total, multiboot_raw_size());
+    TEST_ASSERT_EQ_INT(addr32(area), multiboot_raw_base());
+    TEST_ASSERT(multiboot_rsdp() != NULL);
+    TEST_ASSERT(memcmp(multiboot_rsdp(), "RSD PTR ", 8) == 0);
+
+    const multiboot_mmap_entry_t *e = multiboot_mmap_first();
+
+    TEST_ASSERT(e != NULL);
+    TEST_ASSERT_EQ_INT(0x9FC00, e->len);
+    e = multiboot_mmap_next(e);
+    TEST_ASSERT(e != NULL);
+    TEST_ASSERT_EQ_INT(0x100000, e->addr);
+    TEST_ASSERT(multiboot_mmap_next(e) == NULL);
+
+    TEST_ASSERT_EQ_INT(1, multiboot_get_info()->mods_count);
+    TEST_ASSERT(multiboot_framebuffer_usable());
+    TEST_ASSERT_EQ_INT(1920, multiboot_get_info()->framebuffer_width);
+    TEST_ASSERT_EQ_INT(7680, multiboot_get_info()->framebuffer_pitch);
+}
+
+static void test_multiboot2_malformed(void)
+{
+    reset();
+
+    /* A tag that claims to be larger than the whole list. */
+    uint32_t words[6] = {24, 0, 6, 4000, 0, 0};
+
+    memcpy(area, words, sizeof(words));
+    TEST_ASSERT_EQ_INT(-1, multiboot2_init(addr32(area)));
+    TEST_ASSERT(multiboot_mmap_first() == NULL);
+
+    /* Too short to hold even the end tag. */
+    uint32_t tiny[2] = {8, 0};
+
+    memcpy(area, tiny, sizeof(tiny));
+    TEST_ASSERT_EQ_INT(-1, multiboot2_init(addr32(area)));
+
+    /* Multiboot 1 afterwards: no raw list, no RSDP. */
+    reset();
+    boot(0, table);
+    TEST_ASSERT_EQ_INT(0, multiboot_raw_size());
+    TEST_ASSERT(multiboot_rsdp() == NULL);
+}
+
 int main(void)
 {
     area = mmap(NULL, AREA_SIZE, PROT_READ | PROT_WRITE,
@@ -360,6 +457,8 @@ int main(void)
     TEST_RUN(test_framebuffer_usable);
     TEST_RUN(test_hal_modules);
     TEST_RUN(test_hal_modules_flag_clear);
+    TEST_RUN(test_multiboot2_tags);
+    TEST_RUN(test_multiboot2_malformed);
 
     munmap(area, AREA_SIZE);
 

@@ -11,7 +11,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -605,6 +605,12 @@ test-shell: iso
 
 # GRUB's graphics mode (640x480) must still show the test pattern: nothing the
 # drivers do at start-up may switch the screen off (tools/fb_check.py).
+# The same ISO started by UEFI firmware (OVMF, q35): Multiboot2, the ACPI RSDP
+# from the boot loader, the framebuffer console. Needs the ovmf package.
+test-uefi: iso
+	SHELL_TEST_UEFI=1 python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
+		"acpi=Local APIC" "cpuinfo=Vendor" "lspci=Host bridge"
+
 test-fb: all
 	python3 -I tools/fb_check.py
 

@@ -33,6 +33,7 @@
 #include "hal/cpu.h"
 #include "hal/mmu.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #define PC_TIMER_FREQUENCY 100 /* Hz */
@@ -54,6 +55,21 @@ void pc_entry(uint32_t magic, uint32_t info)
     kernel_main();
 }
 
+static bool boot_known(void)
+{
+    return boot_magic == MULTIBOOT_BOOTLOADER_MAGIC ||
+           boot_magic == MULTIBOOT2_BOOTLOADER_MAGIC;
+}
+
+/* Parse the boot loader's information (Multiboot 1 or 2). */
+static void boot_parse(void)
+{
+    if (boot_magic == MULTIBOOT_BOOTLOADER_MAGIC)
+        multiboot_init(boot_info);
+    else if (boot_magic == MULTIBOOT2_BOOTLOADER_MAGIC)
+        multiboot2_init(boot_info);
+}
+
 void hal_init_console(void)
 {
     /*
@@ -61,10 +77,9 @@ void hal_init_console(void)
      * goes to serial. Multiboot is parsed here already (and again, with
      * logging, in hal_init_early) to find out which mode we are in.
      */
-    if (boot_magic == MULTIBOOT_BOOTLOADER_MAGIC)
-        multiboot_init(boot_info);
+    boot_parse();
 
-    if (boot_magic != MULTIBOOT_BOOTLOADER_MAGIC || !pc_framebuffer_detect())
+    if (!boot_known() || !pc_framebuffer_detect())
         text_display_register(&vga_text_display);
 
     serial_init();
@@ -73,16 +88,18 @@ void hal_init_console(void)
 
 void hal_init_early(void)
 {
-    if (boot_magic != MULTIBOOT_BOOTLOADER_MAGIC)
+    if (!boot_known())
     {
         kernel_log(LOG_ERROR, "Invalid Multiboot magic");
 
         hal_cpu_halt();
     }
 
-    multiboot_init(boot_info);
+    boot_parse();
 
     kernel_log(LOG_INFO, "Multiboot initialized");
+    kernel_printf("Boot protocol: Multiboot%d\n",
+                  boot_magic == MULTIBOOT2_BOOTLOADER_MAGIC ? 2 : 1);
 
     kernel_printf("Multiboot flags: %x\n", multiboot_get_info()->flags);
     kernel_printf("Multiboot info: %x\n", boot_info);

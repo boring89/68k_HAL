@@ -73,7 +73,8 @@ int hal_boot_module(unsigned int index, hal_boot_module_t *module)
 }
 
 /*
- * Reserved, in this order: the Multiboot info structure, the memory map (if
+ * Reserved, in this order: the Multiboot info structure, the Multiboot2 tag
+ * list (if any), the memory map (if
  * any), then the module table (if any) followed by each module's contents
  * and name string.
  */
@@ -93,6 +94,18 @@ int hal_boot_reserved_region(unsigned int index, hal_memory_region_t *region)
         return 0;
     }
     index--;
+
+    /* Multiboot2: the loader's own tag list (module names point into it). */
+    if (multiboot_raw_size() != 0)
+    {
+        if (index == 0)
+        {
+            region->base = multiboot_raw_base();
+            region->length = multiboot_raw_size();
+            return 0;
+        }
+        index--;
+    }
 
     if (mbi->flags & MULTIBOOT_INFO_MEM_MAP)
     {

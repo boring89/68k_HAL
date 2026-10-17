@@ -13,6 +13,10 @@
  * (Multiboot Specification 0.6.96, 3.2 Machine state). */
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
 
+/* EAX at kernel entry when a Multiboot2 loader started the kernel
+ * (Multiboot2 Specification 2.0, 3.3 Machine state). */
+#define MULTIBOOT2_BOOTLOADER_MAGIC 0x36D76289
+
 /* multiboot_info_t.flags bit 6: mmap_addr / mmap_length are valid
  * (Multiboot Specification 0.6.96, 3.3 Boot information format). */
 #define MULTIBOOT_INFO_MEM_MAP (1u << 6)
@@ -118,6 +122,30 @@ _Static_assert(sizeof(multiboot_mmap_entry_t) == 24,
                "multiboot_mmap_entry_t must match the Multiboot layout");
 
 void multiboot_init(uint32_t address);
+
+/*
+ * Multiboot2 (Multiboot2 Specification 2.0, 3.6 Boot information): the tag
+ * list at address is translated into the same multiboot_info_t, memory map
+ * and module table that multiboot_init builds from Multiboot 1, so the rest
+ * of the kernel does not care which protocol was used. Memory map entries
+ * and modules beyond MULTIBOOT2_MAX_MMAP / MULTIBOOT2_MAX_MODULES are
+ * dropped. The tag list is never modified. Returns 0, or -1 if the list is
+ * malformed (multiboot_init state is then an empty Multiboot 1 structure).
+ */
+#define MULTIBOOT2_MAX_MMAP 128
+#define MULTIBOOT2_MAX_MODULES 8
+
+int multiboot2_init(uint32_t address);
+
+/* Start and size of the raw Multiboot2 tag list, or 0 for Multiboot 1. */
+uint32_t multiboot_raw_base(void);
+uint32_t multiboot_raw_size(void);
+
+/*
+ * Copy of the ACPI RSDP the Multiboot2 loader found (UEFI firmware keeps it
+ * outside the BIOS area), or NULL. The copy lives inside the tag list.
+ */
+const void *multiboot_rsdp(void);
 
 const multiboot_info_t *multiboot_get_info(void);
 

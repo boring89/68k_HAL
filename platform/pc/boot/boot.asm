@@ -29,6 +29,38 @@ multiboot_header:
 	dd 32           ; depth
 %endif
 
+; Multiboot2 header (Multiboot2 Specification 2.0, 3.1). A loader that speaks
+; Multiboot2 (GRUB's "multiboot2" command, the only way to get the ACPI RSDP
+; and a framebuffer under UEFI) uses this one; the Multiboot 1 header above
+; stays for QEMU -kernel and GRUB's "multiboot" command. Both headers can sit
+; in the same image. The header must be 8-byte aligned.
+align 8
+MB2_MAGIC equ 0xE85250D6
+mb2_header:
+	dd MB2_MAGIC
+	dd 0                              ; architecture: i386
+	dd mb2_header_end - mb2_header    ; header length
+	dd -(MB2_MAGIC + 0 + (mb2_header_end - mb2_header))
+%ifdef GRAPHICS
+	; Framebuffer tag: type 5, size 20, width, height, depth.
+	align 8
+	dw 5, 0
+	dd 20
+	dd 640, 480, 32
+%else
+	; No preference (0 x 0 x 0 would mean "any"); the text image keeps VGA
+	; text mode, so ask for the EGA text console (console flags tag, type 4,
+	; flags bit 1 = EGA text supported).
+	align 8
+	dw 4, 0
+	dd 12
+	dd 2
+%endif
+	align 8
+	dw 0, 0                           ; end tag
+	dd 8
+mb2_header_end:
+
 section .text
 
 global _start

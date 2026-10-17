@@ -5,6 +5,8 @@
 
 #include "multiboot.h"
 
+#include "kernel/lib/k_memory.h"
+
 #include <stddef.h>
 
 /* Bytes in an entry after the size field: addr + len + type. */
@@ -12,6 +14,14 @@
     (sizeof(multiboot_mmap_entry_t) - sizeof(uint32_t))
 
 static const multiboot_info_t *multiboot_info;
+
+/* Multiboot2 translation (multiboot2_init). */
+static multiboot_info_t synth_info;
+static multiboot_mmap_entry_t synth_mmap[MULTIBOOT2_MAX_MMAP];
+static multiboot_module_t synth_modules[MULTIBOOT2_MAX_MODULES];
+static uint32_t raw_base;
+static uint32_t raw_size;
+static const void *rsdp_copy;
 
 /* Memory map bounds; both 0 when the boot loader gave no map. */
 static uintptr_t mmap_start;
@@ -21,6 +31,9 @@ void multiboot_init(uint32_t address)
 {
     multiboot_info = (const multiboot_info_t *)(uintptr_t)address;
 
+    raw_base = 0;
+    raw_size = 0;
+    rsdp_copy = NULL;
     mmap_start = 0;
     mmap_end = 0;
 
@@ -82,4 +95,166 @@ const multiboot_mmap_entry_t *multiboot_mmap_next(
         (uintptr_t)entry + sizeof(uint32_t) + entry->size;
 
     return multiboot_mmap_at(next);
+}
+
+/*
+ * Multiboot2 tag types and layouts (Multiboot2 Specification 2.0, 3.6).
+ * Every tag starts with {type, size} and the next tag begins at the next
+ * 8-byte boundary.
+ */
+#define MB2_TAG_END 0
+#define MB2_TAG_CMDLINE 1
+#define MB2_TAG_MODULE 3
+#define MB2_TAG_MMAP 6
+#define MB2_TAG_FRAMEBUFFER 8
+#define MB2_TAG_ACPI_OLD 14
+#define MB2_TAG_ACPI_NEW 15
+
+typedef struct
+{
+    uint32_t type;
+    uint32_t size;
+} mb2_tag_t;
+
+typedef struct
+{
+    uint64_t addr;
+    uint64_t len;
+    uint32_t type;
+    uint32_t reserved;
+} mb2_mmap_entry_t;
+
+int multiboot2_init(uint32_t address)
+{
+    const uint8_t *base = (const uint8_t *)(uintptr_t)address;
+    uint32_t total = ((const uint32_t *)base)[0];
+
+    k_memset(&synth_info, 0, sizeof(synth_info));
+
+    raw_base = address;
+    raw_size = total;
+    rsdp_copy = NULL;
+    mmap_start = 0;
+    mmap_end = 0;
+    multiboot_info = &synth_info;
+
+    if (total < 16)
+        return -1;
+
+    unsigned int mmap_count = 0;
+    unsigned int module_count = 0;
+
+    for (uint32_t offset = 8; offset + sizeof(mb2_tag_t) <= total;)
+    {
+        const mb2_tag_t *tag = (const mb2_tag_t *)(base + offset);
+
+        if (tag->type == MB2_TAG_END)
+            break;
+
+        if (tag->size < sizeof(*tag) || tag->size > total - offset)
+            return -1;
+
+        const uint8_t *body = (const uint8_t *)tag + sizeof(*tag);
+        uint32_t body_size = tag->size - sizeof(*tag);
+
+        switch (tag->type)
+        {
+        case MB2_TAG_MMAP:
+        {
+            /* entry_size, entry_version, then the entries. */
+            if (body_size < 8)
+                return -1;
+
+            uint32_t entry_size = ((const uint32_t *)body)[0];
+
+            if (entry_size < sizeof(mb2_mmap_entry_t))
+                return -1;
+
+            for (uint32_t pos = 8; pos + entry_size <= body_size &&
+                                   mmap_count < MULTIBOOT2_MAX_MMAP;
+                 pos += entry_size)
+            {
+                const mb2_mmap_entry_t *entry =
+                    (const mb2_mmap_entry_t *)(body + pos);
+
+                synth_mmap[mmap_count].size = MMAP_ENTRY_MIN_SIZE;
+                synth_mmap[mmap_count].addr = entry->addr;
+                synth_mmap[mmap_count].len = entry->len;
+                synth_mmap[mmap_count].type = entry->type;
+                mmap_count++;
+            }
+            break;
+        }
+        case MB2_TAG_MODULE:
+            /* mod_start, mod_end, then the NUL-terminated command line. */
+            if (body_size >= 8 && module_count < MULTIBOOT2_MAX_MODULES)
+            {
+                synth_modules[module_count].mod_start = ((const uint32_t *)body)[0];
+                synth_modules[module_count].mod_end = ((const uint32_t *)body)[1];
+                synth_modules[module_count].string =
+                    body_size > 8 ? (uint32_t)(uintptr_t)(body + 8) : 0;
+                synth_modules[module_count].reserved = 0;
+                module_count++;
+            }
+            break;
+        case MB2_TAG_FRAMEBUFFER:
+            /* addr(8) pitch(4) width(4) height(4) bpp(1) type(1) reserved(2) */
+            if (body_size >= 22)
+            {
+                synth_info.flags |= MULTIBOOT_INFO_FRAMEBUFFER;
+                synth_info.framebuffer_addr = *(const uint64_t *)body;
+                synth_info.framebuffer_pitch = ((const uint32_t *)body)[2];
+                synth_info.framebuffer_width = ((const uint32_t *)body)[3];
+                synth_info.framebuffer_height = ((const uint32_t *)body)[4];
+                synth_info.framebuffer_bpp = body[20];
+                synth_info.framebuffer_type = body[21];
+            }
+            break;
+        case MB2_TAG_ACPI_OLD:
+        case MB2_TAG_ACPI_NEW:
+            /* A copy of the RSDP; the newer tag wins. */
+            if (body_size >= 20 &&
+                (rsdp_copy == NULL || tag->type == MB2_TAG_ACPI_NEW))
+                rsdp_copy = body;
+            break;
+        default:
+            break;
+        }
+
+        offset += (tag->size + 7u) & ~7u;
+    }
+
+    if (mmap_count > 0)
+    {
+        synth_info.flags |= MULTIBOOT_INFO_MEM_MAP;
+        synth_info.mmap_addr = (uint32_t)(uintptr_t)synth_mmap;
+        synth_info.mmap_length =
+            mmap_count * (uint32_t)sizeof(multiboot_mmap_entry_t);
+        mmap_start = (uintptr_t)synth_mmap;
+        mmap_end = mmap_start + synth_info.mmap_length;
+    }
+
+    if (module_count > 0)
+    {
+        synth_info.flags |= MULTIBOOT_INFO_MODS;
+        synth_info.mods_count = module_count;
+        synth_info.mods_addr = (uint32_t)(uintptr_t)synth_modules;
+    }
+
+    return 0;
+}
+
+uint32_t multiboot_raw_base(void)
+{
+    return raw_base;
+}
+
+uint32_t multiboot_raw_size(void)
+{
+    return raw_size;
+}
+
+const void *multiboot_rsdp(void)
+{
+    return rsdp_copy;
 }

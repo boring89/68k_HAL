@@ -92,7 +92,16 @@ def main():
     tmp = tempfile.mkdtemp()
     serial = os.path.join(tmp, "serial.log")
     monitor = os.path.join(tmp, "mon.sock")
-    cmd = ["qemu-system-i386", "-cdrom", iso, "-display", "none",
+    qemu_bin = ["qemu-system-i386"]
+    if os.environ.get("SHELL_TEST_UEFI"):
+        # q35 + OVMF (UEFI firmware); the variable store is a private copy.
+        code = "/usr/share/OVMF/OVMF_CODE_4M.fd"
+        vars_copy = os.path.join(tmp, "vars.fd")
+        subprocess.run(["cp", "/usr/share/OVMF/OVMF_VARS_4M.fd", vars_copy], check=True)
+        qemu_bin = ["qemu-system-x86_64", "-machine", "q35",
+                    "-drive", "if=pflash,format=raw,readonly=on,file=" + code,
+                    "-drive", "if=pflash,format=raw,file=" + vars_copy]
+    cmd = qemu_bin + ["-cdrom", iso, "-display", "none",
            "-serial", "file:" + serial, "-monitor", "unix:%s,server,nowait" % monitor,
            "-m", "128"] + os.environ.get("QEMU_ARGS", "").split()
     qemu = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
