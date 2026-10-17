@@ -122,12 +122,50 @@ static void test_hub_and_other(void)
     TEST_ASSERT_EQ_INT(0, usb_configuration_total_length(keyboard_config, 5));
 }
 
+/* QEMU's usb-storage: one Bulk-Only SCSI interface with a bulk IN (0x81) and a bulk OUT (0x02) endpoint. */
+static void test_storage(void)
+{
+    static const uint8_t config[] = {
+        9, 2, 32, 0, 1, 1, 0, 0x80, 50,
+        9, 4, 0, 0, 2, 8, 6, 0x50, 0,
+        7, 5, 0x81, 2, 0, 2, 0,
+        7, 5, 0x02, 2, 0, 2, 0,
+    };
+    usb_storage_interface_t found;
+
+    TEST_ASSERT_EQ_INT(0, usb_find_storage(config, sizeof(config), &found));
+    TEST_ASSERT_EQ_INT(1, found.configuration_value);
+    TEST_ASSERT_EQ_INT(0, found.interface_number);
+    TEST_ASSERT_EQ_INT(0x81, found.bulk_in);
+    TEST_ASSERT_EQ_INT(0x02, found.bulk_out);
+    TEST_ASSERT_EQ_INT(512, found.in_packet_size);
+
+    /* The endpoints may come in the other order; a keyboard is not storage; a missing OUT endpoint is not usable. */
+    uint8_t swapped[sizeof(config)];
+
+    memcpy(swapped, config, sizeof(config));
+    memcpy(swapped + 18, config + 25, 7);
+    memcpy(swapped + 25, config + 18, 7);
+    TEST_ASSERT_EQ_INT(0, usb_find_storage(swapped, sizeof(swapped), &found));
+    TEST_ASSERT_EQ_INT(0x81, found.bulk_in);
+
+    TEST_ASSERT_EQ_INT(-1, usb_find_storage(keyboard_config, sizeof(keyboard_config), &found));
+
+    uint8_t one_way[sizeof(config)];
+
+    memcpy(one_way, config, sizeof(config));
+    one_way[25 + 2] = 0x81; /* both IN */
+    memcpy(one_way + 18, one_way + 25, 7);
+    TEST_ASSERT_EQ_INT(-1, usb_find_storage(one_way, sizeof(one_way), &found));
+}
+
 int main(void)
 {
     TEST_RUN(test_device);
     TEST_RUN(test_keyboard);
     TEST_RUN(test_composite);
     TEST_RUN(test_hub_and_other);
+    TEST_RUN(test_storage);
 
     return TEST_REPORT("usb_descriptor");
 }

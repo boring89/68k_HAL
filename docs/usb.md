@@ -2,7 +2,7 @@
 
 `drivers/usb_host/`（列舉控制器）、`drivers/xhci/`（xHCI 控制器與 HID 鍵盤滑鼠）、`kernel/usb/`（描述子、HID 報告解析、裝置清單）。
 
-**P7 R4 完成（自動排程一次做完，使用者尚未審核）**：xHCI 啟動、port 重置、裝置列舉、HID boot 鍵盤與滑鼠、熱插拔、MSI。集線器（hub，R10）也有；隨身碟（Mass Storage）還沒有。
+**P7 R4 完成（自動排程一次做完，使用者尚未審核）**：xHCI 啟動、port 重置、裝置列舉、HID boot 鍵盤與滑鼠、熱插拔、MSI。集線器（hub，R10）也有；隨身碟（Mass Storage，R11）也有（唯讀／讀寫的區塊裝置 `usb0`）。
 
 ## 1. 概念
 
@@ -63,6 +63,8 @@ HID 報告 → `kernel/usb/hid.c`：鍵盤 8 位元組（修飾鍵位元 + 最�
 限制：只用第一個 xHCI 控制器；interrupt endpoint 出錯（stall）時停止輪詢該 endpoint 而不做 Reset Endpoint 復原；沒有 USB 3 的 stream、isochronous、電源管理（U1/U2）；沒有 Mass Storage。
 
 測試：`tests/host/test_usb_hid.c`、`test_usb_descriptor.c`（純函式）；`make test-usb`：q35 + `-machine q35,i8042=off`（沒有 PS/2）+ `qemu-xhci` + `usb-kbd` + `usb-mouse`，用 monitor 的 `sendkey` 打字、`mouse_move` 移動滑鼠（`/bin/evtest` 看到事件）；另一輪從只有控制器開始，`device_add usb-kbd`／`usb-mouse` 熱插拔。
+
+**Mass Storage（P7 R11）**：class 8、subclass 6（SCSI）、protocol 0x50（Bulk-Only Transport）的介面（`usb_find_storage`）：`SET_CONFIGURATION` → `Configure Endpoint` 一次加兩個 bulk endpoint（IN＝type 6、OUT＝type 2，各自一個傳輸環）→ 每個 SCSI 命令是三步：**CBW**（command block wrapper，31 位元組，簽章 `USBC`、tag、資料長度、方向、LUN、CDB）從 bulk OUT 送出，資料階段（透過 64 KiB 的 bounce buffer；每個 TRB 不能跨 64 KiB 邊界，所以每頁一個 TRB 用 chain 串起來），**CSW**（13 位元組，簽章 `USBS`、同一個 tag、狀態 0 = good）從 bulk IN 讀回。啟動時用 `TEST UNIT READY` 輪詢到就緒（失敗就 `REQUEST SENSE` 清掉狀態，最多 20 次）、`READ CAPACITY(10)` 取得容量與區塊大小，登記成區塊裝置 `usb0`（`disks` 會列出）。讀寫用 `READ(10)`／`WRITE(10)`（寫完 `SYNCHRONIZE CACHE`）。stall 時做 Reset Endpoint ＋ Set TR Dequeue Pointer ＋ `CLEAR_FEATURE(ENDPOINT_HALT)`。限制：LBA 32 位元（2 TiB）、單一 LUN、同步（等完成才回）、拔掉後區塊裝置仍在清單但讀寫回 -1。測試：`test_usb_storage_disk`（QEMU `usb-storage` 在 xHCI 後面：全部內容比對、寫入讀回還原）。**未在實機驗證**。
 
 ## 3. 設計：之後要做的事（依序，每一步都能在 QEMU 驗證）
 

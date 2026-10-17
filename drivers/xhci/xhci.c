@@ -10,6 +10,7 @@
 #include "hal/irq.h"
 #include "hal/timer.h"
 
+#include "kernel/block/block.h"
 #include "kernel/input/event_buffer.h"
 #include "kernel/lib/k_memory.h"
 #include "kernel/log/log.h"
@@ -203,6 +204,32 @@ typedef struct
     usb_hid_keyboard_t keyboard;
 } hid_endpoint_t;
 
+#define STORAGE_BUFFER_SIZE (64u * 1024)
+
+/* A USB mass storage device (Bulk-Only Transport, SCSI): two bulk endpoints and a block device on top. */
+typedef struct
+{
+    int active;
+    ring_t in_ring;
+    ring_t out_ring;
+    uint8_t in_dci;
+    uint8_t out_dci;
+    uint8_t in_address;
+    uint8_t out_address;
+    uint8_t *buffer;     /* the data stage goes through here */
+    uint32_t buffer_phys;
+    uint8_t *command;    /* the command block wrapper at 0, the status wrapper at 64 */
+    uint32_t command_phys;
+    volatile int in_done;
+    volatile uint32_t in_code;
+    volatile int out_done;
+    volatile uint32_t out_code;
+    uint32_t tag;
+    char name[8];
+    block_device_t block;
+    int registered;
+} storage_t;
+
 typedef struct
 {
     int in_use;
@@ -239,6 +266,9 @@ typedef struct
 
     hid_endpoint_t hid[2];
     unsigned int hid_count;
+
+    storage_t storage;
+    int is_storage;
 } device_t;
 
 typedef struct
@@ -345,6 +375,16 @@ static void process_events(void)
                 {
                     device->control_code = code;
                     device->control_done = 1;
+                }
+                else if (device->is_storage && dci == device->storage.in_dci)
+                {
+                    device->storage.in_code = code;
+                    device->storage.in_done = 1;
+                }
+                else if (device->is_storage && dci == device->storage.out_dci)
+                {
+                    device->storage.out_code = code;
+                    device->storage.out_done = 1;
                 }
                 else
                 {
@@ -553,6 +593,23 @@ static void free_device(device_t *device)
             hal_dma_free(device->hid[i].buffer, 4096);
     }
 
+    if (device->is_storage)
+    {
+        device->storage.active = 0;
+
+        if (device->storage.in_ring.trbs != 0)
+            ring_free(&device->storage.in_ring);
+
+        if (device->storage.out_ring.trbs != 0)
+            ring_free(&device->storage.out_ring);
+
+        if (device->storage.buffer != 0)
+            hal_dma_free(device->storage.buffer, STORAGE_BUFFER_SIZE);
+
+        if (device->storage.command != 0)
+            hal_dma_free(device->storage.command, 4096);
+    }
+
     ring_free(&device->control_ring);
 
     if (device->output_context != 0)
@@ -699,6 +756,295 @@ static int configure_hid(device_t *device, const usb_hid_interface_t *found)
     hid->active = 1;
     device->hid_count++;
     queue_hid_transfer(device, hid);
+
+    return 0;
+}
+
+
+/* --- mass storage (USB Mass Storage Class Bulk-Only Transport 1.0; SCSI Primary/Block Commands) --- */
+
+#define CBW_SIGNATURE 0x43425355u /* "USBC" */
+#define CSW_SIGNATURE 0x53425355u /* "USBS" */
+#define TRB_CHAIN (1u << 4)
+
+/* Put `length` bytes at `phys` on a bulk ring and wait for the transfer to finish. A TRB must not cross a 64 KiB boundary: one per page. */
+static int bulk_transfer(device_t *device, ring_t *ring, unsigned int dci, volatile int *done,
+                         volatile uint32_t *code, uint32_t phys, uint32_t length)
+{
+    *done = 0;
+
+    while (length > 0)
+    {
+        uint32_t chunk = 4096 - (phys & 0xFFF);
+
+        if (chunk > length)
+            chunk = length;
+
+        int last = chunk == length;
+
+        ring_push(ring, phys, 0, chunk, TRB_TYPE(TRB_NORMAL) | (last ? TRB_INTERRUPT_ON_COMPLETION : TRB_CHAIN));
+        phys += chunk;
+        length -= chunk;
+    }
+
+    asm volatile("" : : : "memory");
+    xhci.doorbells[device->slot] = dci;
+
+    if (wait_until(done, 5000) != 0)
+        return -1;
+
+    return *code == COMPLETION_SUCCESS || *code == COMPLETION_SHORT_PACKET ? 0 : -1;
+}
+
+/* After a stall: Reset Endpoint, move the ring's dequeue pointer past the failed transfer, clear the halt on the device. */
+static void recover_endpoint(device_t *device, ring_t *ring, unsigned int dci, uint8_t address)
+{
+    run_command(0, TRB_TYPE(TRB_RESET_ENDPOINT) | ((uint32_t)device->slot << 24) | ((uint32_t)dci << 16), 0);
+
+    uint32_t dequeue = ring->phys + ring->enqueue * (uint32_t)sizeof(trb_t);
+
+    run_command(dequeue | (ring->cycle ? 1u : 0u),
+                TRB_TYPE(TRB_SET_DEQUEUE) | ((uint32_t)device->slot << 24) | ((uint32_t)dci << 16), 0);
+    send_request(device, 0x02, 1, 0, address); /* CLEAR_FEATURE(ENDPOINT_HALT) */
+}
+
+/*
+ * One SCSI command: the command block wrapper (31 bytes) out, the data (length bytes, in the direction
+ * data_in says) through the bounce buffer, the command status wrapper (13 bytes) in. Returns 0 if the
+ * device says "good", else -1.
+ */
+static int bot_command(device_t *device, const uint8_t *cdb, unsigned int cdb_length, int data_in, uint32_t length)
+{
+    storage_t *st = &device->storage;
+    uint8_t *cbw = st->command;
+    uint8_t *csw = st->command + 64;
+
+    if (!st->active || length > STORAGE_BUFFER_SIZE)
+        return -1;
+
+    k_memset(cbw, 0, 31);
+    st->tag++;
+
+    uint32_t fields[3] = {CBW_SIGNATURE, st->tag, length};
+
+    k_memcpy(cbw, fields, 12);
+    cbw[12] = data_in ? 0x80 : 0;
+    cbw[13] = 0; /* LUN 0 */
+    cbw[14] = (uint8_t)cdb_length;
+    k_memcpy(cbw + 15, cdb, cdb_length);
+
+    if (bulk_transfer(device, &st->out_ring, st->out_dci, &st->out_done, &st->out_code, st->command_phys, 31) != 0)
+    {
+        recover_endpoint(device, &st->out_ring, st->out_dci, st->out_address);
+
+        return -1;
+    }
+
+    if (length != 0)
+    {
+        int bad;
+
+        if (data_in)
+            bad = bulk_transfer(device, &st->in_ring, st->in_dci, &st->in_done, &st->in_code, st->buffer_phys, length);
+        else
+            bad = bulk_transfer(device, &st->out_ring, st->out_dci, &st->out_done, &st->out_code, st->buffer_phys, length);
+
+        if (bad)
+        {
+            if (data_in)
+                recover_endpoint(device, &st->in_ring, st->in_dci, st->in_address);
+            else
+                recover_endpoint(device, &st->out_ring, st->out_dci, st->out_address);
+
+            /* The device still owes a status: try to read it, but the data are gone. */
+            bulk_transfer(device, &st->in_ring, st->in_dci, &st->in_done, &st->in_code, st->command_phys + 64, 13);
+
+            return -1;
+        }
+    }
+
+    if (bulk_transfer(device, &st->in_ring, st->in_dci, &st->in_done, &st->in_code, st->command_phys + 64, 13) != 0)
+    {
+        recover_endpoint(device, &st->in_ring, st->in_dci, st->in_address);
+
+        return -1;
+    }
+
+    uint32_t signature = (uint32_t)csw[0] | (uint32_t)csw[1] << 8 | (uint32_t)csw[2] << 16 | (uint32_t)csw[3] << 24;
+    uint32_t tag = (uint32_t)csw[4] | (uint32_t)csw[5] << 8 | (uint32_t)csw[6] << 16 | (uint32_t)csw[7] << 24;
+
+    return signature == CSW_SIGNATURE && tag == st->tag && csw[12] == 0 ? 0 : -1;
+}
+
+static int scsi_simple(device_t *device, uint8_t opcode)
+{
+    uint8_t cdb[6] = {opcode, 0, 0, 0, 0, 0};
+
+    return bot_command(device, cdb, 6, 0, 0);
+}
+
+static void put_be32(uint8_t *p, uint32_t value)
+{
+    p[0] = (uint8_t)(value >> 24);
+    p[1] = (uint8_t)(value >> 16);
+    p[2] = (uint8_t)(value >> 8);
+    p[3] = (uint8_t)value;
+}
+
+static uint32_t get_be32(const uint8_t *p)
+{
+    return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3];
+}
+
+static int usb_storage_io(block_device_t *block, uint64_t lba, uint32_t count, void *buffer, int write)
+{
+    device_t *device = block->driver_data;
+    storage_t *st = &device->storage;
+    uint8_t *data = buffer;
+    uint32_t sector = block->block_size;
+    uint32_t most = STORAGE_BUFFER_SIZE / sector;
+
+    if (!device->in_use || !st->active)
+        return -1;
+
+    while (count > 0)
+    {
+        uint32_t n = count > most ? most : count;
+        uint8_t cdb[10] = {write ? 0x2A : 0x28, 0, 0, 0, 0, 0, 0, (uint8_t)(n >> 8), (uint8_t)n, 0};
+
+        put_be32(cdb + 2, (uint32_t)lba);
+
+        if (write)
+            k_memcpy(st->buffer, data, (size_t)n * sector);
+
+        if (bot_command(device, cdb, 10, !write, n * sector) != 0)
+            return -1;
+
+        if (!write)
+            k_memcpy(data, st->buffer, (size_t)n * sector);
+
+        data += (size_t)n * sector;
+        lba += n;
+        count -= n;
+    }
+
+    if (write)
+    {
+        /* SYNCHRONIZE CACHE(10): the drive writes its cache out before we say "done". */
+        uint8_t flush[10] = {0x35, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+        bot_command(device, flush, 10, 0, 0);
+    }
+
+    return 0;
+}
+
+static int usb_storage_read(block_device_t *block, uint64_t lba, uint32_t count, void *buffer)
+{
+    return usb_storage_io(block, lba, count, buffer, 0);
+}
+
+static int usb_storage_write(block_device_t *block, uint64_t lba, uint32_t count, const void *buffer)
+{
+    return usb_storage_io(block, lba, count, (void *)buffer, 1);
+}
+
+static const block_ops_t usb_storage_ops = {usb_storage_read, usb_storage_write};
+static unsigned int storage_count;
+
+/* Set up the two bulk endpoints of a storage interface, wake the drive, find out its size and register it. */
+static int start_storage(device_t *device, const usb_storage_interface_t *found)
+{
+    storage_t *st = &device->storage;
+
+    device->is_storage = 1;
+    st->in_address = found->bulk_in;
+    st->out_address = found->bulk_out;
+    st->in_dci = (uint8_t)((found->bulk_in & 0xF) * 2 + 1);
+    st->out_dci = (uint8_t)((found->bulk_out & 0xF) * 2);
+    st->buffer = hal_dma_alloc(STORAGE_BUFFER_SIZE, &st->buffer_phys);
+    st->command = hal_dma_alloc(4096, &st->command_phys);
+
+    if (st->buffer == 0 || st->command == 0 || ring_init(&st->in_ring) != 0 || ring_init(&st->out_ring) != 0)
+        return -1;
+
+    clear_input(device);
+    k_memcpy(input_context(device, 1), output_context(device, 0), xhci.context_size);
+
+    unsigned int top = st->in_dci > st->out_dci ? st->in_dci : st->out_dci;
+    uint32_t *slot = input_context(device, 1);
+    uint32_t *in_ep = input_context(device, 1 + st->in_dci);
+    uint32_t *out_ep = input_context(device, 1 + st->out_dci);
+
+    if ((slot[0] >> 27) < top)
+        slot[0] = (slot[0] & 0x07FFFFFFu) | ((uint32_t)top << 27);
+
+    input_context(device, 0)[1] = 1u | (1u << st->in_dci) | (1u << st->out_dci);
+
+    /* Error count 3, endpoint type bulk IN (6) / bulk OUT (2), max packet size, the ring (xHCI 6.2.3). */
+    in_ep[1] = (3u << 1) | (6u << 3) | ((uint32_t)found->in_packet_size << 16);
+    in_ep[2] = st->in_ring.phys | 1u;
+    in_ep[4] = 1024;
+    out_ep[1] = (3u << 1) | (2u << 3) | ((uint32_t)found->out_packet_size << 16);
+    out_ep[2] = st->out_ring.phys | 1u;
+    out_ep[4] = 1024;
+
+    uint32_t code = run_command(device->input_phys, TRB_TYPE(TRB_CONFIGURE_ENDPOINT) | ((uint32_t)device->slot << 24), 0);
+
+    if (code != COMPLETION_SUCCESS)
+    {
+        kernel_printf("xhci: slot %u: Configure Endpoint (storage) failed (%u)\n", device->slot, code);
+
+        return -1;
+    }
+
+    st->active = 1;
+
+    /* The drive may need a moment, and may complain about a media change first: ask until it is ready. */
+    int ready = 0;
+
+    for (int attempt = 0; attempt < 20 && !ready; attempt++)
+    {
+        if (scsi_simple(device, 0x00) == 0) /* TEST UNIT READY */
+        {
+            ready = 1;
+        }
+        else
+        {
+            uint8_t sense[6] = {0x03, 0, 0, 0, 18, 0}; /* REQUEST SENSE clears the condition */
+
+            bot_command(device, sense, 6, 1, 18);
+            delay_ms(100);
+        }
+    }
+
+    uint8_t capacity_cdb[10] = {0x25, 0, 0, 0, 0, 0, 0, 0, 0, 0}; /* READ CAPACITY(10) */
+
+    if (bot_command(device, capacity_cdb, 10, 1, 8) != 0)
+        return -1;
+
+    uint32_t last = get_be32(st->buffer);
+    uint32_t block_size = get_be32(st->buffer + 4);
+
+    if (block_size == 0 || block_size > 4096 || (block_size & (block_size - 1)))
+        return -1;
+
+    st->name[0] = 'u';
+    st->name[1] = 's';
+    st->name[2] = 'b';
+    st->name[3] = (char)('0' + storage_count);
+    st->name[4] = '\0';
+    st->block.name = st->name;
+    st->block.block_size = block_size;
+    st->block.block_count = (uint64_t)last + 1;
+    st->block.ops = &usb_storage_ops;
+    st->block.driver_data = device;
+
+    if (!st->registered && block_register(&st->block) == 0)
+    {
+        st->registered = 1;
+        storage_count++;
+    }
 
     return 0;
 }
@@ -861,6 +1207,7 @@ static void enumerate_device(unsigned int root_port, device_t *parent, unsigned 
         goto fail;
 
     usb_hid_interface_t found[USB_MAX_HID_INTERFACES];
+    usb_storage_interface_t storage_found;
     int is_hub = 0;
     int count = usb_parse_configuration(device->data, total, found, USB_MAX_HID_INTERFACES, &is_hub);
     uint8_t configuration_value = ((uint8_t *)device->data)[5];
@@ -868,7 +1215,8 @@ static void enumerate_device(unsigned int root_port, device_t *parent, unsigned 
     /* A hub is a device of class 9 (in the device descriptor or in its interface). */
     is_hub = is_hub || description.device_class == USB_CLASS_HUB;
 
-    const char *use = is_hub ? "hub" : count > 0 ? "HID" : "not used";
+    int storage = !is_hub && count == 0 && usb_find_storage(device->data, total, &storage_found) == 0;
+    const char *use = is_hub ? "hub" : count > 0 ? "HID" : storage ? "storage" : "not used";
 
     kernel_printf("usb: %s port %u: %x:%x class %u, %s speed, %s\n", parent != NULL ? "hub" : "root", port,
                   description.vendor_id, description.product_id, description.device_class, speed_name(speed), use);
@@ -925,6 +1273,19 @@ static void enumerate_device(unsigned int root_port, device_t *parent, unsigned 
 
             device->is_hub = 1;
             use = "hub";
+        }
+    }
+    else if (storage)
+    {
+        if (send_request(device, 0x00, 9, configuration_value, 0) != 0)
+            goto fail;
+
+        if (start_storage(device, &storage_found) == 0)
+            use = "storage";
+        else
+        {
+            kernel_printf("xhci: slot %u: the storage device does not answer\n", slot_id);
+            use = "storage (failed)";
         }
     }
     else if (count > 0)

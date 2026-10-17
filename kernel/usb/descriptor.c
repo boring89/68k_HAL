@@ -102,3 +102,61 @@ int usb_parse_configuration(const uint8_t *data, unsigned length, usb_hid_interf
 
     return (int)count;
 }
+
+int usb_find_storage(const uint8_t *data, unsigned length, usb_storage_interface_t *out)
+{
+    unsigned total = usb_configuration_total_length(data, length);
+
+    if (total == 0 || total > length)
+        return -1;
+
+    int in_storage = 0;
+    uint8_t interface_number = 0;
+    usb_storage_interface_t found = {0};
+
+    found.configuration_value = data[5];
+
+    for (unsigned offset = 0; offset + 2 <= total;)
+    {
+        uint8_t size = data[offset];
+        uint8_t type = data[offset + 1];
+
+        if (size < 2 || offset + size > total)
+            return -1;
+
+        if (type == USB_DT_INTERFACE && size >= 9)
+        {
+            in_storage = data[offset + 5] == USB_CLASS_MASS_STORAGE && data[offset + 6] == USB_SUBCLASS_SCSI &&
+                         data[offset + 7] == USB_PROTOCOL_BULK_ONLY;
+            interface_number = data[offset + 2];
+            found.interface_number = interface_number;
+            found.bulk_in = 0;
+            found.bulk_out = 0;
+        }
+        else if (type == USB_DT_ENDPOINT && size >= 7 && in_storage && (data[offset + 3] & 3) == 2)
+        {
+            /* Transfer type 2 = bulk. */
+            if (data[offset + 2] & 0x80)
+            {
+                found.bulk_in = data[offset + 2];
+                found.in_packet_size = le16(data + offset + 4);
+            }
+            else
+            {
+                found.bulk_out = data[offset + 2];
+                found.out_packet_size = le16(data + offset + 4);
+            }
+
+            if (found.bulk_in != 0 && found.bulk_out != 0)
+            {
+                *out = found;
+
+                return 0;
+            }
+        }
+
+        offset += size;
+    }
+
+    return -1;
+}

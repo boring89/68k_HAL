@@ -424,6 +424,49 @@ static void test_nvme_disk(void)
     check_write_roundtrip(disk, 0, 512);   /* more than one command */
 }
 
+/* The USB flash drive of test-qemu (usb-storage behind the xHCI): 128 sectors filled with (sector * 5 + byte) & 255. */
+static void test_usb_storage_disk(void)
+{
+    block_device_t *disk = block_device_find("usb0");
+
+    SELFTEST_ASSERT(disk != 0);
+
+    if (disk == 0)
+        return;
+
+    SELFTEST_ASSERT(disk->block_size == 512);
+    SELFTEST_ASSERT(disk->block_count == 128);
+
+    /* All of it: 64 KiB per command, so two commands. */
+    uint8_t *sectors = kmalloc(128 * 512);
+
+    SELFTEST_ASSERT(sectors != 0);
+
+    if (sectors == 0)
+        return;
+
+    SELFTEST_ASSERT(block_read(disk, 0, 128, sectors) == 0);
+
+    int bad = 0;
+
+    for (unsigned int s = 0; s < 128; s++)
+    {
+        for (unsigned int i = 0; i < 512; i++)
+        {
+            if (sectors[s * 512 + i] != (uint8_t)(s * 5 + i))
+                bad++;
+        }
+    }
+
+    SELFTEST_ASSERT(bad == 0);
+    SELFTEST_ASSERT(block_read(disk, 128, 1, sectors) == -1);
+    kfree(sectors);
+
+    check_write_roundtrip(disk, 127, 1);
+    check_write_roundtrip(disk, 30, 9);
+    check_write_roundtrip(disk, 0, 128);
+}
+
 /*
  * test-qemu adds one controller of each of three kinds: qemu-xhci, usb-ehci and
  * piix3-usb-uhci. They must be found with the right type, version and ports.
@@ -960,6 +1003,7 @@ void selftest_run(void)
     SELFTEST_RUN(test_ata_write);
     SELFTEST_RUN(test_ahci_disk);
     SELFTEST_RUN(test_nvme_disk);
+    SELFTEST_RUN(test_usb_storage_disk);
     SELFTEST_RUN(test_usb_hosts);
     SELFTEST_RUN(test_m68k_guest_ram_size);
     SELFTEST_RUN(test_m68k_guest_program);

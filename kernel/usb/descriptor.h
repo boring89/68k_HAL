@@ -67,4 +67,25 @@ int usb_parse_configuration(const uint8_t *data, unsigned length, usb_hid_interf
 /* wTotalLength of a configuration descriptor from its first 9 bytes, or 0 if they are not one. */
 unsigned usb_configuration_total_length(const uint8_t *data, unsigned length);
 
+#define USB_CLASS_MASS_STORAGE 8
+#define USB_SUBCLASS_SCSI 6
+#define USB_PROTOCOL_BULK_ONLY 0x50
+
+/* A USB mass storage interface using the SCSI command set over Bulk-Only Transport (a flash drive). */
+typedef struct
+{
+    uint8_t configuration_value;
+    uint8_t interface_number;
+    uint8_t bulk_in;       /* endpoint address, bit 7 set */
+    uint8_t bulk_out;
+    uint16_t in_packet_size;
+    uint16_t out_packet_size;
+} usb_storage_interface_t;
+
+/*
+ * The first Bulk-Only SCSI interface of a configuration descriptor (all of it) that has a bulk IN and a bulk
+ * OUT endpoint. Returns 0 and fills *out, or -1 if there is none or the descriptor is malformed.
+ */
+int usb_find_storage(const uint8_t *data, unsigned length, usb_storage_interface_t *out);
+
 #endif
