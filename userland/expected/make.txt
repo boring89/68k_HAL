@@ -1,0 +1,6 @@
+/bin/tcc -static -o /tmp/mk_hello /data/tcc_hello.c
+/tmp/mk_hello
+compiled by tcc: fib(20)=6765 1099511627 ok 6.28
+args: 1
+make: [/data/test.mk:3: all] Error 1 (ignored)
+make built and ran a program with tcc

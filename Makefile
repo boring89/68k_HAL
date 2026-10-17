@@ -478,7 +478,7 @@ test-sst: $(BUILD)/host/sst_run
 
 SDK_LIBC := build/sdk/sysroot/lib/librt68k.a
 USERLAND_SOURCES := $(wildcard userland/*.c)
-USERLAND_BINS := $(patsubst userland/%.c,build/initrd/bin/%,$(USERLAND_SOURCES)) build/initrd/bin/lua build/initrd/bin/tcc build/initrd/bin/sqlite3 build/initrd/bin/kilo
+USERLAND_BINS := $(patsubst userland/%.c,build/initrd/bin/%,$(USERLAND_SOURCES)) build/initrd/bin/lua build/initrd/bin/tcc build/initrd/bin/sqlite3 build/initrd/bin/kilo build/initrd/bin/dash build/initrd/bin/make
 
 # musl and the runtime helpers (downloads musl on the first run).
 sdk: $(SDK_LIBC)
@@ -496,6 +496,14 @@ build/initrd/bin/lua: tools/build_lua.sh $(SDK_LIBC) tools/68khal-cc
 	tools/build_lua.sh $@
 
 # Kilo, a terminal text editor: needs raw mode, escape sequences and the window size.
+build/initrd/bin/make: tools/build_make.sh $(SDK_LIBC) tools/68khal-cc
+	@mkdir -p $(dir $@)
+	tools/build_make.sh $@
+
+build/initrd/bin/dash: tools/build_dash.sh $(SDK_LIBC) tools/68khal-cc
+	@mkdir -p $(dir $@)
+	tools/build_dash.sh $@
+
 build/initrd/bin/kilo: tools/build_kilo.sh $(SDK_LIBC) tools/68khal-cc
 	mkdir -p $(dir $@)
 	tools/build_kilo.sh $@
@@ -524,6 +532,7 @@ $(INITRD): $(USERLAND_BINS) $(wildcard userland/data/*) $(wildcard userland/expe
 	for name in $$(grep -o '{"[a-z]*", box_' userland/box.c | grep -o '"[a-z]*"' | tr -d '"'); do \
 		[ -e userland/$$name.c ] || { rm -f build/initrd/bin/$$name; ln build/initrd/bin/box build/initrd/bin/$$name; }; \
 	done
+	rm -f build/initrd/bin/sh; ln build/initrd/bin/dash build/initrd/bin/sh
 	tar --format=ustar --owner=0 --group=0 --numeric-owner --sort=name \
 		-C build/initrd -cf $@ bin data etc expected usr
 
@@ -639,6 +648,8 @@ test-shell: iso
 		"dmesg=Kernel Booting" \
 		"seq 1000 | grep 7 | wc -l=271" \
 		"run /bin/forkexec=grandchild chain: 4" \
+		"run /bin/dash /data/test.sh=job finished" \
+		"run /bin/make -f /data/test.mk=make built and ran" \
 		"run /bin/pipes=default SIGPIPE: killed 1 by signal 13" \
 		"run /bin/signals=SIGKILL: signal 9" \
 		"sleep 30=" \

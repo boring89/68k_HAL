@@ -132,7 +132,16 @@ int32_t signal_deliver(int32_t result)
         int sig = lowest(deliverable(p));
 
         if (sig == 0)
+        {
+            /* sigsuspend woke for a signal that turned out to need no handler: the old mask is back now. */
+            if (p->sig_restore)
+            {
+                p->sig_blocked = p->sig_saved;
+                p->sig_restore = 0;
+            }
+
             return result;
+        }
 
         p->sig_pending &= ~BIT(sig);
 
@@ -173,7 +182,9 @@ int32_t signal_deliver(int32_t result)
         frame->info_pointer = (uint32_t)(uintptr_t)frame->info;
         frame->context_pointer = (uint32_t)(uintptr_t)frame->context;
         frame->saved = regs;
-        frame->saved_mask = p->sig_blocked;
+        /* After sigsuspend the handler runs with the temporary mask; sigreturn brings the old one back. */
+        frame->saved_mask = p->sig_restore ? p->sig_saved : p->sig_blocked;
+        p->sig_restore = 0;
         frame->info[0] = (uint32_t)sig; /* si_signo */
 
         p->sig_blocked |= action->mask;
@@ -353,16 +364,17 @@ int32_t signal_suspend(uint32_t mask_address, uint32_t size)
 
     k_memcpy(mask, (const void *)(uintptr_t)mask_address, size);
 
-    uint32_t saved = p->sig_blocked;
-
+    p->sig_saved = p->sig_blocked;
+    p->sig_restore = 1;
     p->sig_blocked = mask[0] & ~UNBLOCKABLE;
 
     while (!signal_interrupts(p))
         sched_wait();
 
-    /* The handler (if any) runs when the call returns; the old mask comes back with it. */
-    p->sig_blocked = saved;
-
+    /*
+     * The temporary mask stays until signal_deliver has run the handler (with it) or found nothing to
+     * run; the old mask comes back through sigreturn or there.
+     */
     return -K_EINTR;
 }
 

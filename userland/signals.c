@@ -121,6 +121,32 @@ int main(void)
     waitpid(pid, &status, 0);
     printf("SIGKILL: signal %d\n", WTERMSIG(status));
 
+    /* sigsuspend: the signal arrives while blocked, the handler runs with the temporary mask, the old mask returns. */
+    sigprocmask(SIG_BLOCK, &block, NULL);
+
+    int before = usr1_count;
+
+    fflush(stdout);
+    pid = fork();
+
+    if (pid == 0)
+    {
+        usleep(50000);
+        kill(getppid(), SIGUSR1);
+        _exit(0);
+    }
+
+    sigset_t empty;
+    sigset_t now;
+
+    sigemptyset(&empty);
+    sigsuspend(&empty);
+    sigprocmask(SIG_BLOCK, NULL, &now);
+    waitpid(pid, &status, 0);
+    printf("sigsuspend: handler ran %d time(s), SIGUSR1 blocked again: %d\n", (int)usr1_count - before,
+           sigismember(&now, SIGUSR1));
+    sigprocmask(SIG_UNBLOCK, &block, NULL);
+
     /* kill on a process that does not exist. */
     printf("kill of a missing process: %d\n", kill(30000, 0));
 

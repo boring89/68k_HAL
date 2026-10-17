@@ -64,6 +64,8 @@ tools/68khal-cc -O2 myprog.c -o myprog      # 與 gcc 用法相同，輸出靜�
 | **Lua 5.4.7**（MIT） | lua.org 官方 tarball，SHA-256 驗證 | `tools/build_lua.sh`（`make initrd` 會呼叫） | `run /bin/lua -e print(6*7)` 或 `run /bin/lua /data/test.lua` |
 | **TinyCC 0.9.27**（LGPL-2.1） | download.savannah.gnu.org，SHA-256 驗證 | `tools/build_tcc.sh` | 見下 |
 | **SQLite 3.54.1**（公有領域） | sqlite.org 的 amalgamation，用官網公布的 SHA3-256 驗證 | `tools/build_sqlite.sh`（編譯約 35 秒） | `run /bin/sqlite3 /tmp/db .read /data/test.sql`（輸出與 host 的逐字相同，包含 `PRAGMA integrity_check`、`VACUUM`） |
+| **dash 0.5.12**（BSD，Herbert Xu；`/bin/dash`，也是 `/bin/sh`） | gondor.apana.org.au 的官方 tarball，SHA-256 驗證 | `tools/build_dash.sh` | `run /bin/dash /data/test.sh`：管線、子 shell、命令替換、函式、here-document、背景工作與 `wait`、`trap` 與 `kill`（輸出與 host 逐字相同）。用到 fork／execve／wait4／pipe／sigsuspend 等（`docs/process.md`） |
+| **GNU make 4.4.1**（GPL-3.0-or-later；`/bin/make`） | ftp.gnu.org 的官方 tarball，SHA-256 驗證 | `tools/build_make.sh` | `run /bin/make -f /data/test.mk`：make 用 dash 執行規則，規則呼叫 tcc 編譯並執行程式 |
 | **Kilo**（BSD-2-Clause，antirez） | GitHub 固定 commit 的單一檔案 `kilo.c`，SHA-256 驗證 | `tools/build_kilo.sh` | `run /bin/kilo /tmp/note.txt`：Ctrl-S 存檔、Ctrl-Q 結束、Ctrl-F 搜尋 |
 
 Kilo 是終端機的壓力測試：raw 模式、ESC 序列的畫面更新、視窗大小、方向鍵（見 5.5）。它還挖出兩個問題：`ftruncate64` 沒實作；以及「寫滿整行時要延遲換行」（像 xterm，否則狀態列每行多一個空行）。

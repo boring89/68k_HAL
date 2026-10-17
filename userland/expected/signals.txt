@@ -5,4 +5,5 @@ SIGCHLD handler ran 1 time(s)
 sleeping child: signaled 1, signal 15
 handler child: exit 21
 SIGKILL: signal 9
+sigsuspend: handler ran 1 time(s), SIGUSR1 blocked again: 1
 kill of a missing process: -1

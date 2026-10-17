@@ -106,6 +106,10 @@ shell 的一行 `a | b | c` 是一個 **job**（`user_run_job`）：
 - 行程群組只有最簡單的語意（沒有 session、控制終端）；`TIOCSPGRP` 被接受但前景群組由 shell 決定。
 - 一次只有一個前景工作；shell 還不能在背景執行（沒有 `&`）。
 
+## 9.5 移植的程式：dash 與 GNU make
+
+兩個用得到所有行程功能的真實程式已經移植（`tools/build_dash.sh`、`tools/build_make.sh`，下載、校驗與建置方式同 Lua 等）。移植時找到並修正的問題：**`rt_sigsuspend`**：訊號要在**暫時的遮罩**下送達 handler，之後才恢復舊遮罩（原本先恢復舊遮罩，被擋住的 SIGCHLD 就不會再送達，dash 的 `wait` 永遠醒不來；現在 `sig_saved`／`sig_restore`，由 `signal_deliver` 或 `sigreturn` 還原）；缺 `faccessat2`（439，musl 的 `faccessat` 用它）。`make → dash → tcc → 程式` 這條鏈在 OS 裡完整跑通（`userland/data/test.mk`）。
+
 ## 10. 測試
 
 - `userland/forkexec.c`、`pipes.c`、`signals.c`（輸出與 host 相同，預期檔在 `userland/expected/`）：`make test-qemu` 在 OS 內執行並比對。

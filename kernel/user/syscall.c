@@ -119,6 +119,7 @@
 #define SYS_clock_getres_time64 406
 #define SYS_getpgid 132
 #define SYS_getsid 147
+#define SYS_faccessat2 439
 
 #define SYS_fork 2
 #define SYS_waitpid 7
@@ -1582,6 +1583,7 @@ static int32_t dispatch(const hal_user_syscall_t *call)
         return sys_access(a[0]);
 
     case SYS_faccessat:
+    case SYS_faccessat2:
         return sys_access(a[1]);
 
     case SYS_getcwd:

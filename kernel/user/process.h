@@ -108,6 +108,8 @@ typedef struct user_process
     /* signal.c */
     uint32_t sig_pending;
     uint32_t sig_blocked;
+    uint32_t sig_saved;   /* sigsuspend: the mask to come back to once the signal has been handled */
+    int sig_restore;
     user_sigaction_t sig_action[USER_SIGNAL_COUNT];
 } user_process_t;
 

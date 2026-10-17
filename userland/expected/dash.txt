@@ -1,0 +1,13 @@
+dash: 42
+lines with a 1:      11 
+subshell exit status: 3
+hello one
+hello two
+here:      11 
+case matched
+started a background job
+job finished
+data
+run by exec
+got USR1
+done
