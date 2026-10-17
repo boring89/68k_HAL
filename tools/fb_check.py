@@ -54,7 +54,7 @@ def main():
         subprocess.run(["cp", kernel, os.path.join(root, "boot", "kernel-gfx.elf")],
                        check=True)
         # The program disk, if it was built: the test runs /bin/fbdemo from it.
-        initrd = os.path.join(os.path.dirname(kernel), "initrd.tar")
+        initrd = "build/initrd.tar"  # the program disk is the same (i386 programs) for every kernel
         if os.path.exists(initrd):
             subprocess.run(["cp", initrd, os.path.join(root, "boot", "initrd.tar")], check=True)
         with open("grub.cfg") as f:
@@ -77,10 +77,11 @@ def main():
             end = time.monotonic() + seconds
             while time.monotonic() < end:
                 with open(serial_path, errors="replace") as f:
-                    if text in f.read():
+                    log = f.read()
+                    if text in log:
                         return
                 time.sleep(0.3)
-            sys.exit(f"FAIL: serial output never showed '{text}'")
+            sys.exit(f"FAIL: serial output never showed '{text}'\n" + log[-600:])
         process = subprocess.Popen(
             [os.environ.get("QEMU_SYSTEM", "qemu-system-i386"), "-cdrom", iso, "-vga", "std",
              "-display", "none", "-no-reboot",

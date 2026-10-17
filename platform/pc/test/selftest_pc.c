@@ -7,6 +7,7 @@
 #ifdef KERNEL_SELFTEST
 
 #include "kernel/lib/k_string.h"
+#include "kernel/memory/pmm.h"
 #include "platform/pc/interrupt/lapic.h"
 
 #include "kernel/test/selftest.h"
@@ -21,6 +22,7 @@
 #include "hal/timer.h"
 
 #include "platform/pc/boot/multiboot.h"
+#include "platform/pc/vmap/vmap.h"
 #include "platform/pc/interrupt/pic.h"
 
 #include "arch/x86/cpu/cpu.h"
@@ -160,6 +162,47 @@ static void test_dma_alloc(void)
 
     SELFTEST_ASSERT(hal_dma_alloc(0, &phys) == NULL);
 }
+
+#ifdef HAL_PHYS_BASE
+/*
+ * A 64-bit kernel uses RAM above 4 GiB (test-qemu starts QEMU with 4.5 GiB): the PMM counts it, the
+ * direct map and a vmap window both reach it. Nothing to test if the machine has less.
+ */
+static void test_memory_above_4g(void)
+{
+    hal_memory_region_t region;
+    uint64_t top = 0;
+
+    for (unsigned int i = 0; hal_boot_memory_region(i, &region) == 0; i++)
+    {
+        if (region.type == HAL_MEMORY_AVAILABLE && region.base + region.length > top)
+            top = region.base + region.length;
+    }
+
+    if (top <= 0x100000000ull + 0x200000)
+        return;
+
+    SELFTEST_ASSERT(pmm_get_total_frames() > 0x100000000ull / 4096);
+
+    /* The last page of RAM: the PMM hands out low frames first, so nobody uses it yet. */
+    uint64_t page = top - 4096;
+    volatile uint32_t *direct = hal_phys_to_virt(page);
+    uintptr_t phys = 0;
+
+    *direct = 0xA55A1234;
+    SELFTEST_ASSERT(hal_mmu_get_phys((uintptr_t)direct, &phys) == 0 && phys == page);
+
+    volatile uint32_t *window = vmap(page, 4096, HAL_MMU_WRITABLE);
+
+    SELFTEST_ASSERT(window != NULL);
+
+    if (window != NULL)
+    {
+        SELFTEST_ASSERT(*window == 0xA55A1234);
+        SELFTEST_ASSERT(hal_mmu_get_phys((uintptr_t)window, &phys) == 0 && phys == page);
+    }
+}
+#endif
 
 /* The nanosecond clock must agree with the PIT ticks it was calibrated on. */
 static void test_hal_timer_ns(void)
@@ -484,6 +527,9 @@ void selftest_platform_run(void)
     SELFTEST_RUN(test_pic_spurious);
     SELFTEST_RUN(test_pic_unmask_keeps_interrupt_flag);
     SELFTEST_RUN(test_multiboot_data_mapped);
+#ifdef HAL_PHYS_BASE
+    SELFTEST_RUN(test_memory_above_4g);
+#endif
 }
 
 void selftest_platform_exit(int passed)

@@ -1492,6 +1492,9 @@ static void cmd_lspci(
             char number[16];
 
             terminal_write(dev.bar[b].type == HAL_PCI_BAR_IO ? "        I/O ports at " : "        Memory at ");
+            /* A 64-bit BAR can be above 4 GiB (a workstation with "Above 4G Decoding"): all 16 digits then. */
+            if (dev.bar[b].base >> 32)
+                write_hex_padded((uint32_t)(dev.bar[b].base >> 32), 8);
             write_hex_padded((uint32_t)dev.bar[b].base, 8);
             terminal_write(" (");
             k_utoa((uint32_t)dev.bar[b].size, number);

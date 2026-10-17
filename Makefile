@@ -55,7 +55,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: test-power usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: test-pci-roots test-power usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -196,10 +196,10 @@ iso: $(BUILD)/kernel.elf $(BUILD)/kernel-gfx.elf $(INITRD)
 # user (docs/p520.md). With MAC_ROM and MAC_DISK existing, copies of them go on the image (local
 # use only; the image must never be committed or shared).
 USB_IMAGE := $(BUILD)/68k_HAL_usb.img
-usb-image: $(BUILD)/kernel.elf $(BUILD)/kernel-gfx.elf $(INITRD) grub-usb.cfg
+usb-image: $(BUILD)/kernel.elf $(BUILD)/kernel-gfx.elf $(BUILD)/kernel-gfx1080.elf $(INITRD) grub-usb.cfg
 	rm -rf $(BUILD)/usb_root
 	mkdir -p $(BUILD)/usb_root/boot/grub
-	cp $(BUILD)/kernel.elf $(BUILD)/kernel-gfx.elf $(INITRD) $(BUILD)/usb_root/boot/
+	cp $(BUILD)/kernel.elf $(BUILD)/kernel-gfx.elf $(BUILD)/kernel-gfx1080.elf $(INITRD) $(BUILD)/usb_root/boot/
 	cp grub-usb.cfg $(BUILD)/usb_root/boot/grub/grub.cfg
 	@if [ -f "$(MAC_ROM)" ] && [ -f "$(MAC_DISK)" ]; then \
 		echo "usb-image: adding the Mac ROM and disk (local copy)"; \
@@ -598,7 +598,8 @@ $(INITRD): $(USERLAND_BINS) $(wildcard userland/data/*) $(wildcard userland/expe
 
 # Kernel built with -DKERNEL_SELFTEST, booted directly by QEMU (no ISO).
 # QEMU exits with 33 on PASS (see kernel/test/selftest.c).
-QEMU_TEST_FLAGS := -display none -serial stdio -no-reboot -smp 4 \
+# 4.5 GiB of RAM: the 64-bit kernel uses what is above 4 GiB (test_memory_above_4g); the 32-bit one ignores it.
+QEMU_TEST_FLAGS := -display none -serial stdio -no-reboot -smp 4 -m 4608 \
 	-device qemu-xhci,id=xhci -device usb-ehci -device piix3-usb-uhci \
 	-drive id=usbdisk,file=$(BUILD)/test/usb_test.img,format=raw,if=none -device usb-storage,bus=xhci.0,drive=usbdisk \
 	-device ich9-ahci,id=ahci -drive id=sata0,file=$(BUILD)/test/ahci_test.img,format=raw,if=none \
@@ -778,6 +779,12 @@ test-usb: iso
 		"{hmp device_add usb-mouse,bus=xhci.0,port=1.2,id=m2}@@" "usb=mouse" \
 		"run /bin/evtest=reading events" "{mouse_move 7 3}=rel 0 7" "a{up}q=key 103 1"
 
+# A second root bus (pxb-pcie is a host bridge of its own, like the extra root buses of the P520): the
+# root port on bus 0x20 and the card behind it on bus 0x21 must be found (hal_pci.c scans every bus).
+test-pci-roots: iso
+	QEMU_ARGS="-machine q35 -device pxb-pcie,id=pcie.1,bus_nr=32,bus=pcie.0 -device pcie-root-port,id=rp1,bus=pcie.1,chassis=1,slot=1 -device e1000e,bus=rp1" \
+	python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso "lspci=20:00.0" "lspci=21:00.0"
+
 # The e1000e card (82574L): DHCP, ping, DNS, with the Q35 chipset.
 test-e1000e: iso
 	QEMU_ARGS="-machine q35 -netdev user,id=n0 -device e1000e,netdev=n0" \
@@ -836,4 +843,4 @@ test-boundary:
 	done
 	@echo "boundary check: PASS"
 
-test: test-boundary test-host test-qemu test-noapic test-q35 test-usb test-e1000e test-shell test-video test-fb test-net test-virtio-net
+test: test-boundary test-host test-qemu test-noapic test-q35 test-usb test-e1000e test-shell test-video test-fb test-net test-virtio-net test-pci-roots

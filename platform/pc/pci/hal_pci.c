@@ -165,6 +165,9 @@ static int add_function(uint8_t bus, uint8_t device, uint8_t function)
 
 static void scan_bus(uint8_t bus, unsigned int depth);
 
+/* Buses that were scanned (a bridge's secondary bus is scanned through the bridge, not again as a root). */
+static uint8_t bus_scanned[32];
+
 static void scan_device(uint8_t bus, uint8_t device, unsigned int depth)
 {
     if ((read_raw(bus, device, 0, PCI_VENDOR_ID, 2)) == 0xFFFF)
@@ -194,6 +197,11 @@ static void scan_device(uint8_t bus, uint8_t device, unsigned int depth)
 
 static void scan_bus(uint8_t bus, unsigned int depth)
 {
+    if (bus_scanned[bus / 8] & (1u << (bus % 8)))
+        return;
+
+    bus_scanned[bus / 8] |= (uint8_t)(1u << (bus % 8));
+
     for (uint8_t device = 0; device < 32; device++)
         scan_device(bus, device, depth);
 }
@@ -207,7 +215,21 @@ unsigned int pci_init(void)
         return 0;
 
     device_count = 0;
+
+    for (unsigned int i = 0; i < sizeof(bus_scanned); i++)
+        bus_scanned[i] = 0;
+
     scan_bus(0, 0);
+
+    /*
+     * Bus 0 only leads to the buses behind its own bridges. A machine with several host bridges (a Xeon
+     * workstation has one root bus per uncore stack: the NVMe drive and the graphics card are on
+     * buses 0x17 and 0x65 of the P520) has more root buses. Look at every remaining bus: a bus that does
+     * not exist answers 0xFFFF everywhere, which costs 32 reads. Buses behind a bridge were scanned
+     * through it (the bridge's bus number is always lower, so it has been visited by now).
+     */
+    for (unsigned int bus = 1; bus < 256; bus++)
+        scan_bus((uint8_t)bus, 0);
 
     return device_count;
 }

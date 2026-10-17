@@ -134,7 +134,14 @@ bool multiboot_framebuffer_usable(void)
     if (colors_known && !same)
         return false;
 
-    return mbi->framebuffer_addr != 0 && (mbi->framebuffer_addr >> 32) == 0 &&
+#ifdef HAL_PHYS_BASE
+    /* A 64-bit kernel can map a framebuffer above 4 GiB (a graphics card with "Above 4G Decoding"). */
+    bool reachable = true;
+#else
+    bool reachable = (mbi->framebuffer_addr >> 32) == 0;
+#endif
+
+    return mbi->framebuffer_addr != 0 && reachable &&
            mbi->framebuffer_width != 0 && mbi->framebuffer_height != 0 &&
            mbi->framebuffer_pitch / 4 >= mbi->framebuffer_width;
 }

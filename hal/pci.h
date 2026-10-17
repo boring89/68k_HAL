@@ -20,7 +20,7 @@
  * platform (platform/<platform>/pci/hal_pci.c).
  */
 
-#define HAL_PCI_MAX_DEVICES 64
+#define HAL_PCI_MAX_DEVICES 256
 
 #define HAL_PCI_BAR_NONE 0
 #define HAL_PCI_BAR_IO 1  /* I/O port range */

@@ -22,7 +22,7 @@
  *   -u   collapse loops in the trace tail (hide addresses seen recently)
  *   -r   print the parameter RAM at the end
  *   -c   list the ROM blocks (64 bytes) in the order they were first executed
- *   -b   stop when the PC reaches this address, or range lo-hi (hex)
+ *   -b   stop when the PC reaches this address, or range lo-hi (hex); also with -F
  *   -f   print the first N executed instructions (when the run is short)
  *   -t   print the last N executed instructions at the end (default 32)
  *
@@ -447,7 +447,11 @@ int main(int argc, char **argv)
         /* Exactly what the kernel does (kernel/mac/machine.c): whole frames. */
         static uint32_t shot[MAC_SCREEN_W * MAC_SCREEN_H];
 
-        for (uint32_t f = 0; f < frames; f++)
+        /* -b works in frame mode too: the run stops at the first time the PC gets there. */
+        mac.break_lo = break_pc;
+        mac.break_hi = break_hi;
+
+        for (uint32_t f = 0; f < frames && !mac.break_hit; f++)
         {
             for (int k = 0; k < nkeys; k++)
             {
