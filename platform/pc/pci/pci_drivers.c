@@ -8,6 +8,7 @@
 #include "drivers/ahci/ahci.h"
 #include "drivers/bga/bga.h"
 #include "drivers/e1000/e1000.h"
+#include "drivers/e1000e/e1000e.h"
 #include "drivers/hda/hda.h"
 #include "drivers/nvme/nvme.h"
 #include "drivers/usb_host/usb_host.h"
@@ -26,6 +27,15 @@ static const hal_pci_driver_t *const drivers[] = {
     &ahci_pci_driver,
     &bga_pci_driver,
     &e1000_pci_driver,
+    &e1000e_pci_drivers[0],
+    &e1000e_pci_drivers[1],
+    &e1000e_pci_drivers[2],
+    &e1000e_pci_drivers[3],
+    &e1000e_pci_drivers[4],
+    &e1000e_pci_drivers[5],
+    &e1000e_pci_drivers[6],
+    &e1000e_pci_drivers[7],
+    &e1000e_pci_drivers[8],
     &hda_pci_driver,
     &nvme_pci_driver,
     &xhci_pci_driver, /* before usb-host: it lists the controller and runs it */

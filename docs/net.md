@@ -97,3 +97,11 @@ virtio 是「為虛擬機設計的裝置」：不模擬舊硬體，而是主機�
 - TCP 的限制見第 3.5 節；沒有 IP 分片重組、沒有 IPv6、沒有 DHCP 租約更新、ARP 快取不過期。
 - 一次只有一張網卡；socket 只有 IPv4、沒有 `SOCK_RAW`、Unix domain socket 與 `socketpair`；被中斷的阻塞呼叫不會回 `EINTR`（沒有訊號）。
 - 沒有 virtio-net 與其他網卡。
+
+## e1000e 與 Intel I219（`drivers/e1000e`，P7 R7，使用者尚未審核）
+
+P520 的網卡是 Intel I219-LM（PCI 8086:15B7，內建在 PCH 裡的 LAN controller）。它和舊的 82540EM（`drivers/e1000`）用同樣格式的 legacy 收送描述符環，但重置與一些 errata 不同，所以另寫 `drivers/e1000e`（支援 82574L＝QEMU 的 `-device e1000e`，以及 I219 系列 ID：15B7、15B8、15B9、156F、1570、15D7、15D8、15E3）。參考：Intel 公開文件與 **FreeBSD em(4)**（BSD-3-Clause，`sys/dev/e1000`，本機下載在 `third_party/downloads/freebsd-e1000/`，不進 repo）。
+
+流程：配好收送環 → （I219）**flush descriptor rings**：韌體留下的環可能讓晶片在 reset 時卡死，要先用我們自己的 TX 環推一個假描述符（PCI 設定空間 0xE4 的 bit 8 `FLUSH_DESC_REQUIRED` 為 1 時，FreeBSD `em_flush_desc_rings`）→ 關中斷、關收送 → 重置 MAC（**不重置 PHY**：保留韌體已協商好的連線，也避免和 Management Engine 搶 PHY）→ `SLU`＋`ASDE` 讓 PHY 自動協商 → MAC 位址從 RAL0/RAH0（硬體在重置後從 NVM 載入）→ 設 `TXDCTL`（write-back 每個描述符，PCH 需 bit 22）、`TIPG`、`TCTL`；I219 另有 `IOSFPC |= RDMTS_HEX` 與 `TARC0` 的 errata（i218-i219 spec update 1.5.4.5）→ `RCTL` 開啟接收 → 最多等 3 秒 link up。輪詢，不用中斷。
+
+驗證：`make test-e1000e`（QEMU `-device e1000e`：`net`、`dhcp`、`ping`、`dns`）通過。**I219 專屬的部分（flush、TARC0、IOSFPC、不重置 PHY 是否足以 link up）沒有在實機驗證**，QEMU 不模擬它們。如果實機的 `net` 指令顯示 link down 或 DHCP 失敗，請拍下開機時的 `e1000e:` 一行與 `net` 的輸出（見 `docs/p520.md`）。可能的下一步：Intel ULP（ultra low power）模式的解除、PHY 暫存器（MDIC）存取、`SWFLAG` 信號量。

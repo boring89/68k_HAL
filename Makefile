@@ -11,7 +11,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -670,6 +670,13 @@ test-usb: iso
 		"{hmp device_add usb-mouse,id=m1}@@" "usb=mouse" \
 		"{hmp device_del m1}@@" "cpuinfo=Vendor"
 
+# The e1000e card (82574L): DHCP, ping, DNS, with the Q35 chipset.
+test-e1000e: iso
+	QEMU_ARGS="-machine q35 -netdev user,id=n0 -device e1000e,netdev=n0" \
+	python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
+		"net=Card:     e1000e" "dhcp=Address: 10.0.2.15" \
+		"ping 10.0.2.2=reply from 10.0.2.2" "dns localhost=address: 127.0.0.1"
+
 test-fb: all
 	python3 -I tools/fb_check.py
 
@@ -717,4 +724,4 @@ test-boundary:
 	done
 	@echo "boundary check: PASS"
 
-test: test-boundary test-host test-qemu test-noapic test-q35 test-usb test-shell test-video test-fb test-net test-virtio-net
+test: test-boundary test-host test-qemu test-noapic test-q35 test-usb test-e1000e test-shell test-video test-fb test-net test-virtio-net
