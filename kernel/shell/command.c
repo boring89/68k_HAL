@@ -1234,14 +1234,9 @@ static void cmd_mac(
         return;
     }
 
+    /* The Mac takes the screen (and gives it back, in the mode and with the text it had: machine.c). */
     mac_machine_set_scale((uint32_t)scale);
     mac_machine_run(0);
-
-    /* The Mac drew on the whole screen, maybe in another mode: draw the console again. */
-    hal_framebuffer_t fb;
-
-    if (fbcon_display() != NULL && hal_framebuffer_get(&fb) == 0 && fbcon_init(&fb, 0) == 0)
-        terminal_init();
 }
 
 static void cmd_cpuinfo(

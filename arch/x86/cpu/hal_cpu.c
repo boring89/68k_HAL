@@ -58,6 +58,29 @@ void hal_cpu_halt(void)
 static hal_cpu_info_t cpu_info;
 
 /*
+ * IA32_PAT (Intel SDM Vol.3A 11.12.2, Table 11-10 memory types: 0 UC, 1 WC, 4 WT, 5 WP, 6 WB, 7 UC-).
+ * A page's PAT index is PAT * 4 + PCD * 2 + PWT. The power-on value is
+ * 0x0007040600070406 (index 0 WB, 1 WT, 2 UC-, 3 UC, then the same again). We change index 1, a page with
+ * PWT alone, from write-through to write combining (HAL_MMU_WRITE_COMBINING, hal/mmu.h); nothing else uses
+ * PWT without PCD. Where the firmware's MTRRs say UC (the display memory of a PC), UC + WC = WC (SDM Vol.3A
+ * 11.5.2.2, Table 11-7). Every processor that runs kernel code needs the same value; the others do not run any.
+ */
+#define PAT_VALUE 0x0007010600070106ull
+
+static void pat_init(void)
+{
+    if (!(cpu_info.features & HAL_CPU_FEATURE_PAT) || !(cpu_info.features & HAL_CPU_FEATURE_MSR))
+        return;
+
+    /* A changed memory type needs the caches and the TLB flushed (SDM Vol.3A 11.12.4, 11.11.8); no page uses index 1 yet. */
+    asm volatile("wbinvd" : : : "memory");
+    cpu_wrmsr(CPU_MSR_PAT, PAT_VALUE);
+
+    if (cpu_read_cr0() & CPU_CR0_PG)
+        cpu_write_cr3(cpu_read_cr3());
+}
+
+/*
  * Enable the x87 FPU and SSE (Intel SDM Vol.3A 13.1.2 "Initializing
  * the FPU" and 13.1.3 "Initializing SSE/SSE2/SSE3 Extensions"):
  *   CR0.EM = 0  the FPU is real, do not trap x87/SSE instructions
@@ -75,6 +98,8 @@ void hal_cpu_init(void)
 
     if (cpuid_read(&raw) == 0)
         cpuid_decode(&raw, &cpu_info);
+
+    pat_init();
 
     if (!(cpu_info.features & HAL_CPU_FEATURE_FPU))
         return;

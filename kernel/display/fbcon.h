@@ -50,4 +50,13 @@ const text_display_t *fbcon_display(void);
 /* Draw the whole grid again, e.g. after a program used the framebuffer. */
 void fbcon_redraw(void);
 
+/*
+ * Stop drawing while something else (the Macintosh) uses the screen: the console still keeps its cells, so
+ * what is written meanwhile is not lost. fbcon_resume draws all cells again; framebuffer is the (possibly
+ * remapped) screen, which must have the size fbcon_init was given. Returns 0, or -1 if it has not
+ * (then call fbcon_init and terminal_init).
+ */
+void fbcon_suspend(void);
+int fbcon_resume(const hal_framebuffer_t *framebuffer);
+
 #endif

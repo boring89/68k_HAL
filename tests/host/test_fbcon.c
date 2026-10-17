@@ -158,6 +158,66 @@ static void test_redraw_after_foreign_drawing(void)
     TEST_ASSERT_EQ_INT(0, (int)at(0, 0)); /* the margins are black again */
 }
 
+/* A cell that is written with what it shows already is not drawn again (scrolling does that a lot). */
+static void test_unchanged_cells_are_not_redrawn(void)
+{
+    start();
+    fbcon_display()->clear();
+    fbcon_display()->put_cell(1, 1, 'B', COLOR_WHITE, COLOR_BLACK);
+    fbcon_display()->put_cell(2, 1, 'B', COLOR_WHITE, COLOR_BLACK);
+
+    pixels[(5 + 16 + 3) * W + 2 + 8] = 0xABCDEF; /* inside cell (1, 1): a mark in the picture */
+
+    fbcon_display()->put_cell(1, 1, 'B', COLOR_WHITE, COLOR_BLACK);
+    fbcon_display()->copy_cell(2, 1, 1, 1);
+    TEST_ASSERT_EQ_INT(0xABCDEF, (int)pixels[(5 + 16 + 3) * W + 2 + 8]);
+
+    /* A different cell is drawn: the mark is gone. */
+    fbcon_display()->put_cell(1, 1, 'C', COLOR_WHITE, COLOR_BLACK);
+    TEST_ASSERT(pixels[(5 + 16 + 3) * W + 2 + 8] != 0xABCDEF);
+    fbcon_display()->copy_cell(2, 1, 1, 1);
+    TEST_ASSERT_EQ_INT((int)cell_pixel(2, 1, 0, 3), (int)cell_pixel(1, 1, 0, 3));
+}
+
+/* While the screen belongs to somebody else the cells change but nothing is drawn; resume draws them. */
+static void test_suspend_and_resume(void)
+{
+    start();
+    fbcon_display()->clear();
+
+    fbcon_suspend();
+    memset(pixels, 0x11, sizeof(pixels));
+    fbcon_display()->put_cell(0, 0, 'A', COLOR_WHITE, COLOR_BLACK);
+    fbcon_display()->set_cursor(3, 1);
+    fbcon_redraw(); /* does nothing either */
+
+    for (int i = 0; i < W * H; i++)
+        TEST_ASSERT_EQ_INT(0x11111111, (int)pixels[i]);
+
+    /* The glyph appears when the screen is given back; so does the cursor, and the margins are black. */
+    hal_framebuffer_t fb = framebuffer();
+
+    TEST_ASSERT_EQ_INT(0, fbcon_resume(&fb));
+
+    int lit = 0;
+
+    for (int py = 0; py < 16; py++)
+    {
+        for (int px = 0; px < 8; px++)
+            lit += cell_pixel(0, 0, px, py) != 0;
+    }
+
+    TEST_ASSERT(lit > 10);
+    TEST_ASSERT_EQ_INT(0xAAAAAA, (int)cell_pixel(3, 1, 0, 15)); /* the cursor */
+    TEST_ASSERT_EQ_INT(0, (int)at(0, 0));
+
+    /* A screen of another size cannot be resumed: the caller starts the console again. */
+    fbcon_suspend();
+    fb.width = 90;
+    TEST_ASSERT_EQ_INT(-1, fbcon_resume(&fb));
+    TEST_ASSERT_EQ_INT(-1, fbcon_resume(NULL));
+}
+
 /* The terminal works on it: text, scrolling, colours. */
 static void test_with_terminal(void)
 {
@@ -242,6 +302,8 @@ int main(void)
     TEST_RUN(test_out_of_range_is_ignored);
     TEST_RUN(test_copy_and_cursor);
     TEST_RUN(test_redraw_after_foreign_drawing);
+    TEST_RUN(test_unchanged_cells_are_not_redrawn);
+    TEST_RUN(test_suspend_and_resume);
     TEST_RUN(test_with_terminal);
 
     return TEST_REPORT("fbcon");

@@ -55,6 +55,36 @@ static void test_scale_one_and_three(void)
     TEST_ASSERT_EQ_INT(5, untouched);
 }
 
+static void test_changed_rows_only(void)
+{
+    const uint32_t first[2 * 3] = {1, 2, 3, 4, 5, 6};
+    uint32_t second[2 * 3] = {1, 2, 9, 9, 5, 6}; /* only the middle row changed */
+    uint32_t screen[4 * 6];
+
+    memset(screen, 0, sizeof(screen));
+
+    /* No previous picture: everything is drawn. */
+    TEST_ASSERT_EQ_INT(3, fb_blit_scaled_rows((uint8_t *)screen, 16, first, NULL, 2, 3, 2));
+    TEST_ASSERT_EQ_INT(1, screen[0]);
+    TEST_ASSERT_EQ_INT(6, screen[5 * 4 + 3]);
+
+    /* A marker in the rows that must stay: it is not overwritten by an identical row. */
+    screen[0] = 77;
+    screen[5 * 4] = 88;
+
+    TEST_ASSERT_EQ_INT(1, fb_blit_scaled_rows((uint8_t *)screen, 16, second, first, 2, 3, 2));
+    TEST_ASSERT_EQ_INT(77, screen[0]);
+    TEST_ASSERT_EQ_INT(88, screen[5 * 4]);
+    /* Row 1 (output rows 2 and 3) was redrawn, enlarged. */
+    TEST_ASSERT_EQ_INT(9, screen[2 * 4]);
+    TEST_ASSERT_EQ_INT(9, screen[2 * 4 + 3]);
+    TEST_ASSERT_EQ_INT(9, screen[3 * 4]);
+
+    /* The same picture again: nothing to do. */
+    TEST_ASSERT_EQ_INT(0, fb_blit_scaled_rows((uint8_t *)screen, 16, second, second, 2, 3, 2));
+    TEST_ASSERT_EQ_INT(0, fb_blit_scaled_rows((uint8_t *)screen, 16, second, second, 2, 3, 0));
+}
+
 static void test_best_scale(void)
 {
     TEST_ASSERT_EQ_INT(1, fb_best_scale(640, 480, 640, 480));
@@ -70,6 +100,7 @@ int main(void)
 {
     TEST_RUN(test_double);
     TEST_RUN(test_scale_one_and_three);
+    TEST_RUN(test_changed_rows_only);
     TEST_RUN(test_best_scale);
 
     return TEST_REPORT("fb_scale");

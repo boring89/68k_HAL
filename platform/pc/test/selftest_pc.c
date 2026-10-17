@@ -16,6 +16,7 @@
 #include "hal/boot.h"
 #include "hal/cpu.h"
 #include "hal/dma.h"
+#include "hal/framebuffer.h"
 #include "hal/irq.h"
 #include "hal/mmu.h"
 #include "hal/pci.h"
@@ -203,6 +204,53 @@ static void test_memory_above_4g(void)
     }
 }
 #endif
+
+/*
+ * Write combining: IA32_PAT index 1 is "WC", a page mapped with HAL_MMU_WRITE_COMBINING is PWT without PCD,
+ * and the framebuffer (if the kernel has one) is mapped that way.
+ */
+static void test_pat_write_combining(void)
+{
+    const hal_cpu_info_t *cpu = hal_cpu_info();
+
+    if (!(cpu->features & HAL_CPU_FEATURE_PAT))
+        return;
+
+    uint64_t pat = cpu_rdmsr(CPU_MSR_PAT);
+
+    SELFTEST_ASSERT(((pat >> 8) & 0xFF) == 0x01); /* index 1: write combining */
+    SELFTEST_ASSERT((pat & 0xFF) == 0x06);        /* index 0: write back (ordinary memory) */
+    SELFTEST_ASSERT(((pat >> 24) & 0xFF) == 0x00); /* index 3: uncacheable (HAL_MMU_UNCACHED) */
+
+    uintptr_t frame = pmm_alloc_frame();
+    uint32_t flags = 0;
+    void *page = vmap(frame, 4096, HAL_MMU_WRITABLE | HAL_MMU_WRITE_COMBINING);
+
+    SELFTEST_ASSERT(page != NULL);
+
+    if (page != NULL)
+    {
+        SELFTEST_ASSERT(hal_mmu_get_flags((uintptr_t)page, &flags) == 0);
+        SELFTEST_ASSERT(flags == (HAL_MMU_WRITABLE | HAL_MMU_WRITE_COMBINING));
+    }
+
+    /* Both at once make no sense. */
+    SELFTEST_ASSERT(vmap(frame, 4096, HAL_MMU_UNCACHED | HAL_MMU_WRITE_COMBINING) == NULL);
+
+    page = vmap(frame, 4096, HAL_MMU_WRITABLE | HAL_MMU_UNCACHED);
+    SELFTEST_ASSERT(page != NULL && hal_mmu_get_flags((uintptr_t)page, &flags) == 0);
+    SELFTEST_ASSERT(flags == (HAL_MMU_WRITABLE | HAL_MMU_UNCACHED));
+
+    hal_framebuffer_t fb;
+
+    if (hal_framebuffer_get(&fb) == 0)
+    {
+        SELFTEST_ASSERT(hal_mmu_get_flags((uintptr_t)fb.base, &flags) == 0);
+        SELFTEST_ASSERT(flags & HAL_MMU_WRITE_COMBINING);
+    }
+
+    pmm_free_frame(frame);
+}
 
 /* The nanosecond clock must agree with the PIT ticks it was calibrated on. */
 static void test_hal_timer_ns(void)
@@ -514,6 +562,7 @@ void selftest_platform_run(void)
     SELFTEST_RUN(test_acpi_tables);
     SELFTEST_RUN(test_pci_devices);
     SELFTEST_RUN(test_dma_alloc);
+    SELFTEST_RUN(test_pat_write_combining);
     SELFTEST_RUN(test_smp_processors_online);
     SELFTEST_RUN(test_hal_irq_register_rejects);
     SELFTEST_RUN(test_apic_in_use);

@@ -50,6 +50,8 @@ int hal_mmu_get_flags(uintptr_t virt, uint32_t *flags)
 
     if (entry_flags & PAGING_CACHE_DISABLE)
         *flags |= HAL_MMU_UNCACHED;
+    else if (entry_flags & PAGING_WRITE_THROUGH)
+        *flags |= HAL_MMU_WRITE_COMBINING;
 
     return 0;
 }

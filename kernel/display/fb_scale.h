@@ -24,6 +24,14 @@ void fb_blit_scaled(uint8_t *destination, uint32_t pitch, const uint32_t *source
                     uint32_t width, uint32_t height, uint32_t scale);
 
 /*
+ * The same, but only the rows of source that differ from previous (a picture of the same size that was
+ * drawn before; NULL = all rows). Nothing is read from the destination, which may be display memory
+ * (write combining: reads are slow). Returns the number of source rows that were drawn.
+ */
+uint32_t fb_blit_scaled_rows(uint8_t *destination, uint32_t pitch, const uint32_t *source,
+                             const uint32_t *previous, uint32_t width, uint32_t height, uint32_t scale);
+
+/*
  * The largest scale (at least 1) at which a width x height picture fits a
  * screen_width x screen_height display.
  */

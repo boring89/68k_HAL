@@ -38,7 +38,10 @@ uintptr_t paging_entry_get_phys(paging_entry_t entry)
 
 int paging_flags_from_hal(uint32_t hal_flags, uint32_t *flags)
 {
-    if (hal_flags & ~(HAL_MMU_WRITABLE | HAL_MMU_USER | HAL_MMU_UNCACHED))
+    if (hal_flags & ~(HAL_MMU_WRITABLE | HAL_MMU_USER | HAL_MMU_UNCACHED | HAL_MMU_WRITE_COMBINING))
+        return -1;
+
+    if ((hal_flags & HAL_MMU_UNCACHED) && (hal_flags & HAL_MMU_WRITE_COMBINING))
         return -1;
 
     uint32_t result = 0;
@@ -51,6 +54,10 @@ int paging_flags_from_hal(uint32_t hal_flags, uint32_t *flags)
 
     if (hal_flags & HAL_MMU_UNCACHED)
         result |= PAGING_WRITE_THROUGH | PAGING_CACHE_DISABLE;
+
+    /* PAT index 1 (PWT alone) is programmed as write combining (hal_cpu.c). */
+    if (hal_flags & HAL_MMU_WRITE_COMBINING)
+        result |= PAGING_WRITE_THROUGH;
 
     *flags = result;
 

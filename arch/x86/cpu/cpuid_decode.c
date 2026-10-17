@@ -59,6 +59,7 @@ void cpuid_decode(const cpuid_raw_t *raw, hal_cpu_info_t *info)
         set_if(info, edx, 9, HAL_CPU_FEATURE_APIC);
         set_if(info, edx, 13, HAL_CPU_FEATURE_PGE);
         set_if(info, edx, 15, HAL_CPU_FEATURE_CMOV);
+        set_if(info, edx, 16, HAL_CPU_FEATURE_PAT);
         set_if(info, edx, 24, HAL_CPU_FEATURE_FXSR);
         set_if(info, edx, 25, HAL_CPU_FEATURE_SSE);
         set_if(info, edx, 26, HAL_CPU_FEATURE_SSE2);

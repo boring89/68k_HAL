@@ -7,29 +7,43 @@
 
 #include "kernel/lib/k_memory.h"
 
-void fb_blit_scaled(uint8_t *destination, uint32_t pitch, const uint32_t *source,
-                    uint32_t width, uint32_t height, uint32_t scale)
+uint32_t fb_blit_scaled_rows(uint8_t *destination, uint32_t pitch, const uint32_t *source,
+                             const uint32_t *previous, uint32_t width, uint32_t height, uint32_t scale)
 {
+    uint32_t drawn = 0;
+
     if (scale == 0)
-        return;
+        return 0;
 
     for (uint32_t y = 0; y < height; y++)
     {
-        uint32_t *row = (uint32_t *)(destination + (size_t)y * scale * pitch);
+        const uint32_t *line = source + (size_t)y * width;
 
-        /* Build the widened row once, straight into the frame buffer ... */
-        for (uint32_t x = 0; x < width; x++)
+        if (previous != NULL && k_memcmp(line, previous + (size_t)y * width, (size_t)width * 4) == 0)
+            continue;
+
+        drawn++;
+
+        /* Every output row of the block is written from the source: no read of the destination. */
+        for (uint32_t j = 0; j < scale; j++)
         {
-            uint32_t pixel = source[(size_t)y * width + x];
+            uint32_t *row = (uint32_t *)(destination + ((size_t)y * scale + j) * pitch);
 
-            for (uint32_t i = 0; i < scale; i++)
-                row[x * scale + i] = pixel;
+            for (uint32_t x = 0; x < width; x++)
+            {
+                for (uint32_t i = 0; i < scale; i++)
+                    row[x * scale + i] = line[x];
+            }
         }
-
-        /* ... and copy it for the other rows of the block. */
-        for (uint32_t j = 1; j < scale; j++)
-            k_memcpy(destination + ((size_t)y * scale + j) * pitch, row, (size_t)width * scale * 4);
     }
+
+    return drawn;
+}
+
+void fb_blit_scaled(uint8_t *destination, uint32_t pitch, const uint32_t *source,
+                    uint32_t width, uint32_t height, uint32_t scale)
+{
+    fb_blit_scaled_rows(destination, pitch, source, NULL, width, height, scale);
 }
 
 uint32_t fb_best_scale(uint32_t width, uint32_t height, uint32_t screen_width,

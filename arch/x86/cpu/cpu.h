@@ -77,6 +77,9 @@ static inline void cpu_write_cr4(uintptr_t value)
     );
 }
 
+/* Page attribute table (Intel SDM Vol.3A 11.12). */
+#define CPU_MSR_PAT 0x277u
+
 /* Time stamp counter (Intel SDM Vol.2B "RDTSC"). Needs HAL_CPU_FEATURE_TSC. */
 /* Model specific registers (Intel SDM Vol.2B RDMSR / WRMSR). Only for MSRs the CPU has (CPUID.1:EDX bit 5). */
 static inline uint64_t cpu_rdmsr(uint32_t msr)

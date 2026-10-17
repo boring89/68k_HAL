@@ -19,7 +19,7 @@ static cpuid_raw_t sample(void)
     /* Family 6, model 0x9E (extended model 9), stepping 10. */
     raw.l1[0] = 0x000906EA;
     raw.l1[2] = (1u << 0) | (1u << 28) | (1u << 31);
-    raw.l1[3] = (1u << 0) | (1u << 4) | (1u << 25) | (1u << 26);
+    raw.l1[3] = (1u << 0) | (1u << 4) | (1u << 16) | (1u << 25) | (1u << 26);
     raw.max_ext = 0x80000008u;
     raw.e1[3] = 1u << 20;
     raw.e7[3] = 1u << 8;
@@ -65,6 +65,7 @@ static void test_features(void)
     TEST_ASSERT(info.features & HAL_CPU_FEATURE_AVX);
     TEST_ASSERT(info.features & HAL_CPU_FEATURE_HYPERVISOR);
     TEST_ASSERT(info.features & HAL_CPU_FEATURE_NX);
+    TEST_ASSERT(info.features & HAL_CPU_FEATURE_PAT);
     TEST_ASSERT(info.features & HAL_CPU_FEATURE_INVARIANT_TSC);
     TEST_ASSERT(!(info.features & HAL_CPU_FEATURE_PAE));
     TEST_ASSERT(!(info.features & HAL_CPU_FEATURE_X2APIC));

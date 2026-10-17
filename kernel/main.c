@@ -42,6 +42,7 @@
 #include "hal/cpu.h"
 #include "hal/framebuffer.h"
 #include "hal/init.h"
+#include "hal/mmu.h"
 #include "hal/timer.h"
 
 #ifdef KERNEL_SELFTEST
@@ -92,6 +93,14 @@ void kernel_main(void)
     if (hal_framebuffer_get(&framebuffer) == 0)
     {
         kernel_printf("Framebuffer: %ux%u\n", framebuffer.width, framebuffer.height);
+
+        /* What a slow screen needs (hal/mmu.h): "write combining" is the fast one; the report of a real machine shows if it worked. */
+        uint32_t memory_type = 0;
+
+        if (hal_mmu_get_flags((uintptr_t)framebuffer.base, &memory_type) == 0)
+            kernel_printf("Framebuffer memory: %s\n", memory_type & HAL_MMU_WRITE_COMBINING ? "write combining"
+                                                       : memory_type & HAL_MMU_UNCACHED      ? "uncached"
+                                                                                             : "cached");
 
         if (text_display_get() == NULL && fbcon_init(&framebuffer, FB_BARS_HEIGHT) == 0 &&
             text_display_register(fbcon_display()) == 0)

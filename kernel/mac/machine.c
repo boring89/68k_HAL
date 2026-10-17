@@ -18,6 +18,7 @@
 #include "kernel/block/block.h"
 #include "kernel/boot/module.h"
 #include "kernel/display/fb_scale.h"
+#include "kernel/display/fbcon.h"
 #include "kernel/sound/sound.h"
 #include "kernel/input/event_buffer.h"
 #include "kernel/keyboard/keycode.h"
@@ -26,6 +27,7 @@
 #include "kernel/m68k/guest.h"
 #include "kernel/memory/heap.h"
 #include "kernel/printf/printf.h"
+#include "kernel/terminal/terminal.h"
 
 #include <stddef.h>
 
@@ -162,11 +164,33 @@ void mac_machine_set_scale(uint32_t scale)
     screen_scale = scale;
 }
 
-/* Copy the rendered screen into the framebuffer, enlarged by scale and centered. */
+/*
+ * What the Mac's picture looks like on the screen after the last show(), to draw only the rows that changed:
+ * the screen is write combining memory (hal/mmu.h), where writes are cheap and reads are not, and a Mac
+ * desktop changes in a small part of the picture from one update to the next.
+ */
+static uint32_t *shown;
+static bool shown_valid;
+
+/* Figures of the run (mac_machine_report): time in the emulation, the rendering and the screen. */
+static struct
+{
+    uint64_t frames;
+    uint64_t emulate_ns;
+    uint64_t render_ns;
+    uint64_t show_ns;
+    uint32_t updates;
+    uint64_t rows;
+    uint64_t instructions;
+} perf;
+
+/* Copy the rendered screen into the framebuffer, enlarged by scale and centered; only what changed. */
 static void show(const hal_framebuffer_t *fb, const uint32_t *pixels, uint32_t scale)
 {
+    uint64_t start = hal_timer_ns();
     uint32_t shown_w = MAC_SCREEN_W * scale;
     uint32_t shown_h = MAC_SCREEN_H * scale;
+    const uint32_t *previous = shown_valid ? shown : NULL;
 
     if (fb->width < shown_w || fb->height < shown_h)
     {
@@ -175,16 +199,67 @@ static void show(const hal_framebuffer_t *fb, const uint32_t *pixels, uint32_t s
         uint32_t h = fb->height < MAC_SCREEN_H ? fb->height : MAC_SCREEN_H;
 
         for (uint32_t y = 0; y < h; y++)
-            k_memcpy(fb->base + y * fb->pitch, pixels + y * MAC_SCREEN_W, w * 4);
+        {
+            if (previous != NULL && k_memcmp(pixels + y * MAC_SCREEN_W, previous + y * MAC_SCREEN_W, w * 4) == 0)
+                continue;
 
-        return;
+            k_memcpy(fb->base + y * fb->pitch, pixels + y * MAC_SCREEN_W, w * 4);
+            perf.rows++;
+        }
+    }
+    else
+    {
+        uint32_t x0 = (fb->width - shown_w) / 2;
+        uint32_t y0 = (fb->height - shown_h) / 2;
+
+        perf.rows += fb_blit_scaled_rows(fb->base + y0 * fb->pitch + x0 * 4, fb->pitch, pixels, previous,
+                                         MAC_SCREEN_W, MAC_SCREEN_H, scale);
     }
 
-    uint32_t x0 = (fb->width - shown_w) / 2;
-    uint32_t y0 = (fb->height - shown_h) / 2;
+    if (shown != NULL)
+    {
+        k_memcpy(shown, pixels, MAC_SCREEN_W * MAC_SCREEN_H * 4);
+        shown_valid = true;
+    }
 
-    fb_blit_scaled(fb->base + y0 * fb->pitch + x0 * 4, fb->pitch, pixels,
-                   MAC_SCREEN_W, MAC_SCREEN_H, scale);
+    perf.updates++;
+    perf.show_ns += hal_timer_ns() - start;
+}
+
+/* A decimal number with one digit after the point, from tenths. */
+static void print_tenths(const char *label, uint64_t tenths, const char *unit)
+{
+    kernel_printf("%s%u.%u%s", label, (unsigned int)(tenths / 10), (unsigned int)(tenths % 10), unit);
+}
+
+/*
+ * What the run cost, for a report from a real machine (dmesg keeps it): how many frames per second the Mac
+ * got, how long the emulation, the rendering and the screen update took per frame, and how fast the emulated
+ * CPU was. A frame is 1/60 s of a 25 MHz Mac IIci; the machine keeps real time, so anything below 60 frames per
+ * second means the work of a frame took longer than 16.7 ms.
+ */
+static void report_performance(uint64_t wall_ns)
+{
+    if (perf.frames == 0 || wall_ns == 0)
+        return;
+
+    uint64_t fps10 = perf.frames * 10000000000ull / wall_ns;
+    uint64_t ms10_emulate = perf.emulate_ns * 10 / perf.frames / 1000000;
+    uint64_t ms10_render = perf.updates != 0 ? perf.render_ns * 10 / perf.updates / 1000000 : 0;
+    uint64_t ms10_show = perf.updates != 0 ? perf.show_ns * 10 / perf.updates / 1000000 : 0;
+    uint64_t rows10 = perf.updates != 0 ? perf.rows * 10 / perf.updates : 0;
+    uint64_t mips10 = perf.emulate_ns != 0 ? perf.instructions * 10000 / perf.emulate_ns : 0;
+
+    kernel_printf("mac: %u frames in %u ms", (unsigned int)perf.frames, (unsigned int)(wall_ns / 1000000));
+    print_tenths(": ", fps10, " frames/s");
+    kernel_printf(", %u screen updates\n", perf.updates);
+    print_tenths("mac: per frame: emulation ", ms10_emulate, " ms");
+    print_tenths(" (", mips10, " million instructions/s)");
+    kernel_printf("\n");
+    print_tenths("mac: per screen update: render ", ms10_render, " ms");
+    print_tenths(", screen ", ms10_show, " ms");
+    print_tenths(" (", rows10, " of 480 rows drawn)");
+    kernel_printf("\n");
 }
 
 
@@ -372,11 +447,32 @@ static const struct
 };
 #endif
 
+/*
+ * Give the screen back to the console: the mode it had before the Mac (if the Mac asked for another one),
+ * then everything the console kept meanwhile, drawn again.
+ */
+static void release_screen(const hal_framebuffer_t *original)
+{
+    hal_framebuffer_t now;
+
+    if (hal_framebuffer_get(&now) == 0 && (now.width != original->width || now.height != original->height))
+        hal_framebuffer_set_mode(original->width, original->height);
+
+    if (hal_framebuffer_get(&now) != 0 || fbcon_display() == NULL)
+        return;
+
+    /* Another size than the console was made for (the mode could not be restored): start it again, empty. */
+    if (fbcon_resume(&now) != 0 && fbcon_init(&now, 0) == 0)
+        terminal_init();
+}
+
 int mac_machine_run(uint32_t frames)
 {
     hal_boot_module_t rom_module;
     hal_boot_module_t disk_module;
     hal_framebuffer_t fb;
+    hal_framebuffer_t original;
+    bool screen_taken = false;
     bool have_screen;
     uint32_t scale = screen_scale;
     mac_t *mac = kmalloc(sizeof *mac);
@@ -385,6 +481,10 @@ int mac_machine_run(uint32_t frames)
     uint32_t *pixels = kmalloc(MAC_SCREEN_W * MAC_SCREEN_H * 4);
     overlay_t *ov = kmalloc(sizeof *ov);
     have_screen = hal_framebuffer_get(&fb) == 0;
+    original = fb;
+    shown = kmalloc(MAC_SCREEN_W * MAC_SCREEN_H * 4);
+    shown_valid = false;
+    k_memset(&perf, 0, sizeof perf);
 
     /* Enlarged: ask the display adapter for a mode that fits the picture exactly. */
     if (scale > 1 && hal_framebuffer_set_mode(MAC_SCREEN_W * scale, MAC_SCREEN_H * scale) == 0)
@@ -488,6 +588,14 @@ int mac_machine_run(uint32_t frames)
 
     kernel_printf("%s\n", have_screen ? "mac: running (` stops)"
                                       : "mac: running without a screen");
+
+    /* From here on the screen is the Mac's: the console keeps what it is told (dmesg, serial) but does not draw it. */
+    if (have_screen && fbcon_display() != NULL)
+    {
+        fbcon_suspend();
+        screen_taken = true;
+    }
+
     uint64_t paced_start = hal_timer_ns();
 
     for (uint32_t frame = 1; frames == 0 || frame <= frames; frame++)
@@ -507,15 +615,27 @@ int mac_machine_run(uint32_t frames)
         if (frame == KERNEL_MAC_TEST_BEEP)
             mac_sysbeep(mac);
 #endif
+        uint64_t emulate_start = hal_timer_ns();
+        uint32_t instructions_before = mac->insn_count;
+
         mac_run(mac, (int)MAC_FRAME_CYCLES);
+
+        perf.emulate_ns += hal_timer_ns() - emulate_start;
+        perf.instructions += (uint32_t)(mac->insn_count - instructions_before);
+        perf.frames++;
 
         if (audio_out != NULL)
             audio_flush(audio_out);
 
-        if (have_screen && frame % SHOW_EVERY == 0 &&
-            mac_render(mac, pixels) == 0)
+        if (have_screen && frame % SHOW_EVERY == 0)
         {
-            show(&fb, pixels, scale);
+            uint64_t render_start = hal_timer_ns();
+            int rendered = mac_render(mac, pixels);
+
+            perf.render_ns += hal_timer_ns() - render_start;
+
+            if (rendered == 0)
+                show(&fb, pixels, scale);
         }
         if (handle_input(mac) && frames == 0)
         {
@@ -537,6 +657,8 @@ int mac_machine_run(uint32_t frames)
                               (unsigned int)mac_bus_read(mac, 0x20C, 4));
         }
     }
+    uint64_t wall_ns = hal_timer_ns() - paced_start;
+
     if (mac_render(mac, pixels) == 0)
     {
         last_crc = crc32(pixels, MAC_SCREEN_W * MAC_SCREEN_H);
@@ -547,7 +669,23 @@ int mac_machine_run(uint32_t frames)
     }
     status = 0;
 
+    /* A test run (a fixed number of frames) leaves the last picture on the screen for the screenshot. */
+    if (screen_taken && frames == 0)
+    {
+        release_screen(&original);
+        screen_taken = false;
+    }
+
+    report_performance(wall_ns);
+
 out:
+    if (screen_taken && frames == 0)
+        release_screen(&original);
+
+    kfree(shown);
+    shown = NULL;
+    shown_valid = false;
+
     kfree(audio_out);
 
     if (ov != NULL)

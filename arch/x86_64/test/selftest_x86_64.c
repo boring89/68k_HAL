@@ -249,7 +249,7 @@ static void test_hal_mmu_map_rejects_unknown_flags(void)
     uintptr_t frame = pmm_alloc_frame();
     uintptr_t phys = 0;
 
-    SELFTEST_ASSERT(hal_mmu_map(TEST_HAL_MMU_VIRT, frame, 0x8) == -1);
+    SELFTEST_ASSERT(hal_mmu_map(TEST_HAL_MMU_VIRT, frame, 0x10) == -1);
     SELFTEST_ASSERT(hal_mmu_get_phys(TEST_HAL_MMU_VIRT, &phys) == -1);
 
     pmm_free_frame(frame);

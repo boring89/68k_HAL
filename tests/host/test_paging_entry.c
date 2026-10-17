@@ -160,12 +160,26 @@ static void test_flags_from_hal_uncached(void)
     TEST_ASSERT_EQ_INT(PAGING_WRITE_THROUGH | PAGING_CACHE_DISABLE, flags);
 }
 
+static void test_flags_from_hal_write_combining(void)
+{
+    uint32_t flags = 0;
+
+    /* PAT index 1 (PWT without PCD) is write combining. */
+    TEST_ASSERT_EQ_INT(0, paging_flags_from_hal(HAL_MMU_WRITABLE | HAL_MMU_WRITE_COMBINING, &flags));
+    TEST_ASSERT_EQ_INT(PAGING_WRITABLE | PAGING_WRITE_THROUGH, flags);
+
+    /* Not together with "uncached". */
+    flags = 0xDEAD;
+    TEST_ASSERT_EQ_INT(-1, paging_flags_from_hal(HAL_MMU_UNCACHED | HAL_MMU_WRITE_COMBINING, &flags));
+    TEST_ASSERT_EQ_INT(0xDEAD, flags);
+}
+
 static void test_flags_from_hal_rejects_unknown(void)
 {
     uint32_t flags = 0xDEAD;
 
     /* 0x4 happens to be PAGING_USER; it must not pass through as is. */
-    TEST_ASSERT_EQ_INT(-1, paging_flags_from_hal(0x8, &flags));
+    TEST_ASSERT_EQ_INT(-1, paging_flags_from_hal(0x10, &flags));
     TEST_ASSERT_EQ_INT(-1, paging_flags_from_hal(HAL_MMU_WRITABLE | 0x80000000u, &flags));
     TEST_ASSERT_EQ_INT(0xDEAD, flags);
 }
@@ -189,6 +203,7 @@ int main(void)
     TEST_RUN(test_table_virt_wraps_index);
     TEST_RUN(test_flags_from_hal);
     TEST_RUN(test_flags_from_hal_uncached);
+    TEST_RUN(test_flags_from_hal_write_combining);
     TEST_RUN(test_flags_from_hal_rejects_unknown);
 
     return TEST_REPORT("paging_entry");

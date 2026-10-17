@@ -49,7 +49,7 @@ int pc_framebuffer_map(void)
      * A 64-bit kernel maps the screen in its own window, which every address space shares (a mapping
      * of the lower half would exist only in the address space that made it), and may find it above 4 GiB.
      */
-    void *window = vmap(start, (size_t)(end - start), HAL_MMU_WRITABLE);
+    void *window = vmap(start, (size_t)(end - start), HAL_MMU_WRITABLE | HAL_MMU_WRITE_COMBINING);
 
     if (window == NULL)
         return -1;
@@ -66,7 +66,7 @@ int pc_framebuffer_map(void)
             continue;
 
         if (hal_mmu_map((uintptr_t)page, (uintptr_t)page,
-                        HAL_MMU_WRITABLE) != 0)
+                        HAL_MMU_WRITABLE | HAL_MMU_WRITE_COMBINING) != 0)
             return -1;
     }
 #endif
@@ -94,7 +94,7 @@ int hal_framebuffer_set_mode(uint32_t width, uint32_t height)
         return -1;
 
     size_t bytes = (size_t)width * height * 4;
-    void *mapped = vmap(physical, bytes, HAL_MMU_WRITABLE);
+    void *mapped = vmap(physical, bytes, HAL_MMU_WRITABLE | HAL_MMU_WRITE_COMBINING);
 
     if (mapped == NULL)
         return -1;

@@ -134,6 +134,8 @@ def main():
 
         with open(serial_path, errors="replace") as f:
             log = f.read()
+        if "Framebuffer memory: write combining" not in log:
+            sys.exit("FAIL: the framebuffer is not mapped write combining\n" + log[-600:])
         print(log.strip().splitlines()[-3:])
         if os.environ.get("FB_CHECK_SAVE"):
             subprocess.run(["cp", shot, os.environ["FB_CHECK_SAVE"]], check=True)

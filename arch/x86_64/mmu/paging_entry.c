@@ -24,7 +24,10 @@ uint64_t paging64_entry_phys(paging64_entry_t entry)
 
 int paging64_flags_from_hal(uint32_t hal_flags, bool no_execute, uint64_t *flags)
 {
-    if (hal_flags & ~(HAL_MMU_WRITABLE | HAL_MMU_USER | HAL_MMU_UNCACHED))
+    if (hal_flags & ~(HAL_MMU_WRITABLE | HAL_MMU_USER | HAL_MMU_UNCACHED | HAL_MMU_WRITE_COMBINING))
+        return -1;
+
+    if ((hal_flags & HAL_MMU_UNCACHED) && (hal_flags & HAL_MMU_WRITE_COMBINING))
         return -1;
 
     uint64_t result = 0;
@@ -39,6 +42,10 @@ int paging64_flags_from_hal(uint32_t hal_flags, bool no_execute, uint64_t *flags
 
     if (hal_flags & HAL_MMU_UNCACHED)
         result |= PAGING64_WRITE_THROUGH | PAGING64_CACHE_DISABLE;
+
+    /* PAT index 1 (PWT alone) is programmed as write combining (arch/x86/cpu/hal_cpu.c). */
+    if (hal_flags & HAL_MMU_WRITE_COMBINING)
+        result |= PAGING64_WRITE_THROUGH;
 
     *flags = result;
 
@@ -57,6 +64,8 @@ uint32_t paging64_flags_to_hal(uint64_t flags)
 
     if (flags & PAGING64_CACHE_DISABLE)
         result |= HAL_MMU_UNCACHED;
+    else if (flags & PAGING64_WRITE_THROUGH)
+        result |= HAL_MMU_WRITE_COMBINING;
 
     return result;
 }

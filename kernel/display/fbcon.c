@@ -25,6 +25,7 @@ static uint32_t origin_y;
 static int cursor_x = -1;
 static int cursor_y = -1;
 static uint32_t scale = 1; /* every glyph pixel is scale x scale screen pixels */
+static bool suspended;     /* fbcon_suspend: cells change, nothing is drawn */
 
 /* The standard VGA palette (0x00RRGGBB), indexed by color_t. */
 static const uint32_t palette[16] = {
@@ -38,6 +39,9 @@ static uint32_t *pixel(uint32_t px, uint32_t py)
 
 static void draw_cell(int x, int y)
 {
+    if (suspended)
+        return;
+
     const cell_t *cell = &cells[y * display.width + x];
     uint32_t fg = palette[cell->fg & 15];
     uint32_t bg = palette[cell->bg & 15];
@@ -72,6 +76,10 @@ static void put_cell(int x, int y, char c, color_t fg, color_t bg)
 
     cell_t *cell = &cells[y * display.width + x];
 
+    /* Scrolling rewrites many cells with what they show already: on slow display memory that is the cost. */
+    if (cell->c == c && cell->fg == (uint8_t)fg && cell->bg == (uint8_t)bg)
+        return;
+
     cell->c = c;
     cell->fg = (uint8_t)fg;
     cell->bg = (uint8_t)bg;
@@ -83,7 +91,13 @@ static void copy_cell(int src_x, int src_y, int dst_x, int dst_y)
     if (!inside(src_x, src_y) || !inside(dst_x, dst_y))
         return;
 
-    cells[dst_y * display.width + dst_x] = cells[src_y * display.width + src_x];
+    cell_t *source = &cells[src_y * display.width + src_x];
+    cell_t *destination = &cells[dst_y * display.width + dst_x];
+
+    if (destination->c == source->c && destination->fg == source->fg && destination->bg == source->bg)
+        return;
+
+    *destination = *source;
     draw_cell(dst_x, dst_y);
 }
 
@@ -119,7 +133,7 @@ static void clear(void)
 
 void fbcon_redraw(void)
 {
-    if (cells == NULL)
+    if (cells == NULL || suspended)
         return;
 
     /* Everything outside the grid is black too. */
@@ -136,6 +150,25 @@ void fbcon_redraw(void)
         for (int x = 0; x < display.width; x++)
             draw_cell(x, y);
     }
+}
+
+void fbcon_suspend(void)
+{
+    suspended = true;
+}
+
+int fbcon_resume(const hal_framebuffer_t *framebuffer)
+{
+    suspended = false;
+
+    if (cells == NULL || framebuffer == NULL || framebuffer->bpp != 32 || framebuffer->width != fb.width ||
+        framebuffer->height != fb.height)
+        return -1;
+
+    fb = *framebuffer;
+    fbcon_redraw();
+
+    return 0;
 }
 
 uint32_t fbcon_scale_for(uint32_t width, uint32_t height)
@@ -174,6 +207,7 @@ int fbcon_init(const hal_framebuffer_t *framebuffer, uint32_t top_margin)
         kfree(cells);
 
     cells = grid;
+    suspended = false;
     fb = *framebuffer;
     display.width = columns;
     display.height = rows;

@@ -96,8 +96,19 @@ static void test_flags_from_hal(void)
 
     /* Unknown bits: refused, *flags untouched. */
     flags = 0x77;
-    TEST_ASSERT_EQ_INT(-1, paging64_flags_from_hal(0x8, false, &flags));
+    TEST_ASSERT_EQ_INT(-1, paging64_flags_from_hal(0x10, false, &flags));
     TEST_ASSERT_EQ_INT(0x77, flags);
+}
+
+static void test_flags_write_combining(void)
+{
+    uint64_t flags = 0;
+
+    TEST_ASSERT_EQ_INT(0, paging64_flags_from_hal(HAL_MMU_WRITABLE | HAL_MMU_WRITE_COMBINING, false, &flags));
+    TEST_ASSERT(flags == (PAGING64_WRITABLE | PAGING64_WRITE_THROUGH));
+    TEST_ASSERT_EQ_INT(HAL_MMU_WRITABLE | HAL_MMU_WRITE_COMBINING,
+                       paging64_flags_to_hal(PAGING64_PRESENT | PAGING64_WRITABLE | PAGING64_WRITE_THROUGH));
+    TEST_ASSERT_EQ_INT(-1, paging64_flags_from_hal(HAL_MMU_UNCACHED | HAL_MMU_WRITE_COMBINING, false, &flags));
 }
 
 static void test_flags_to_hal(void)
@@ -116,6 +127,7 @@ int main(void)
     TEST_RUN(test_entry_make);
     TEST_RUN(test_entry_phys);
     TEST_RUN(test_flags_from_hal);
+    TEST_RUN(test_flags_write_combining);
     TEST_RUN(test_flags_to_hal);
 
     return TEST_REPORT("paging64_entry");

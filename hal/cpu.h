@@ -70,6 +70,7 @@ void hal_cpu_halt(void) __attribute__((noreturn));
 #define HAL_CPU_FEATURE_NX 0x00040000u       /* no-execute page bit */
 #define HAL_CPU_FEATURE_INVARIANT_TSC 0x00080000u /* TSC rate never changes */
 #define HAL_CPU_FEATURE_HYPERVISOR 0x00100000u    /* running in a virtual machine */
+#define HAL_CPU_FEATURE_PAT 0x00200000u           /* page attribute table (write combining) */
 
 typedef struct
 {

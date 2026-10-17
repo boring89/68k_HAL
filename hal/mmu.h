@@ -39,6 +39,12 @@ static inline void *hal_phys_to_virt(uint64_t phys)
 #define HAL_MMU_WRITABLE 0x1u
 #define HAL_MMU_USER     0x2u /* reachable from user mode */
 #define HAL_MMU_UNCACHED 0x4u /* device memory: never cached */
+/*
+ * Display memory: not cached, but writes are collected and sent in bursts (write combining), which is
+ * many times faster than HAL_MMU_UNCACHED for a framebuffer. Reads are as slow as uncached ones:
+ * keep a copy in RAM. Without PAT support the page is write-through. Not together with HAL_MMU_UNCACHED.
+ */
+#define HAL_MMU_WRITE_COMBINING 0x8u
 
 /*
  * Map the page at virt to the frame at phys. Returns -1 if either is
