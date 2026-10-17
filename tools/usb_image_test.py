@@ -24,9 +24,9 @@ OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 ENTRIES = [
     (0, "normal", ["Shell ready", "Interrupts: I/O APIC", "CPUs online: 2"]),
     (1, "safe mode", ["Shell ready", "using the 8259", "CPUs online: 1"]),
-    (2, "diagnostics", ["diagnostics 1/8", "Vendor"]),
+    (2, "diagnostics", ["diagnostics 1/9", "Vendor"]),
     (3, "mac", ["Shell ready"]),
-    (4, "diagnostics without USB", ["diagnostics 1/8", "driver disabled by noxhci"]),
+    (4, "diagnostics without USB", ["diagnostics 1/9", "driver disabled by noxhci"]),
     (5, "graphics (BIOS only)", ["Shell ready", "Framebuffer: 640x480"]),
 ]
 

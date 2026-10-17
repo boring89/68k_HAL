@@ -61,6 +61,9 @@ const char *hal_irq_controller(void);
  */
 void hal_irq_set_user_return_hook(void (*hook)(void));
 
+/* How many interrupts arrived on line (0 .. HAL_IRQ_LINE_COUNT - 1) since boot; 0 for other values. For diagnostics (`irqs`). */
+unsigned int hal_irq_line_count(unsigned int line);
+
 /*
  * How many interrupts have arrived since boot (wraps around). The scheduler uses it to see
  * whether anything happened while every process was waiting.

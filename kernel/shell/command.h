@@ -44,7 +44,8 @@ typedef enum
     COMMAND_DMESG,
     COMMAND_DIAG,
     COMMAND_POWEROFF,
-    COMMAND_REBOOT
+    COMMAND_REBOOT,
+    COMMAND_IRQS
 
 } shell_command_id_t;
 

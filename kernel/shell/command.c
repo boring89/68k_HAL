@@ -150,6 +150,9 @@ static void cmd_poweroff(
 static void cmd_reboot(
     int argc,
     char **argv);
+static void cmd_irqs(
+    int argc,
+    char **argv);
 
 static shell_command_entry_t commands[] =
     {
@@ -292,7 +295,11 @@ static shell_command_entry_t commands[] =
         {COMMAND_REBOOT,
          "reboot",
          "Restart the computer",
-         cmd_reboot}};
+         cmd_reboot},
+        {COMMAND_IRQS,
+         "irqs",
+         "Interrupts counted per line since boot (lines 0-15 ISA, 16 and up message signalled)",
+         cmd_irqs}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -1949,7 +1956,7 @@ static void run_named(const char *name, int argc, char **argv)
 
 void shell_run_diagnostics(void)
 {
-    static const char *const pages[] = {"cpuinfo", "acpi", "lspci -v", "usb", "disks", "net"};
+    static const char *const pages[] = {"cpuinfo", "acpi", "lspci -v", "usb", "irqs", "disks", "net"};
     unsigned int total = sizeof(pages) / sizeof(pages[0]) + 2;
     char *none[1] = {0};
 
@@ -2034,6 +2041,30 @@ static void cmd_reboot(
 
     terminal_write_line("Restarting...");
     hal_power_reboot();
+}
+
+static void cmd_irqs(
+    int argc,
+    char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    terminal_write("Controller: ");
+    terminal_write_line(hal_irq_controller());
+
+    for (unsigned int line = 0; line < HAL_IRQ_LINE_COUNT; line++)
+    {
+        unsigned int count = hal_irq_line_count(line);
+
+        if (count != 0)
+        {
+            write_number_line("line ", line, 0);
+            write_number_line("  count: ", count, 0);
+        }
+    }
+
+    write_number_line("total: ", hal_irq_count(), 0);
 }
 
 int shell_command_count(void)

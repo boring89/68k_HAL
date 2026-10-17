@@ -43,6 +43,12 @@ void irq_user_return(void)
 }
 
 static volatile unsigned int irq_total;
+static volatile unsigned int line_total[HAL_IRQ_LINE_COUNT];
+
+unsigned int hal_irq_line_count(unsigned int line)
+{
+    return line < HAL_IRQ_LINE_COUNT ? line_total[line] : 0;
+}
 
 unsigned int hal_irq_count(void)
 {
@@ -180,6 +186,9 @@ int hal_irq_msi_alloc(hal_irq_handler_t handler, uint32_t *address, uint32_t *da
 void irq_handler(uint32_t irq)
 {
     irq_total++;
+
+    if (irq < HAL_IRQ_LINE_COUNT)
+        line_total[irq]++;
 
     if (apic_mode)
     {
