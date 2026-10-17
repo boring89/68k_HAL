@@ -48,7 +48,7 @@ endif
 # The tools/*.py scripts start this QEMU for the tests that boot an image.
 export QEMU_SYSTEM := $(QEMU)
 
-CFLAGS=$(ARCH_FLAGS) -ffreestanding -I. -Wall -Wextra -Werror -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -nostdlib -MMD -MP \
+CFLAGS=$(ARCH_FLAGS) -std=gnu11 -ffreestanding -I. -Wall -Wextra -Werror -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -nostdlib -MMD -MP \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' $(EXTRA_CFLAGS)
 
 HOST_CC=gcc

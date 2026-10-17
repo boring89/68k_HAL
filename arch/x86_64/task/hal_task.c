@@ -14,6 +14,7 @@
 
 #include "kernel/lib/k_memory.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 
 extern void task_entry_stub(void);
