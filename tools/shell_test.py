@@ -95,7 +95,7 @@ def main():
     tmp = tempfile.mkdtemp()
     serial = os.path.join(tmp, "serial.log")
     monitor = os.path.join(tmp, "mon.sock")
-    qemu_bin = ["qemu-system-i386"]
+    qemu_bin = [os.environ.get("QEMU_SYSTEM", "qemu-system-i386")]
     if os.environ.get("SHELL_TEST_UEFI"):
         # q35 + OVMF (UEFI firmware); the variable store is a private copy.
         code = "/usr/share/OVMF/OVMF_CODE_4M.fd"

@@ -28,7 +28,7 @@ def main():
     tmp = tempfile.mkdtemp()
     serial = os.path.join(tmp, "serial.log")
     monitor = os.path.join(tmp, "mon.sock")
-    args = ["qemu-system-i386", "-cdrom", iso, "-display", "none", "-serial", "file:" + serial,
+    args = [os.environ.get("QEMU_SYSTEM", "qemu-system-i386"), "-cdrom", iso, "-display", "none", "-serial", "file:" + serial,
             "-monitor", "unix:%s,server,nowait" % monitor, "-m", "256"]
     if os.access("/dev/kvm", os.W_OK):
         args.insert(1, "-enable-kvm")

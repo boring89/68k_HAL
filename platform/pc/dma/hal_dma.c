@@ -30,6 +30,14 @@ void *hal_dma_alloc(size_t size, uint32_t *phys)
     if (address == 0)
         return NULL;
 
+    /* Devices are given 32-bit addresses (hal/dma.h): the PMM hands out low frames first, but check. */
+    if ((uint64_t)address + frames * HAL_MMU_PAGE_SIZE > 0x100000000ull)
+    {
+        pmm_free_frames(address, frames);
+
+        return NULL;
+    }
+
     void *memory = vmap(address, frames * HAL_MMU_PAGE_SIZE, HAL_MMU_WRITABLE);
 
     if (memory == NULL)

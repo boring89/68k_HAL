@@ -20,21 +20,20 @@
  * Physical memory as the kernel sees it. On a 32-bit machine the boot data and the boot modules
  * are identity mapped (virtual == physical). A 64-bit kernel maps all RAM at a fixed offset, the
  * "higher half direct map" (HAL_PHYS_BASE, set by the build for the x86_64 kernel; see
- * docs/x86_64.md). hal_phys_to_virt gives the pointer through which a physical address
+ * docs/x86_64.md). hal_phys_to_virt (and the macro HAL_PHYS_TO_VIRT, usable in a static initializer) gives the pointer through which a physical address
  * the boot loader handed over (a module, a table) can be read; it is only valid for RAM and for
  * addresses that the boot data mapping covers.
  */
 #ifdef HAL_PHYS_BASE
-static inline void *hal_phys_to_virt(uint64_t phys)
-{
-    return (void *)(uintptr_t)(phys + HAL_PHYS_BASE);
-}
+#define HAL_PHYS_TO_VIRT(phys) ((void *)(uintptr_t)((uint64_t)(phys) + HAL_PHYS_BASE))
 #else
+#define HAL_PHYS_TO_VIRT(phys) ((void *)(uintptr_t)(phys))
+#endif
+
 static inline void *hal_phys_to_virt(uint64_t phys)
 {
-    return (void *)(uintptr_t)phys;
+    return HAL_PHYS_TO_VIRT(phys);
 }
-#endif
 
 /* Mapping flags. Without HAL_MMU_WRITABLE a page is read-only. */
 #define HAL_MMU_WRITABLE 0x1u

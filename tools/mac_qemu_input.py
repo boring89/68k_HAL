@@ -43,7 +43,7 @@ def main():
         if os.path.exists(path):
             os.remove(path)
 
-    args = ["qemu-system-i386", "-m", "128", "-cdrom", iso, "-display", "none",
+    args = [os.environ.get("QEMU_SYSTEM", "qemu-system-i386"), "-m", "128", "-cdrom", iso, "-display", "none",
             "-serial", "file:" + serial,
             "-monitor", "unix:%s,server,nowait" % sock_path]
     if os.access("/dev/kvm", os.W_OK):

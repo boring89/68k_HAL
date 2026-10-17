@@ -12,6 +12,10 @@
 
 static int cpuid_supported(void)
 {
+#ifdef __x86_64__
+    /* Every processor with a 64-bit mode has CPUID. */
+    return 1;
+#else
     uint32_t before;
     uint32_t after;
 
@@ -30,6 +34,7 @@ static int cpuid_supported(void)
         : "memory", "cc");
 
     return ((before ^ after) & EFLAGS_ID) != 0;
+#endif
 }
 
 static void cpuid(uint32_t leaf, uint32_t out[4])

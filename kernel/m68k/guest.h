@@ -15,7 +15,11 @@
  * needs at least that much).
  */
 
+#ifdef HAL_PHYS_BASE
+#define M68K_GUEST_RAM_BASE 0xFFFFC00040000000ull /* kernel virtual address (64-bit kernel) */
+#else
 #define M68K_GUEST_RAM_BASE 0x10000000u /* kernel virtual address */
+#endif
 #define M68K_GUEST_RAM_DEFAULT_SIZE (8u * 1024 * 1024)
 /* 256 MiB: the range 0x10000000-0x1FFFFFFF is reserved for the guest RAM. */
 #define M68K_GUEST_RAM_MAX_SIZE (256u * 1024 * 1024)

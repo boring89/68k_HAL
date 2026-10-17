@@ -4,6 +4,7 @@
  */
 
 #include "hal/acpi.h"
+#include "hal/mmu.h"
 
 #include "acpi.h"
 #include "acpi_parse.h"
@@ -42,7 +43,7 @@ static const acpi_rsdp_t *find_rsdp(void)
 
     for (uintptr_t address = BIOS_AREA_START; address < BIOS_AREA_END; address += 16)
     {
-        const acpi_rsdp_t *rsdp = (const acpi_rsdp_t *)address;
+        const acpi_rsdp_t *rsdp = (const acpi_rsdp_t *)hal_phys_to_virt(address);
 
         if (acpi_rsdp_valid(rsdp))
             return rsdp;

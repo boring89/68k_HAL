@@ -23,7 +23,12 @@
 #include "platform/pc/timer/tsc.h"
 
 #include "arch/x86/interrupt/idt.h"
+#ifdef HAL_PHYS_BASE
+#include "arch/x86_64/gdt/gdt.h"
+#include "arch/x86_64/mmu/paging.h"
+#else
 #include "arch/x86/mmu/paging.h"
+#endif
 
 #include "kernel/log/log.h"
 #include "kernel/main.h"
@@ -50,6 +55,11 @@ static uint32_t boot_info;
  */
 void pc_entry(uint32_t magic, uint32_t info)
 {
+#ifdef HAL_PHYS_BASE
+    /* The boot code's GDT is in low memory that the kernel's own page tables will not map. */
+    gdt_init();
+#endif
+
     boot_magic = magic;
     boot_info = info;
 
@@ -124,6 +134,7 @@ void hal_init_early(void)
     kernel_printf("Multiboot info: %x\n", boot_info);
 }
 
+#ifndef HAL_PHYS_BASE
 /*
  * Identity map every page overlapping [start, end) that is not mapped
  * yet, read-only. Returns -1 if that would map page 0 (the null pointer
@@ -162,6 +173,12 @@ static void map_boot_data(void)
             panic("boot: cannot map boot data at %x", (unsigned int)region.base);
     }
 }
+#else
+/* The direct map of all RAM already covers the boot data (arch/x86_64/mmu/paging.c). */
+static void map_boot_data(void)
+{
+}
+#endif
 
 void hal_init(void)
 {

@@ -4,12 +4,14 @@
  */
 
 #include "vga.h"
+#include "hal/mmu.h"
 #include "arch/x86/io/io.h"
 
 #define VGA_MEM 0xB8000
 
+/* The text buffer's physical address; a 64-bit kernel reaches it through the direct map. */
 static unsigned short *video =
-    (unsigned short *)VGA_MEM;
+    (unsigned short *)HAL_PHYS_TO_VIRT(VGA_MEM);
 
 static void vga_update_cursor(int x, int y)
 {

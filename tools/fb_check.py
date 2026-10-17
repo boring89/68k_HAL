@@ -82,7 +82,7 @@ def main():
                 time.sleep(0.3)
             sys.exit(f"FAIL: serial output never showed '{text}'")
         process = subprocess.Popen(
-            ["qemu-system-i386", "-cdrom", iso, "-vga", "std",
+            [os.environ.get("QEMU_SYSTEM", "qemu-system-i386"), "-cdrom", iso, "-vga", "std",
              "-display", "none", "-no-reboot",
              "-serial", f"file:{serial_path}",
              "-monitor", f"unix:{monitor},server,nowait"])

@@ -21,7 +21,7 @@
  * Addresses of the entry stubs for lines 0-63 (irq_stub.asm): 0-15 are the ISA lines of
  * the 8259 / I/O APIC, 16-63 are vectors for message signalled interrupts (hal_irq_msi_alloc).
  */
-extern const uint32_t irq_stub_table[IRQ_STUB_COUNT];
+extern const uintptr_t irq_stub_table[IRQ_STUB_COUNT];
 
 /*
  * The stub for the local APIC's spurious vector: it just returns, without an end of interrupt

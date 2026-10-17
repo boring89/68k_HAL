@@ -19,7 +19,7 @@
 /* A suspended context: the saved kernel stack pointer (the registers are on that stack). */
 typedef struct
 {
-    uint32_t sp;
+    uintptr_t sp;
 } hal_context_t;
 
 /*

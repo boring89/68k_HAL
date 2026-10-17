@@ -161,7 +161,7 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         serial_path = os.path.join(tmp, "serial.log")
         process = subprocess.Popen(
-            ["qemu-system-i386", "-kernel", kernel,
+            [os.environ.get("QEMU_SYSTEM", "qemu-system-i386"), "-kernel", kernel,
              *(["-initrd", initrd] if initrd else []),
              "-display", "none", "-no-reboot",
              "-serial", f"file:{serial_path}",

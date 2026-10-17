@@ -6,6 +6,10 @@
 #ifndef ARCH_X86_INTERRUPT_INTERRUPT_FRAME_H
 #define ARCH_X86_INTERRUPT_INTERRUPT_FRAME_H
 
+#ifdef HAL_PHYS_BASE
+#include "arch/x86_64/interrupt/interrupt_frame.h"
+#else
+
 #include <stdint.h>
 
 /*
@@ -43,5 +47,7 @@ struct interrupt_frame
     uint32_t user_esp;
     uint32_t user_ss;
 };
+
+#endif /* HAL_PHYS_BASE */
 
 #endif

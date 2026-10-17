@@ -42,7 +42,7 @@ void hal_context_init(hal_context_t *ctx, void *stack, uint32_t stack_size,
     *--sp = (uint32_t)(uintptr_t)arg;
     *--sp = (uint32_t)(uintptr_t)entry;
 
-    ctx->sp = (uint32_t)(uintptr_t)push_start_state(sp, task_entry_stub);
+    ctx->sp = (uintptr_t)push_start_state(sp, task_entry_stub);
 }
 
 void hal_task_set_kernel_stack(void *top)
@@ -170,7 +170,7 @@ int hal_user_fork(hal_context_t *child, void *stack, uint32_t stack_size, uint32
     if (user_sp != 0)
         copy->user_esp = user_sp;
 
-    child->sp = (uint32_t)(uintptr_t)push_start_state((uint32_t *)copy, fork_return_stub);
+    child->sp = (uintptr_t)push_start_state((uint32_t *)copy, fork_return_stub);
 
     return 0;
 }

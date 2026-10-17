@@ -1,10 +1,53 @@
-BUILD=build
+# The kernel's architecture: i386 (32-bit protected mode, the default) or x86_64 (docs/x86_64.md).
+# make ARCH=x86_64 builds into build/x86_64 and runs the tests with qemu-system-x86_64.
+ARCH ?= i386
+
+ifeq ($(ARCH),x86_64)
+BUILD ?= build/x86_64
+else ifeq ($(ARCH),i386)
+BUILD ?= build
+else
+$(error ARCH must be i386 or x86_64)
+endif
+
 ISO_ROOT=$(BUILD)/iso_root
 
 ASM=nasm
 CC=gcc
 
-CFLAGS=-m32 -ffreestanding -I. -Wall -Wextra -Werror -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -nostdlib -MMD -MP \
+ifeq ($(ARCH),x86_64)
+# The "kernel" code model puts the kernel in the top 2 GiB; no red zone because interrupts use the
+# kernel stack; no SSE/x87 in kernel code (user programs' FPU state is saved with FXSAVE).
+# HAL_PHYS_BASE: where all RAM is mapped (hal/mmu.h); HAL_KERNEL_OFFSET: virtual - physical of the
+# kernel image (linker64.ld).
+ARCH_FLAGS := -m64 -mcmodel=kernel -mno-red-zone -mno-sse -mno-mmx -mno-80387 \
+	-DHAL_PHYS_BASE=0xFFFF800000000000ull -DHAL_KERNEL_OFFSET=0xFFFFFFFF80000000ull
+# Musashi may use double (its FPU emulation), so the compiler may use SSE there.
+ARCH_FLAGS_MUSASHI := -m64 -mcmodel=kernel -mno-red-zone
+BOOT_ASM := platform/pc/boot/boot64.asm
+ASM_FORMAT := elf64
+LD_ARCH := -m elf_x86_64 -z max-page-size=0x1000 -z noseparate-code
+LINKER_SCRIPT := linker64.ld
+QEMU ?= qemu-system-x86_64
+# Files of arch/x86 and platform/pc that only exist for the 32-bit kernel.
+ARCH_EXCLUDE := arch/x86/gdt arch/x86/interrupt/idt.c arch/x86/interrupt/isr.asm \
+	arch/x86/interrupt/irq_stub.asm arch/x86/interrupt/exception.c arch/x86/mmu arch/x86/task \
+	arch/x86/user arch/x86/test platform/pc/boot/boot.asm platform/pc/smp/trampoline.asm
+else
+ARCH_FLAGS := -m32
+ARCH_FLAGS_MUSASHI := -m32
+BOOT_ASM := platform/pc/boot/boot.asm
+ASM_FORMAT := elf32
+LD_ARCH := -m elf_i386
+LINKER_SCRIPT := linker.ld
+QEMU ?= qemu-system-i386
+ARCH_EXCLUDE := arch/x86_64 platform/pc/boot/boot64.asm platform/pc/smp/trampoline64.asm
+endif
+
+# The tools/*.py scripts start this QEMU for the tests that boot an image.
+export QEMU_SYSTEM := $(QEMU)
+
+CFLAGS=$(ARCH_FLAGS) -ffreestanding -I. -Wall -Wextra -Werror -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -nostdlib -MMD -MP \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' $(EXTRA_CFLAGS)
 
 HOST_CC=gcc
@@ -55,7 +98,7 @@ $(BUILD)/host/obj/$(MUSASHI)/%.o: $(MUSASHI)/%.c $(MUSASHI_GEN)/m68kops.h
 
 # Kernel build of Musashi. The stand-in headers come first (-isystem) because
 # the build machine has no 32-bit libc headers.
-KMUSASHI_CFLAGS := -m32 -ffreestanding -O2 -w -fno-pie -fno-stack-protector \
+KMUSASHI_CFLAGS := $(ARCH_FLAGS_MUSASHI) -ffreestanding -O2 -w -fno-pie -fno-stack-protector \
 	-fno-asynchronous-unwind-tables -nostdlib -I. -I$(MUSASHI) \
 	-I$(MUSASHI_GEN) -DMUSASHI_CNF='"$(MUSASHI_CNF)"' \
 	-isystem emu/m68k/freestanding/include -MMD -MP
@@ -77,8 +120,8 @@ $(BUILD)/$(MUSASHI)/%.o: $(MUSASHI)/%.c $(MUSASHI_GEN)/m68kops.h
 # emu/ (the 68k emulator) is built into the kernel as well as for host tests.
 SRC_DIRS := $(wildcard arch drivers emu hal kernel platform)
 
-C_SOURCES := $(shell find $(SRC_DIRS) -name "*.c")
-ASM_SOURCES := $(shell find $(SRC_DIRS) -name "*.asm")
+C_SOURCES := $(filter-out $(addsuffix %,$(ARCH_EXCLUDE)),$(shell find $(SRC_DIRS) -name "*.c"))
+ASM_SOURCES := $(filter-out $(addsuffix %,$(ARCH_EXCLUDE)),$(shell find $(SRC_DIRS) -name "*.asm"))
 
 C_OBJECTS := $(C_SOURCES:%.c=$(BUILD)/%.o)
 ASM_OBJECTS := $(ASM_SOURCES:%.asm=$(BUILD)/%.o)
@@ -92,32 +135,49 @@ $(BUILD)/%.o: %.c
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# The stand-in libc for Musashi has floating point functions (sin, pow...): SSE is allowed there.
+$(BUILD)/emu/m68k/freestanding/%.o: emu/m68k/freestanding/%.c
+	mkdir -p $(dir $@)
+	$(CC) $(filter-out -mno-sse -mno-mmx -mno-80387,$(CFLAGS)) -c $< -o $@
+
 $(BUILD)/%.o: %.asm
 	mkdir -p $(dir $@)
-	$(ASM) -f elf32 $< -o $@
+	$(ASM) -f $(ASM_FORMAT) -I. $< -o $@
 
-$(BUILD)/kernel.elf: $(OBJECTS)
-	ld -m elf_i386 -T linker.ld \
-		$(OBJECTS) \
-		-o $@
+# The 64-bit kernel is linked as an ELF64 file (kernel.elf.elf64, for debugging) and converted to a
+# 32-bit ELF file: GRUB's "multiboot" command and QEMU's -kernel only load those, and the entry code
+# is 32-bit anyway. The load addresses (physical) survive the conversion, the high virtual ones do not.
+ifeq ($(ARCH),x86_64)
+define LINK_KERNEL
+	ld $(LD_ARCH) -T $(LINKER_SCRIPT) $(1) -o $(2).elf64
+	objcopy -O elf32-i386 $(2).elf64 $(2)
+endef
+else
+define LINK_KERNEL
+	ld $(LD_ARCH) -T $(LINKER_SCRIPT) $(1) -o $(2)
+endef
+endif
+
+$(BUILD)/kernel.elf: $(OBJECTS) $(LINKER_SCRIPT)
+	$(call LINK_KERNEL,$(OBJECTS),$@)
 
 # The same kernel with a Multiboot header that asks for a graphics mode.
-BOOT_OBJECT := $(BUILD)/platform/pc/boot/boot.o
+BOOT_OBJECT := $(BOOT_ASM:%.asm=$(BUILD)/%.o)
 
-$(BUILD)/boot_gfx.o: platform/pc/boot/boot.asm
+$(BUILD)/boot_gfx.o: $(BOOT_ASM)
 	mkdir -p $(dir $@)
-	$(ASM) -f elf32 -d GRAPHICS $< -o $@
+	$(ASM) -f $(ASM_FORMAT) -d GRAPHICS $< -o $@
 
-$(BUILD)/kernel-gfx.elf: $(filter-out $(BOOT_OBJECT),$(OBJECTS)) $(BUILD)/boot_gfx.o
-	ld -m elf_i386 -T linker.ld $^ -o $@
+$(BUILD)/kernel-gfx.elf: $(filter-out $(BOOT_OBJECT),$(OBJECTS)) $(BUILD)/boot_gfx.o $(LINKER_SCRIPT)
+	$(call LINK_KERNEL,$(filter-out $(LINKER_SCRIPT),$^),$@)
 
 # For tools/uefi_check.py: the graphics image with a Multiboot2 header that asks for 1920x1080.
-$(BUILD)/boot_gfx1080.o: platform/pc/boot/boot.asm
+$(BUILD)/boot_gfx1080.o: $(BOOT_ASM)
 	mkdir -p $(dir $@)
-	$(ASM) -f elf32 -d GRAPHICS -d GFX_WIDTH=1920 -d GFX_HEIGHT=1080 $< -o $@
+	$(ASM) -f $(ASM_FORMAT) -d GRAPHICS -d GFX_WIDTH=1920 -d GFX_HEIGHT=1080 $< -o $@
 
-$(BUILD)/kernel-gfx1080.elf: $(filter-out $(BOOT_OBJECT),$(OBJECTS)) $(BUILD)/boot_gfx1080.o
-	ld -m elf_i386 -T linker.ld $^ -o $@
+$(BUILD)/kernel-gfx1080.elf: $(filter-out $(BOOT_OBJECT),$(OBJECTS)) $(BUILD)/boot_gfx1080.o $(LINKER_SCRIPT)
+	$(call LINK_KERNEL,$(filter-out $(LINKER_SCRIPT),$^),$@)
 
 # Header dependencies generated by -MMD.
 -include $(C_OBJECTS:.o=.d)
@@ -153,7 +213,7 @@ test-usb-image: usb-image
 	python3 -I tools/usb_image_test.py $(USB_IMAGE)
 
 run: iso
-	qemu-system-i386 -cdrom $(BUILD)/68k_HAL.iso -serial stdio -netdev user,id=n0 -device e1000,netdev=n0
+	$(QEMU) -cdrom $(BUILD)/68k_HAL.iso -serial stdio -netdev user,id=n0 -device e1000,netdev=n0
 
 all: $(BUILD)/kernel.elf $(BUILD)/kernel-gfx.elf
 
@@ -166,6 +226,7 @@ HOST_LIB_SOURCES := \
 	arch/x86/cpu/cpuid_decode.c \
 	arch/x86/interrupt/page_fault.c \
 	arch/x86/mmu/paging_entry.c \
+	arch/x86_64/mmu/paging_entry.c \
 	drivers/ps2_keyboard/keymap.c \
 	drivers/ps2_keyboard/scancode.c \
 	drivers/ps2_mouse/mouse_packet.c \
@@ -302,7 +363,7 @@ test-rom-qemu: $(BUILD)/host/mac_run_fast
 	want=$$($(BUILD)/host/mac_run_fast -F $(MAC_TEST_FRAMES) -d "$(MAC_DISK)" "$(MAC_ROM)" | sed -n 's/^mac: screen crc \([0-9a-f]*\) .*/\1/p'); \
 	accel=""; [ -w /dev/kvm ] && accel="-enable-kvm"; \
 	out=$(BUILD)/mac/qemu.out; \
-	qemu-system-i386 $$accel -m 128 -display none -serial stdio \
+	$(QEMU) $$accel -m 128 -display none -serial stdio \
 		-kernel $(BUILD)/mac/kernel-$(MAC_TEST_FRAMES)/kernel.elf \
 		-initrd "$(BUILD)/mac/rom.bin mac_rom,$(BUILD)/mac/disk.img mac_disk" > $$out 2>&1 & \
 	pid=$$!; n=0; \
@@ -328,7 +389,7 @@ test-mac-sound:
 	accel=""; [ -w /dev/kvm ] && accel="-enable-kvm"; \
 	out=$(BUILD)/mac/qemu_sound.out; \
 	rm -f $(BUILD)/mac/beep.wav; \
-	qemu-system-i386 $$accel -m 128 -display none -serial stdio \
+	$(QEMU) $$accel -m 128 -display none -serial stdio \
 		-audiodev wav,id=snd0,path=$(BUILD)/mac/beep.wav \
 		-device intel-hda -device hda-output,audiodev=snd0 \
 		-kernel $(BUILD)/mac/kernel-beep/kernel.elf \
@@ -353,7 +414,7 @@ test-mac-persist:
 	cp "$(MAC_DISK)" $(BUILD)/mac/persist.img; \
 	accel=""; [ -w /dev/kvm ] && accel="-enable-kvm"; \
 	out=$(BUILD)/mac/qemu_persist.out; \
-	qemu-system-i386 $$accel -m 128 -display none -serial stdio \
+	$(QEMU) $$accel -m 128 -display none -serial stdio \
 		-drive file=$(BUILD)/mac/persist.img,format=raw,if=ide,index=0,media=disk \
 		-kernel $(BUILD)/mac/kernel-persist/kernel.elf \
 		-initrd "$(BUILD)/mac/rom.bin mac_rom" > $$out 2>&1 & \
@@ -417,7 +478,7 @@ run-mac: $(BUILD)/kernel-gfx.elf
 	grub-mkrescue -o $(BUILD)/mac/play.iso $(BUILD)/mac/play > /dev/null 2>&1 || exit 1; \
 	accel=""; [ -w /dev/kvm ] && accel="-enable-kvm"; \
 	echo "run-mac: type mac + Enter in the QEMU window; \` stops; Ctrl+Alt+G frees the mouse"; \
-	qemu-system-i386 $$accel -m 256 -cdrom $(BUILD)/mac/play.iso -serial stdio
+	$(QEMU) $$accel -m 256 -cdrom $(BUILD)/mac/play.iso -serial stdio
 
 mac-screenshot: mac-iso
 	@[ -f $(BUILD)/mac/mac.iso ] || exit 0; \
@@ -580,7 +641,7 @@ $(BUILD)/test/ata_test.img: Makefile
 test-qemu: $(BUILD)/test/module_test.txt $(BUILD)/images/disk.img $(BUILD)/test/ata_test.img $(BUILD)/test/ahci_test.img $(BUILD)/test/nvme_test.img $(BUILD)/test/usb_test.img $(INITRD)
 	$(MAKE) --no-print-directory BUILD=$(BUILD)/test \
 		EXTRA_CFLAGS=-DKERNEL_SELFTEST $(BUILD)/test/kernel.elf
-	@timeout 60 qemu-system-i386 -kernel $(BUILD)/test/kernel.elf \
+	@timeout 60 $(QEMU) -kernel $(BUILD)/test/kernel.elf \
 		-initrd "$(BUILD)/test/module_test.txt testmod,$(BUILD)/images/disk.img disk,$(INITRD) initrd" \
 		-drive file=$(BUILD)/test/ata_test.img,format=raw,if=ide,index=0,media=disk $(QEMU_TEST_FLAGS); \
 	status=$$?; \
@@ -595,7 +656,7 @@ test-qemu: $(BUILD)/test/module_test.txt $(BUILD)/images/disk.img $(BUILD)/test/
 # The same selftest with "noapic" on the kernel command line: the 8259 delivers the interrupts
 # (the safe mode of the real-hardware USB image). Run after test-qemu: it reuses its kernel.
 test-noapic: test-qemu
-	@timeout 60 qemu-system-i386 -kernel $(BUILD)/test/kernel.elf -append noapic \
+	@timeout 60 $(QEMU) -kernel $(BUILD)/test/kernel.elf -append noapic \
 		-initrd "$(BUILD)/test/module_test.txt testmod,$(BUILD)/images/disk.img disk,$(INITRD) initrd" \
 		-drive file=$(BUILD)/test/ata_test.img,format=raw,if=ide,index=0,media=disk $(QEMU_TEST_FLAGS); \
 	status=$$?; \

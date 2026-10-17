@@ -254,8 +254,10 @@ void *hal_pci_map_bar(const hal_pci_device_t *device, unsigned int bar)
     if (bar >= 6 || device->bar[bar].type != HAL_PCI_BAR_MEM)
         return NULL;
 
+#ifndef HAL_PHYS_BASE
     if (device->bar[bar].base + device->bar[bar].size > 0x100000000ull)
-        return NULL; /* the kernel is 32-bit */
+        return NULL; /* the 32-bit kernel cannot address it */
+#endif
 
     return vmap(device->bar[bar].base, (size_t)device->bar[bar].size,
                 HAL_MMU_WRITABLE | HAL_MMU_UNCACHED);

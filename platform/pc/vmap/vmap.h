@@ -14,8 +14,13 @@
  * that lie outside the boot identity map: ACPI tables, the local APIC,
  * PCI BARs. Pages are handed out in order and never given back.
  */
+#ifdef HAL_PHYS_BASE
+#define VMAP_BASE 0xFFFFC00080000000ull /* 4 GiB in the upper half (64-bit kernel) */
+#define VMAP_LIMIT 0xFFFFC00180000000ull
+#else
 #define VMAP_BASE 0xE0000000u
 #define VMAP_LIMIT 0xF0000000u
+#endif
 
 /*
  * Map length bytes at physical address phys (any alignment) and return

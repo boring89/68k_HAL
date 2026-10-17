@@ -21,8 +21,8 @@ OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 KEYS = {"p": "p", "o": "o", "w": "w", "e": "e", "r": "r", "f": "f", "b": "b", "t": "t"}
 
 MACHINES = [
-    ("i440fx BIOS", ["qemu-system-i386"]),
-    ("q35 BIOS", ["qemu-system-i386", "-machine", "q35"]),
+    ("i440fx BIOS", [os.environ.get("QEMU_SYSTEM", "qemu-system-i386")]),
+    ("q35 BIOS", [os.environ.get("QEMU_SYSTEM", "qemu-system-i386"), "-machine", "q35"]),
     ("q35 UEFI", ["qemu-system-x86_64", "-machine", "q35"]),
 ]
 

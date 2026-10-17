@@ -29,9 +29,9 @@
  * across these instructions: the CPU reads the tables from memory.
  */
 
-static inline uint32_t cpu_read_cr0(void)
+static inline uintptr_t cpu_read_cr0(void)
 {
-    uint32_t value;
+    uintptr_t value;
 
     asm volatile(
         "mov %%cr0, %0"
@@ -43,7 +43,7 @@ static inline uint32_t cpu_read_cr0(void)
     return value;
 }
 
-static inline void cpu_write_cr0(uint32_t value)
+static inline void cpu_write_cr0(uintptr_t value)
 {
     asm volatile(
         "mov %0, %%cr0"
@@ -53,9 +53,9 @@ static inline void cpu_write_cr0(uint32_t value)
     );
 }
 
-static inline uint32_t cpu_read_cr4(void)
+static inline uintptr_t cpu_read_cr4(void)
 {
-    uint32_t value;
+    uintptr_t value;
 
     asm volatile(
         "mov %%cr4, %0"
@@ -67,7 +67,7 @@ static inline uint32_t cpu_read_cr4(void)
     return value;
 }
 
-static inline void cpu_write_cr4(uint32_t value)
+static inline void cpu_write_cr4(uintptr_t value)
 {
     asm volatile(
         "mov %0, %%cr4"
@@ -105,9 +105,9 @@ static inline uint64_t cpu_rdtsc(void)
 }
 
 /* Faulting linear address of the last page fault (Intel SDM Vol.3A 2.5). */
-static inline uint32_t cpu_read_cr2(void)
+static inline uintptr_t cpu_read_cr2(void)
 {
-    uint32_t value;
+    uintptr_t value;
 
     asm volatile(
         "mov %%cr2, %0"
@@ -119,9 +119,9 @@ static inline uint32_t cpu_read_cr2(void)
     return value;
 }
 
-static inline uint32_t cpu_read_cr3(void)
+static inline uintptr_t cpu_read_cr3(void)
 {
-    uint32_t value;
+    uintptr_t value;
 
     asm volatile(
         "mov %%cr3, %0"
@@ -137,7 +137,7 @@ static inline uint32_t cpu_read_cr3(void)
  * Load the physical address of the page directory. Also flushes all
  * non-global TLB entries (Intel SDM Vol.3A 4.10.4.1).
  */
-static inline void cpu_write_cr3(uint32_t value)
+static inline void cpu_write_cr3(uintptr_t value)
 {
     asm volatile(
         "mov %0, %%cr3"
@@ -165,18 +165,18 @@ static inline void cpu_invlpg(uintptr_t virt)
  */
 static inline uint32_t cpu_irq_save(void)
 {
-    uint32_t flags;
+    uintptr_t flags;
 
     asm volatile(
-        "pushfl\n\t"
-        "popl %0\n\t"
+        "pushf\n\t"
+        "pop %0\n\t"
         "cli"
         : "=r"(flags)
         :
         : "memory"
     );
 
-    return flags;
+    return (uint32_t)flags;
 }
 
 static inline void cpu_irq_restore(uint32_t flags)

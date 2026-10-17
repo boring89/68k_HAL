@@ -109,7 +109,7 @@ void hal_power_reboot(void)
     struct
     {
         uint16_t limit;
-        uint32_t base;
+        uintptr_t base; /* 4 bytes in protected mode, 8 in long mode */
     } __attribute__((packed)) empty = {0, 0};
 
     asm volatile("lidt %0; int3" : : "m"(empty));

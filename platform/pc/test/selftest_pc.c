@@ -178,7 +178,7 @@ static void test_hal_timer_ns(void)
     SELFTEST_ASSERT(hal_timer_ns() > ns0);
 }
 
-/* hal_init identity maps the Multiboot data for the shell's mmap. */
+/* The Multiboot data stays readable for the shell's mmap (hal_init identity maps it; a 64-bit kernel's direct map covers it). */
 static void test_multiboot_data_mapped(void)
 {
     const multiboot_info_t *mbi = multiboot_get_info();
@@ -186,14 +186,15 @@ static void test_multiboot_data_mapped(void)
     uintptr_t phys = 0;
 
     SELFTEST_ASSERT(hal_mmu_get_phys(address, &phys) == 0);
-    SELFTEST_ASSERT(phys == address);
+    SELFTEST_ASSERT(phys == multiboot_info_phys());
     SELFTEST_ASSERT(hal_mmu_get_phys(address + sizeof(*mbi) - 1, &phys) == 0);
 
     SELFTEST_ASSERT(mbi->flags & MULTIBOOT_INFO_MEM_MAP);
 
-    uintptr_t mmap_end = (uintptr_t)mbi->mmap_addr + mbi->mmap_length;
+    uintptr_t mmap_virt = (uintptr_t)hal_phys_to_virt(mbi->mmap_addr);
+    uintptr_t mmap_end = mmap_virt + mbi->mmap_length;
 
-    SELFTEST_ASSERT(hal_mmu_get_phys(mbi->mmap_addr, &phys) == 0);
+    SELFTEST_ASSERT(hal_mmu_get_phys(mmap_virt, &phys) == 0);
     SELFTEST_ASSERT(phys == mbi->mmap_addr);
     SELFTEST_ASSERT(hal_mmu_get_phys(mmap_end - 1, &phys) == 0);
 

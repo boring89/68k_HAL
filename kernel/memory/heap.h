@@ -14,8 +14,14 @@
  * to HEAP_VIRT_LIMIT, and grows by mapping more PMM frames at its end (see
  * heap_vm_init). KERNEL_HEAP_SIZE is how much it maps at first.
  */
+#ifdef HAL_PHYS_BASE
+/* 64-bit kernel: the kernel's own windows are in the upper half (docs/x86_64.md). */
+#define HEAP_VIRT_BASE 0xFFFFC00000000000ull
+#define HEAP_VIRT_LIMIT 0xFFFFC00040000000ull
+#else
 #define HEAP_VIRT_BASE 0x20000000u
 #define HEAP_VIRT_LIMIT 0x30000000u
+#endif
 #define KERNEL_HEAP_SIZE (1024 * 1024)
 
 typedef struct

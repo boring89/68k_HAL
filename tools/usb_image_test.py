@@ -42,7 +42,7 @@ def run_entry(image, uefi, index, name, expect):
                    "-drive", f"if=pflash,format=raw,readonly=on,file={OVMF_CODE}",
                    "-drive", f"if=pflash,format=raw,file={variables}"]
         else:
-            cmd = ["qemu-system-i386"]
+            cmd = [os.environ.get("QEMU_SYSTEM", "qemu-system-i386")]
         cmd += ["-m", "512", "-smp", "2", "-device", "qemu-xhci", "-cdrom", image, "-display", "none", "-no-reboot",
                 "-serial", f"file:{serial}", "-monitor", f"unix:{monitor},server,nowait"]
         process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

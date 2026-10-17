@@ -40,7 +40,9 @@ extern const char ap_tramp_end[];
 extern const char ap_tramp_stack[];
 extern const char ap_tramp_entry[];
 
+#ifndef HAL_PHYS_BASE
 static uint8_t ap_stacks[AP_MAX][AP_STACK_SIZE] __attribute__((aligned(16)));
+#endif
 
 /* Written by the APs (one lock-prefixed increment each), read by the boot CPU. */
 static volatile uint32_t ap_online;
@@ -76,6 +78,7 @@ static void icr_send(uint32_t apic_id, uint32_t command)
     icr_wait_idle();
 }
 
+#ifndef HAL_PHYS_BASE
 /* Runs on the AP, on its own stack, in protected mode without paging. */
 void smp_ap_entry(void);
 
@@ -86,6 +89,7 @@ void smp_ap_entry(void)
     for (;;)
         asm volatile("cli; hlt");
 }
+#endif
 
 /* Start one AP; returns 0 once it has reported, -1 on timeout. */
 static int start_ap(uint32_t apic_id, unsigned int index)
@@ -93,12 +97,19 @@ static int start_ap(uint32_t apic_id, unsigned int index)
     uint32_t before = ap_online;
 
     /* The data words sit at the same offsets in the copy. */
-    uint8_t *copy = (uint8_t *)TRAMP_BASE;
+    uint8_t *copy = hal_phys_to_virt(TRAMP_BASE);
     uint32_t *stack = (uint32_t *)(copy + (ap_tramp_stack - ap_tramp_start));
     uint32_t *entry = (uint32_t *)(copy + (ap_tramp_entry - ap_tramp_start));
 
+#ifdef HAL_PHYS_BASE
+    /* The 64-bit kernel's AP stays in protected mode and only counts itself (trampoline64.asm). */
+    (void)index;
+    *stack = 0;
+    *entry = (uint32_t)((uintptr_t)&ap_online - HAL_KERNEL_OFFSET);
+#else
     *stack = (uint32_t)(uintptr_t)(ap_stacks[index] + AP_STACK_SIZE);
     *entry = (uint32_t)(uintptr_t)smp_ap_entry;
+#endif
 
     /* INIT, wait 10 ms, then two SIPIs 200 us apart (MP Initialization Protocol). */
     icr_send(apic_id, ICR_LEVEL_ASSERT | ICR_INIT);
@@ -142,8 +153,8 @@ unsigned int smp_start(void)
 
     uint32_t bsp_id = lapic_id();
 
-    /* TRAMP_BASE is in the first 1 MiB, which the kernel identity maps. */
-    k_memcpy((void *)TRAMP_BASE, ap_tramp_start, (size_t)(ap_tramp_end - ap_tramp_start));
+    /* TRAMP_BASE is in the first 1 MiB (identity mapped, or in the direct map). */
+    k_memcpy(hal_phys_to_virt(TRAMP_BASE), ap_tramp_start, (size_t)(ap_tramp_end - ap_tramp_start));
 
     unsigned int index = 0;
 

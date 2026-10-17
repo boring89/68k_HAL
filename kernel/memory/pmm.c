@@ -8,14 +8,21 @@
 #include "hal/boot.h"
 #include "kernel/lib/k_memory.h"
 
-/* 32-bit physical address space without PAE: 4 GiB / 4 KiB frames. */
+/*
+ * 32-bit kernel: the physical address space without PAE, 4 GiB / 4 KiB frames. 64-bit kernel
+ * (HAL_PHYS_BASE, see docs/x86_64.md): 128 GiB, a 4 MiB bitmap in .bss.
+ */
+#ifdef HAL_PHYS_BASE
+#define PMM_MAX_FRAMES (1u << 25)
+#else
 #define PMM_MAX_FRAMES (1u << 20)
+#endif
 #define PMM_ADDRESS_LIMIT ((uint64_t)PMM_MAX_FRAMES * PMM_FRAME_SIZE)
 
 /* The low 1 MiB (BIOS data, EBDA, VGA, ROMs, frame 0) is never handed out. */
 #define PMM_LOW_MEMORY_END 0x100000
 
-/* One bit per frame, 1 = used. 128 KiB in .bss covers all of 4 GiB. */
+/* One bit per frame, 1 = used. */
 static uint32_t pmm_bitmap[PMM_MAX_FRAMES / 32];
 
 static size_t pmm_total_count;
