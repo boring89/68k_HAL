@@ -78,7 +78,10 @@ Mac 的 ROM 是一本很長的開機劇本，劇本裡不斷地「去敲某個�
 | `0x7860` | 等目標回應 BSY（逾時要幾分鐘） | `moveq #2,D0; rts` | 立刻逾時 |
 | `0xA3DC` | `_ADBOp` | `jmp` 到 stub | 每個 ADB 命令立刻回「沒有資料」 |
 | `0xA8E6` | 等 ADB 重新初始化的狀態機 | NOP | 沒有 ADB 硬體 |
+| `0x5E8A` | Slot Manager 探測每個 slot 的 `move.b (A1),D0`（空 slot 會 bus error，handler 回到 A2） | `SLOT_PROBE` 模擬 opcode：永遠跳到 A2 | 見下「GDevice 太多」 |
 | `0x36D0`、`0x3710` | UniversalInfo 的 FPU 旗標（bit 28） | 清除 | 否則 System 會執行 FNOP 偵測而炸掉 |
+
+**GDevice 太多（P8 S8 第 5 項，Monitors 卡死）**：我們的 bus 讀不存在的位址不會 bus error，所以 Slot Manager 的探測把 slot $1–$E 全當成有卡，最後內建視訊的 declaration ROM（ROM 尾端，映射在 slot $E）變成第二份視訊 sResource 來源：視訊的 primary init（ROM 尾端的程式，複製到 RAM `0x4178`）依螢幕偵測值刪掉不用的模式，但它是用 slot 0（= 內建視訊）刪的，slot $E 那 15 個模式沒被刪到。System 為每個模式開驅動，建了 16 個 GDevice；System 7.5.3 的 Monitors 控制台把螢幕收集進 16 格的陣列，第 16 格寫過界蓋到自己的 frame（`unlk` 得到壞的 A6、`rtd` 跳掉），停在 `movea.l ($38,A1),A1` 的串列搜尋迴圈裡。修正：探測永遠回報「沒有卡」，開機後只有一個 GDevice（`make test-rom` 檢查 `-G` 列出的 GDevice 數 = 1）。重現與分析用的工具：`-G`（列 GDevice）、`-T A06E`（記錄 A-line trap 與 Slot Manager 的 SpBlock）、`-L @addr`（在某 PC 記暫存器與記憶體）、`-V addr`（某個 long 改變時印出是哪個指令改的）、`-D addr,n`（反組譯 ROM）。
 
 **BootGlobs 與 BufPtr**：ROM 用實際探測記憶體得到的值算出 MemTop 與 BufPtr；我們的 RAM 是一整塊，那些值會是亂數。`PATCH_BOOT_GLOBS` 把 MemTop 設成 RAM 大小（8 MiB），BufPtr 保持 ROM 算出的距離但**對齊 4 位元組**。不對齊的話，ROM 把堆疊與 heap 的分界切在奇數位址，後來 boot block 被載到奇數位址，執行它時就發生 address error（指令位址一定要是偶數）。這是整個過程中最難找的 bug 之一。
 

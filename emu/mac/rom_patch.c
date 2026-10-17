@@ -111,6 +111,19 @@
  * device". */
 #define PATCH_ADBOP 0xA3DC
 
+/* Slot probe in the Slot Manager's init (ROM $5E8A): for slots $E down to $1
+ * it reads the byte at the top of the slot's address space ("move.b (A1),D0")
+ * and counts the slots that answer. On a real IIci every one of them is
+ * empty: the read gives a bus error and the handler resumes at A2, which
+ * skips the counting. Our bus never faults, so every slot counted as a card;
+ * the built-in video's declaration ROM (the end of the ROM, mapped at slot
+ * $E) then became a second source of the video sResources, and the video
+ * primary init, which deletes the unused modes through "slot 0" (the
+ * built-in video), left its 15 modes in slot $E. The System made a GDevice for
+ * each (16 in all), and the Monitors control panel overran its 16-entry
+ * list of screens and hung. The emulated opcode resumes at A2 for every slot. */
+#define PATCH_SLOT_PROBE 0x5E8A
+
 
 static void put16(uint8_t *rom, uint32_t off, uint16_t v)
 {
@@ -180,6 +193,8 @@ int mac_rom_patch(uint8_t *rom, uint32_t size)
     put16(rom, PATCH_INSTALL_DRIVERS + 6, OP_NOP);
 
     put16(rom, PATCH_SCSI_DISPATCH, MAC_EMUL_OP_SCSI_DISPATCH);
+
+    put16(rom, PATCH_SLOT_PROBE, MAC_EMUL_OP_SLOT_PROBE);
 
     put16(rom, PATCH_SCSI_WAIT_BSY, OP_MOVEQ_2_D0);
     put16(rom, PATCH_SCSI_WAIT_BSY + 2, OP_TST_W_D0);

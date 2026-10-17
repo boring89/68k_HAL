@@ -150,6 +150,9 @@ typedef struct
     bool trace_enabled;
     uint32_t break_lo, break_hi;    /* stop before running an instruction here */
     bool break_hit;
+    void (*pc_hook)(void *ctx, uint32_t pc); /* debugging: called before every instruction (tools/mac_run -L) */
+    void *pc_hook_ctx;
+    uint32_t watch_lo, watch_hi;    /* debugging: stop after the instruction that writes RAM here (0 = off) */
     uint32_t insn_count;
     mac_trace_t trace[MAC_TRACE_SIZE];
     uint32_t trace_next;        /* total entries written, ring index = % size */
@@ -233,6 +236,7 @@ int mac_rom_patch(uint8_t *rom, uint32_t size);
 #define MAC_EMUL_OP_DISK_CONTROL 0x7112
 #define MAC_EMUL_OP_DISK_STATUS 0x7113
 #define MAC_EMUL_OP_SCSI_DISPATCH 0x7128
+#define MAC_EMUL_OP_SLOT_PROBE 0x7129
 
 /* Native handlers of the .Disk driver (emu/mac/disk.c). They work on the
  * guest state of the emulated opcode that called them. */

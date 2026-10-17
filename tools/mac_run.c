@@ -23,6 +23,14 @@
  *   -r   print the parameter RAM at the end
  *   -c   list the ROM blocks (64 bytes) in the order they were first executed
  *   -b   stop when the PC reaches this address, or range lo-hi (hex); also with -F
+ *   -T   opcode: log each A-line trap (opcode 0 = all) with D0/A0/A1 (the Mac OS trap dispatcher entry)
+ *   -D   addr,count: disassemble count instructions from addr (hex) and exit
+ *   -G   with -F, list the QuickDraw GDevices (DeviceList) at the end
+ *   -V   addr: print every change of the 32-bit guest value at that address (hex), with the instruction that did it
+ *   -L   @addr: print the registers each time the PC is addr (hex)
+ *   -L   lo-hi: print every instruction with the registers while the instruction count (decimal) is in that range
+ *   -W   lo-hi,frame: with -F, from that frame on stop after the instruction that writes guest RAM in that
+ *        range (hex); the instruction is the last one of the trace tail (-t)
  *   -f   print the first N executed instructions (when the run is short)
  *   -t   print the last N executed instructions at the end (default 32)
  *
@@ -152,6 +160,93 @@ static void print_regs(void)
 
 static mac_t mac;
 static uint32_t g_tail = 32;
+static uint32_t log_lo, log_hi, log_pc;
+static bool want_log;
+static bool show_gd;
+static uint32_t dis_addr, dis_n;
+static bool trap_log;
+static uint32_t trap_filter;
+static uint32_t val_addr, val_last, val_prev_pc;
+static bool val_on;
+
+/* -L: one line per instruction with the registers (the hook runs before the instruction). */
+static void log_hook(void *ctx, uint32_t pc)
+{
+    (void)ctx;
+    if (val_on)
+    {
+        uint32_t v = mac_bus_read(&mac, val_addr, 4);
+
+        if (v != val_last)
+        {
+            printf("%u V %08X: %08X -> %08X by the instruction at %08X (next pc %08X)\n", mac.insn_count, val_addr,
+                   val_last, v, val_prev_pc, pc);
+            val_last = v;
+        }
+        val_prev_pc = pc;
+    }
+    if (trap_log && pc == 0x408099B0)
+    {
+        uint32_t sp = m68k_vm_get_reg(M68K_VM_REG_A0 + 7);
+        uint32_t op = mac_bus_read(&mac, mac_bus_read(&mac, sp + 2, 4), 2);
+
+        if (trap_filter == 0 || trap_filter == op)
+        {
+            printf("%u T %04X from %08X D0=%08X A0=%08X A1=%08X\n", mac.insn_count, op, mac_bus_read(&mac, sp + 2, 4),
+                   m68k_vm_get_reg(M68K_VM_REG_D0), m68k_vm_get_reg(M68K_VM_REG_A0),
+                   m68k_vm_get_reg(M68K_VM_REG_A0 + 1));
+            if (op == 0xA06E) /* Slot Manager: also the SpBlock (A0 = parameter block pointer in A0? no: A0 holds the SpBlock) */
+            {
+                uint32_t a = m68k_vm_get_reg(M68K_VM_REG_A0);
+
+                printf("    SpBlock@%08X result=%08X ptr=%08X cat=%04X ctype=%04X sw=%04X hw=%04X slot=%02X id=%02X\n", a,
+                       mac_bus_read(&mac, a, 4), mac_bus_read(&mac, a + 4, 4), mac_bus_read(&mac, a + 0x28, 2),
+                       mac_bus_read(&mac, a + 0x2A, 2), mac_bus_read(&mac, a + 0x2C, 2),
+                       mac_bus_read(&mac, a + 0x2E, 2), mac_bus_read(&mac, a + 0x31, 1), mac_bus_read(&mac, a + 0x32, 1));
+            }
+        }
+    }
+    if (log_pc == 0 && log_hi == 0)
+    {
+        return;
+    }
+    if (log_pc != 0 && pc != log_pc)
+    {
+        return;
+    }
+    if (mac.insn_count < log_lo || mac.insn_count > log_hi)
+    {
+        return;
+    }
+    char text[128];
+
+    m68k_disassemble(text, pc, M68K_CPU_TYPE_68030);
+    printf("%u %08X: %-32s D0=%08X D1=%08X D2=%08X D3=%08X D4=%08X D5=%08X D6=%08X A0=%08X A1=%08X A2=%08X A3=%08X A6=%08X A7=%08X\n",
+           mac.insn_count, pc, text, m68k_vm_get_reg(M68K_VM_REG_D0), m68k_vm_get_reg(M68K_VM_REG_D0 + 1),
+           m68k_vm_get_reg(M68K_VM_REG_D0 + 2), m68k_vm_get_reg(M68K_VM_REG_D0 + 3),
+           m68k_vm_get_reg(M68K_VM_REG_D0 + 4), m68k_vm_get_reg(M68K_VM_REG_D0 + 5),
+           m68k_vm_get_reg(M68K_VM_REG_D0 + 6), m68k_vm_get_reg(M68K_VM_REG_A0),
+           m68k_vm_get_reg(M68K_VM_REG_A0 + 1), m68k_vm_get_reg(M68K_VM_REG_A0 + 2),
+           m68k_vm_get_reg(M68K_VM_REG_A0 + 3), m68k_vm_get_reg(M68K_VM_REG_A0 + 6), m68k_vm_get_reg(M68K_VM_REG_A0 + 7));
+    if (log_pc != 0) /* -L @addr: also the first 48 bytes at A1 and the return address */
+    {
+        uint32_t a1 = m68k_vm_get_reg(M68K_VM_REG_A0 + 1);
+        uint32_t sp = m68k_vm_get_reg(M68K_VM_REG_A0 + 7);
+
+        printf("    ret=%08X A1:", mac_bus_read(&mac, sp, 4));
+        for (uint32_t i = 0; i < 48; i += 4)
+        {
+            printf(" %08X", mac_bus_read(&mac, a1 + i, 4));
+        }
+        printf("\n    A0:");
+        a1 = m68k_vm_get_reg(M68K_VM_REG_A0);
+        for (uint32_t i = 0; i < 56; i += 4)
+        {
+            printf(" %08X", mac_bus_read(&mac, a1 + i, 4));
+        }
+        printf("\n");
+    }
+}
 
 /* Sound: -W records what the sound chip plays (8-bit mono) and writes a WAV file at the end. */
 static uint8_t *audio_data;
@@ -252,6 +347,7 @@ int main(int argc, char **argv)
     int ndump = 0;
     uint32_t extra = 0;
     uint32_t break_hi = 0;
+    uint32_t watch_lo = 0, watch_hi = 0, watch_frame = 0;
     bool flow = false;
     bool show_xpram = false;
     uint32_t unimpl_max = 24;
@@ -320,6 +416,47 @@ int main(int argc, char **argv)
                        &keys[nkeys].down, &keys[nkeys].frame);
                 nkeys++;
             }
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'L' && i + 1 < argc)
+        {
+            if (argv[i + 1][0] == '@') /* -L @addr: log only when the PC is addr (hex) */
+            {
+                sscanf(argv[++i] + 1, "%x", &log_pc);
+                log_hi = 0xFFFFFFFFu;
+            }
+            else
+            {
+                sscanf(argv[++i], "%u-%u", &log_lo, &log_hi);
+            }
+            want_log = true;
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'W' && i + 1 < argc && strchr(argv[i + 1], ','))
+        {
+            sscanf(argv[++i], "%x-%x,%u", &watch_lo, &watch_hi, &watch_frame);
+            if (watch_hi == 0)
+            {
+                watch_hi = watch_lo;
+            }
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'V' && i + 1 < argc)
+        {
+            sscanf(argv[++i], "%x", &val_addr); /* -V addr: print each change of the 32-bit value at addr (hex) */
+            val_on = true;
+            want_log = true;
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'T' && i + 1 < argc)
+        {
+            sscanf(argv[++i], "%x", &trap_filter); /* -T opcode: log every A-line trap (0 = all) with that opcode (hex) */
+            trap_log = true;
+            want_log = true;
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'D' && i + 1 < argc)
+        {
+            sscanf(argv[++i], "%x,%u", &dis_addr, &dis_n);
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'G')
+        {
+            show_gd = true; /* -G: with -F, list the QuickDraw GDevices (DeviceList) at the end */
         }
         else if (argv[i][0] == '-' && argv[i][1] == 'R')
         {
@@ -440,7 +577,24 @@ int main(int argc, char **argv)
     mac.audio = audio_sink;
     mac.trace_enabled = true;
     mac.rtc_seconds = 0xD0000000u;     /* a fixed date in 2013 */
+    if (want_log)
+    {
+        mac.pc_hook = log_hook;
+    }
     mac_reset(&mac);
+    if (dis_n > 0)
+    {
+        /* -D addr,count: disassemble from that address (hex) and exit */
+        for (uint32_t a = dis_addr, n = 0; n < dis_n; n++)
+        {
+            char text[128];
+            uint32_t len = m68k_disassemble(text, a, M68K_CPU_TYPE_68030);
+
+            printf("%08X: %s\n", a, text);
+            a += len;
+        }
+        return 0;
+    }
 
     if (frames > 0)
     {
@@ -453,6 +607,11 @@ int main(int argc, char **argv)
 
         for (uint32_t f = 0; f < frames && !mac.break_hit; f++)
         {
+            if (watch_hi != 0 && f == watch_frame)
+            {
+                mac.watch_lo = watch_lo;
+                mac.watch_hi = watch_hi;
+            }
             for (int k = 0; k < nkeys; k++)
             {
                 if (keys[k].frame == f)
@@ -516,6 +675,20 @@ int main(int argc, char **argv)
         {
             printf("mac: screen crc %x after %u frames\n",
                    crc32(shot, MAC_SCREEN_W * MAC_SCREEN_H), frames);
+        }
+        if (show_gd)
+        {
+            /* DeviceList ($8A8): handle -> GDevice, gdNextGD at +$1E, gdFlags at +$14 */
+            uint32_t h = mac_bus_read(&mac, 0x8A8, 4);
+
+            for (int n = 0; h != 0 && n < 20; n++)
+            {
+                uint32_t gd = mac_bus_read(&mac, h, 4);
+
+                printf("gdevice %d: handle %08X ptr %08X flags %04X next %08X\n", n, h, gd,
+                       mac_bus_read(&mac, gd + 0x14, 2), mac_bus_read(&mac, gd + 0x1E, 4));
+                h = mac_bus_read(&mac, gd + 0x1E, 4);
+            }
         }
         max_insns = 0;
     }

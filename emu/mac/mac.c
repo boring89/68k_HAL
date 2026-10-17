@@ -272,6 +272,9 @@ void mac_bus_write(mac_t *mac, uint32_t addr, int size, uint32_t value)
         if (addr + size <= mac->ram_size && addr + size >= addr)
         {
             bswap_write(mac->ram + addr, size, value);
+
+            if (mac->watch_hi != 0 && addr <= mac->watch_hi && addr + size > mac->watch_lo)
+                mac->break_hit = true;
         }
         return;
     }
@@ -562,6 +565,15 @@ static void emul_patch_boot_globs(mac_t *mac)
 }
 
 
+/* "move.b (A1),D0" of the Slot Manager's probe of the slot address spaces: no card answers. A real
+ * empty slot raises a bus error and the handler resumes at the recovery address in A2. */
+static void emul_slot_probe(mac_t *mac)
+{
+    (void)mac;
+    m68k_vm_set_reg(M68K_VM_REG_PC, m68k_vm_get_reg(M68K_VM_REG_A0 + 2));
+}
+
+
 static void emul_op(mac_t *mac, uint32_t pc, uint16_t op)
 {
     switch (op)
@@ -602,6 +614,9 @@ static void emul_op(mac_t *mac, uint32_t pc, uint16_t op)
     case MAC_EMUL_OP_SCSI_DISPATCH:
         emul_scsi_dispatch(mac);
         break;
+    case MAC_EMUL_OP_SLOT_PROBE:
+        emul_slot_probe(mac);
+        break;
     default:
         log_unimpl(mac, pc, 2, false, op);
         break;
@@ -614,6 +629,10 @@ static void insn_hook(void *ctx, uint32_t pc)
     mac_t *mac = ctx;
 
     mac->insn_count++;
+    if (mac->pc_hook != NULL)
+    {
+        mac->pc_hook(mac->pc_hook_ctx, pc);
+    }
     if (mac->call_active && pc == mac->call_return_pc)
     {
         mac->call_returned = true;

@@ -341,6 +341,11 @@ test-rom: $(BUILD)/host/mac_run_fast
 		echo "test-rom: SKIP (no ROM at '$(MAC_ROM)'; set MAC_ROM=...)"; \
 	else \
 		$(BUILD)/host/mac_run_fast -n 2000000 "$(MAC_ROM)"; \
+		if [ -f "$(MAC_DISK)" ]; then \
+			n=$$($(BUILD)/host/mac_run_fast -F 1200 -G -d "$(MAC_DISK)" "$(MAC_ROM)" | grep -c '^gdevice'); \
+			if [ "$$n" != 1 ]; then echo "test-rom: FAIL: $$n GDevices after boot (want 1: empty slots must not look like cards)"; exit 1; fi; \
+			echo "test-rom: ok: one GDevice"; \
+		fi; \
 	fi
 
 # The same Mac in the kernel (kernel/mac), booted by QEMU with the ROM and the
