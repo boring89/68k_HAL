@@ -24,6 +24,16 @@ void hal_cpu_disable_interrupts(void)
     asm volatile("cli" : : : "memory");
 }
 
+uint32_t hal_cpu_irq_save(void)
+{
+    return cpu_irq_save();
+}
+
+void hal_cpu_irq_restore(uint32_t state)
+{
+    cpu_irq_restore(state);
+}
+
 /*
  * HLT stops the CPU until an interrupt, NMI or reset arrives; the
  * handler runs, then execution continues after HLT (Intel SDM Vol.2A

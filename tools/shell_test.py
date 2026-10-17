@@ -4,6 +4,7 @@
 """Boot the ISO in QEMU, type shell commands, and check the serial output.
 
 Usage: tools/shell_test.py ISO COMMAND=EXPECTED_TEXT [COMMAND=EXPECTED_TEXT ...]
+(COMMAND@@EXPECTED_TEXT when the command contains an "=")
 
 Each COMMAND is typed at the "HAL> " prompt through the QEMU monitor
 (sendkey); the run passes if EXPECTED_TEXT then shows up on the serial
@@ -88,7 +89,9 @@ def main():
         return 2
 
     iso = sys.argv[1]
-    steps = [arg.split("=", 1) for arg in sys.argv[2:]]
+    # COMMAND=EXPECTED; a command that has an "=" itself (a monitor command like device_add
+    # usb-kbd,id=k1) separates the two with "@@" instead.
+    steps = [arg.split("@@", 1) if "@@" in arg else arg.split("=", 1) for arg in sys.argv[2:]]
     tmp = tempfile.mkdtemp()
     serial = os.path.join(tmp, "serial.log")
     monitor = os.path.join(tmp, "mon.sock")
@@ -148,8 +151,11 @@ def main():
         for command, expected in steps:
             mark = len(output())
             for key in keys_for(command + "\n"):
-                # "{mouse_move 7 3}" is a monitor command, not a key.
-                send(key if key.startswith("mouse_") else "sendkey " + key)
+                # "{mouse_move 7 3}" is a monitor command, not a key; so is "{hmp device_add ...}".
+                if key.startswith("hmp "):
+                    send(key[4:])
+                else:
+                    send(key if key.startswith("mouse_") else "sendkey " + key)
             if expected == "":
                 # Nothing to wait for on the serial port (the command prints
                 # nothing): give it time before the next one is typed.

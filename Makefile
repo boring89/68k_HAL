@@ -11,7 +11,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -142,6 +142,8 @@ HOST_LIB_SOURCES := \
 	drivers/ps2_keyboard/scancode.c \
 	drivers/ps2_mouse/mouse_packet.c \
 	kernel/input/event.c \
+	kernel/usb/descriptor.c \
+	kernel/usb/hid.c \
 	kernel/input/linux_keys.c \
 	kernel/keyboard/keychar.c \
 	kernel/keyboard/keyseq.c \
@@ -640,6 +642,20 @@ test-q35: iso
 		"cpuinfo=Vendor" "acpi=Local APIC" "lspci=Host bridge" \
 		"dhcp=Address: 10.0.2.15" "ping 10.0.2.2=reply from 10.0.2.2"
 
+# USB keyboard and mouse through xHCI, with the PS/2 controller switched off (the P520 has none):
+# typing, the mouse, and a keyboard plugged in while the system runs.
+test-usb: iso
+	QEMU_ARGS="-machine q35,i8042=off -device qemu-xhci -device usb-kbd -device usb-mouse" \
+	python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
+		"cpuinfo=Vendor" "usb=keyboard" "usb=mouse" \
+		"run /bin/evtest=reading events" "{mouse_move 7 3}=rel 0 7" "a{up}q=key 103 1" \
+		"run /bin/hello=Hello from user mode"
+	QEMU_ARGS="-machine q35,i8042=off -device qemu-xhci" \
+	python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
+		"{hmp device_add usb-kbd,id=k1}@@" "usb=keyboard" "cpuinfo=Vendor" \
+		"{hmp device_add usb-mouse,id=m1}@@" "usb=mouse" \
+		"{hmp device_del m1}@@" "cpuinfo=Vendor"
+
 test-fb: all
 	python3 -I tools/fb_check.py
 
@@ -687,4 +703,4 @@ test-boundary:
 	done
 	@echo "boundary check: PASS"
 
-test: test-boundary test-host test-qemu test-noapic test-q35 test-shell test-video test-fb test-net test-virtio-net
+test: test-boundary test-host test-qemu test-noapic test-q35 test-usb test-shell test-video test-fb test-net test-virtio-net

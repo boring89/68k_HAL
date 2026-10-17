@@ -51,6 +51,40 @@ const char *usb_host_type_name(usb_host_type_t type);
 /* The USB version a controller type implements: "1.1", "2.0" or "3.x". */
 const char *usb_host_speed_name(usb_host_type_t type);
 
+/* A device found on a port of a host controller (what `usb` lists below the controllers). */
+#define USB_MAX_DEVICES 16
+
+typedef struct
+{
+    uint8_t port;         /* root hub port, 1-based */
+    uint8_t speed;        /* 1 full, 2 low, 3 high, 4 super, 5 super+ */
+    uint16_t vendor_id;
+    uint16_t product_id;
+    uint8_t device_class;
+    char use[16];         /* "keyboard", "mouse", "hub", "not used"... */
+} usb_device_info_t;
+
+/* Add a device to the list. Returns its id (>= 0), or -1 if the list is full. */
+int usb_device_add(const usb_device_info_t *device);
+
+/* Take it off the list again (unplugged). */
+void usb_device_remove(int id);
+
+unsigned int usb_device_count(void);
+
+/* Device index of those on the list. Returns 0, or -1 if out of range. */
+int usb_device_get(unsigned int index, usb_device_info_t *device);
+
+/*
+ * Drivers that need to look at their hardware now and then (hot plug, a lost interrupt) register a
+ * poller. usb_poll runs them all; the kernel's main loop and the scheduler's idle loop call it.
+ * Never from an interrupt handler. At most USB_MAX_POLLERS.
+ */
+#define USB_MAX_POLLERS 4
+
+int usb_poller_register(void (*poller)(void));
+void usb_poll(void);
+
 /* Forget every controller (for tests). */
 void usb_reset(void);
 

@@ -6,6 +6,9 @@
 #ifndef HAL_CPU_H
 #define HAL_CPU_H
 
+#include <stdint.h>
+
+
 /*
  * Control of the current CPU. Implemented once per architecture
  * (arch/<arch>/cpu/hal_cpu.c).
@@ -25,6 +28,14 @@ void hal_cpu_enable_interrupts(void);
 void hal_cpu_disable_interrupts(void);
 
 /*
+ * Critical sections: hal_cpu_irq_save disables interrupts and returns whether they were on;
+ * hal_cpu_irq_restore puts that state back (so the section may nest, or be entered with
+ * interrupts already off).
+ */
+uint32_t hal_cpu_irq_save(void);
+void hal_cpu_irq_restore(uint32_t state);
+
+/*
  * Sleep until the next interrupt arrives and has been handled.
  * Interrupts must be enabled, or the CPU never wakes up.
  */
@@ -37,7 +48,6 @@ void hal_cpu_halt(void) __attribute__((noreturn));
  * What the CPU reports about itself (CPUID). Feature bits are the
  * HAL_CPU_FEATURE_* masks.
  */
-#include <stdint.h>
 
 #define HAL_CPU_FEATURE_FPU 0x00000001u      /* x87 floating point unit */
 #define HAL_CPU_FEATURE_TSC 0x00000002u      /* time stamp counter */

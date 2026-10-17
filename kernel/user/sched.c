@@ -18,6 +18,7 @@
 #include "kernel/lib/k_string.h"
 #include "kernel/memory/heap.h"
 #include "kernel/panic/panic.h"
+#include "kernel/usb/usb.h"
 
 user_process_t *user_current;
 
@@ -129,6 +130,8 @@ static void schedule(void)
 
     for (;;)
     {
+        usb_poll(); /* devices come and go, and a lost interrupt must not lose a key */
+
         uint32_t now = stamp();
 
         /* Round robin, starting after the process that was running; it comes last. */

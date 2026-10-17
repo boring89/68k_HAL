@@ -1,6 +1,8 @@
 # USB：控制器列舉與設計
 
-`drivers/usb_host/`、`kernel/usb/`（第一步已完成）；其餘是設計。
+`drivers/usb_host/`（列舉控制器）、`drivers/xhci/`（xHCI 控制器與 HID 鍵盤滑鼠）、`kernel/usb/`（描述子、HID 報告解析、裝置清單）。
+
+**P7 R4 完成（自動排程一次做完，使用者尚未審核）**：xHCI 啟動、port 重置、裝置列舉、HID boot 鍵盤與滑鼠、熱插拔、MSI。集線器（hub）與隨身碟（Mass Storage）還沒有。
 
 ## 1. 概念
 
@@ -32,6 +34,34 @@
 - 範例輸出（QEMU）：`00:04.0 xHCI (USB 3.x) version 1.0, 8 ports, 64 device slots`、`EHCI … version 1.0, 6 ports`、`UHCI … 2 ports`。
 - 測試：selftest `test_usb_hosts`（QEMU 同時掛 `qemu-xhci`、`usb-ehci`、`piix3-usb-uhci`）與 `make test-shell` 的 `usb` 指令。
 
+## 2.5 xHCI driver（`drivers/xhci/xhci.c`）
+
+比喻：xHCI 控制器像一個**郵局**。我們（軟體）把「要寄的信」（TRB，每個 16 位元組的小紙條）放進**環狀的信箱**（ring）然後按**門鈴**（doorbell）；郵局把做完的事寫在另一個環狀信箱（事件環）並響鈴（中斷）。每張紙條有一個**cycle bit**表示「這張現在歸誰」：生產者每繞環一圈就把「有效」的意義翻轉一次，所以不需要頭尾指標暫存器。
+
+```
+ 軟體                                    xHCI
+ 命令環 ──[Enable Slot][Address Device]…──▶            （按 doorbell 0）
+ 傳輸環 ──[Setup][Data][Status]… ──────────▶            （按 doorbell slot，目標 endpoint）
+ 事件環 ◀──[Command Completion][Transfer Event][Port Status Change]── 中斷（MSI）
+```
+
+啟動順序（`xhci_probe` → `start_controller`）：
+1. PCI 驅動順序：`xhci_pci_driver` 排在 `usb_host` 之前；它先登記控制器（和 usb_host 同樣的記錄，讓 `usb` 能列出；驅動之間不能互相 include，所以自己做一份），再自己接手。
+2. 向 BIOS 取回控制權（USB Legacy Support 擴充 capability：設 OS-owned 位元、等 BIOS-owned 清除、關掉 SMI）。
+3. 停止、重置（`HCRST`）、設 `CONFIG`、配置 DCBAA（device context base address array）、scratchpad 緩衝（控制器要求的工作記憶）、命令環、事件環（一個 segment 的 ERST）、啟動 `R/S`。
+4. 中斷：MSI/MSI-X（`hal_pci_enable_msi`）；沒有就用 PCI 的傳統線；**輪詢也保留**：`usb_poll()`（kernel 主迴圈與排程器的閒置迴圈每圈呼叫）會自己跑事件環，所以中斷丟了或不存在也不會掉鍵。處理事件環的兩個地方（中斷處理程式與輪詢）互斥靠「輪詢時關中斷」（`hal_cpu_irq_save`）。
+5. 等 200 ms（裝置接上要時間），掃描每個 port。
+
+每個接了東西的 port（`scan_port`）：重置 port（USB2 需要；USB3 硬體自己訓練，已在 U0 就不用）→ `Enable Slot`（拿到 slot 編號）→ 配 device context、input context、控制 endpoint 的傳輸環 → `Address Device`（xHC 送出 SET_ADDRESS）→ 讀 device descriptor 前 8 位元組得知控制 endpoint 的真正封包大小（全速裝置可能是 8/16/32/64，不同就 `Evaluate Context` 更正）→ 讀完整 device 與 configuration descriptor（`kernel/usb/descriptor.c` 解析）→ 如果有 HID boot 介面：`SET_CONFIGURATION`、`SET_PROTOCOL(boot)`、`SET_IDLE(0)`、`Configure Endpoint`（加上 interrupt IN endpoint 與它的傳輸環）→ 放一個 Normal TRB 等報告。
+
+**熱插拔**：事件環的 Port Status Change 事件只設旗標；`usb_poll()` 呼叫的 `service()`（不在中斷裡，可以等）重新掃那個 port：拔掉就 `Disable Slot` 並釋放；插上就列舉。
+
+HID 報告 → `kernel/usb/hid.c`：鍵盤 8 位元組（修飾鍵位元 + 最多 6 個按下的鍵）與上一份比較，產生 release → 修飾鍵變化 → press 的事件（所以 Ctrl+C 是 Ctrl 先、C 後）；滑鼠 3–4 位元組（按鈕、dx、dy）直接成為滑鼠事件。使用 `input_event_push`，和 PS/2 驅動一樣，所以 shell、使用者程式、Mac 都不需要知道輸入來自 USB。
+
+限制：只用第一個 xHCI 控制器；**還沒有 hub**（接在 hub 後面的裝置不會被找到，`usb` 會列出 hub 為 `hub (unsupported)`）；interrupt endpoint 出錯（stall）時停止輪詢該 endpoint 而不做 Reset Endpoint 復原；沒有 USB 3 的 stream、isochronous、電源管理（U1/U2）；沒有 Mass Storage。
+
+測試：`tests/host/test_usb_hid.c`、`test_usb_descriptor.c`（純函式）；`make test-usb`：q35 + `-machine q35,i8042=off`（沒有 PS/2）+ `qemu-xhci` + `usb-kbd` + `usb-mouse`，用 monitor 的 `sendkey` 打字、`mouse_move` 移動滑鼠（`/bin/evtest` 看到事件）；另一輪從只有控制器開始，`device_add usb-kbd`／`usb-mouse` 熱插拔。
+
 ## 3. 設計：之後要做的事（依序，每一步都能在 QEMU 驗證）
 
 參考實作：Haiku 的 USB 匯流排驅動（MIT 授權，原始碼已淺層下載在 `third_party/downloads/haiku/haiku-src/src/add-ons/kernel/busses/usb/`：`xhci.cpp` 3300 行、`ehci.cpp` 3100 行、`uhci.cpp` 2500 行、`ohci.cpp`）。建議**只做 xHCI**（QEMU 與所有近年電腦都有；它也是唯一同時處理 1.x/2.0/3.x 裝置的）。
@@ -51,4 +81,4 @@
 
 ## 4. 限制
 
-目前只有「找到並列出控制器」：沒有任何 USB 裝置能用。
+見 2.5。UHCI／OHCI／EHCI 只列出，不驅動。

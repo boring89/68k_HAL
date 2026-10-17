@@ -1809,6 +1809,26 @@ static void cmd_usb(
 
         terminal_newline();
     }
+
+    /* Below the controllers: what is plugged in. */
+    for (unsigned int i = 0; i < usb_device_count(); i++)
+    {
+        usb_device_info_t device;
+        char number[16];
+
+        usb_device_get(i, &device);
+        terminal_write("  port ");
+        k_utoa(device.port, number);
+        terminal_write(number);
+        terminal_write(": ");
+        write_hex_padded(device.vendor_id, 4);
+        terminal_put_char(':');
+        write_hex_padded(device.product_id, 4);
+        terminal_write(", ");
+        terminal_write(device.speed == 1 ? "full" : device.speed == 2 ? "low" : device.speed == 3 ? "high" : "super");
+        terminal_write(" speed, ");
+        terminal_write_line(device.use);
+    }
 }
 
 int shell_command_count(void)
