@@ -22,6 +22,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -1401,6 +1402,62 @@ static int box_uptime(int argc, char **argv)
     return 0;
 }
 
+/* ps: the process list of the kernel (/proc/processes). */
+static int box_ps(int argc, char **argv)
+{
+    char text[4096];
+    int fd = open("/proc/processes", O_RDONLY);
+
+    (void)argc;
+    (void)argv;
+
+    if (fd < 0)
+        return fail("/proc/processes");
+
+    ssize_t n = read(fd, text, sizeof(text) - 1);
+
+    close(fd);
+
+    if (n < 0)
+        return fail("/proc/processes");
+
+    fwrite(text, 1, (size_t)n, stdout);
+
+    return 0;
+}
+
+/* kill [-SIGNAL-NUMBER] pid... */
+static int box_kill(int argc, char **argv)
+{
+    int signal_number = 15;
+    int first = 1;
+    int status = 0;
+
+    if (argc > 1 && argv[1][0] == '-')
+    {
+        signal_number = atoi(argv[1] + 1);
+        first = 2;
+    }
+
+    if (first >= argc)
+    {
+        fprintf(stderr, "usage: kill [-signal] pid...\n");
+
+        return 1;
+    }
+
+    for (int i = first; i < argc; i++)
+    {
+        if (kill((pid_t)atoi(argv[i]), signal_number) != 0)
+        {
+            perror(argv[i]);
+            status = 1;
+        }
+    }
+
+    return status;
+}
+
 static int box_clear(int argc, char **argv)
 {
     (void)argc;
@@ -1424,6 +1481,7 @@ static const struct
     {"stat", box_stat},         {"tail", box_tail},   {"tee", box_tee},       {"touch", box_touch},
     {"true", box_true},         {"uname", box_uname}, {"uniq", box_uniq},     {"wc", box_wc},
     {"echo", box_echo},         {"free", box_free},   {"uptime", box_uptime},
+    {"ps", box_ps},             {"kill", box_kill},
 };
 
 #define APPLET_COUNT ((int)(sizeof(applets) / sizeof(applets[0])))

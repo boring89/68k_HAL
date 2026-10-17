@@ -13,6 +13,8 @@
 #include "kernel/memory/pmm.h"
 #include "kernel/vfs/procfs.h"
 
+#include "sched.h"
+
 static size_t version_text(char *buffer, size_t size)
 {
     return k_snprintf(buffer, size, "68k_HAL 0.1 (i386)\n");
@@ -73,6 +75,27 @@ static size_t cpuinfo_text(char *buffer, size_t size)
     return length < size ? length : size;
 }
 
+/* One line per process: pid, parent, group, state (R runnable, S waiting, Z zombie), name. */
+static size_t processes_text(char *buffer, size_t size)
+{
+    size_t length = k_snprintf(buffer, size, "PID PPID PGID S NAME\n");
+
+    for (unsigned int i = 1; i <= USER_MAX_PROCS && length < size; i++)
+    {
+        const user_process_t *p = sched_slot(i);
+
+        if (p == NULL)
+            continue;
+
+        char state = p->state == PROC_ZOMBIE ? 'Z' : p->state == PROC_WAITING ? 'S' : 'R';
+
+        length += k_snprintf(buffer + length, size - length, "%u %u %u %c %s\n", (unsigned int)p->pid,
+                             (unsigned int)p->ppid, (unsigned int)p->pgid, state, p->name);
+    }
+
+    return length < size ? length : size;
+}
+
 vfs_fs_t *procfiles_create(void)
 {
     vfs_fs_t *fs = procfs_create();
@@ -84,6 +107,7 @@ vfs_fs_t *procfiles_create(void)
     procfs_add(fs, "uptime", uptime_text);
     procfs_add(fs, "meminfo", meminfo_text);
     procfs_add(fs, "cpuinfo", cpuinfo_text);
+    procfs_add(fs, "processes", processes_text);
 
     return fs;
 }

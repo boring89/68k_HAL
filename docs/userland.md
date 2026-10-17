@@ -208,7 +208,7 @@ shell 行裡的 `|`、`<`、`>`、`>>`（各自要用空白隔開）：`seq 20 |
 
 ### 5.10 `/proc`
 
-`kernel/vfs/procfs.c`（通用：唯讀文字檔，內容在 `open` 時才產生，像 Linux 的 /proc；產生函式註冊在表裡）與 `kernel/user/procfiles.c`（實際的檔案）：`/proc/version`、`/proc/uptime`（「秒.百分之一秒 0.00」）、`/proc/meminfo`（MemTotal、MemFree、HeapUsed、HeapTotal，單位 kB）、`/proc/cpuinfo`（每個執行中的處理器一段，格式同 Linux）。內容在 `open` 的那一刻定格（讀到一半不會變）。box 的 `free`、`uptime` 讀它們（`free` 與 shell 內建的 `free` 同名，請打 `box free`）。
+`kernel/vfs/procfs.c`（通用：唯讀文字檔，內容在 `open` 時才產生，像 Linux 的 /proc；產生函式註冊在表裡）與 `kernel/user/procfiles.c`（實際的檔案）：`/proc/version`、`/proc/uptime`（「秒.百分之一秒 0.00」）、`/proc/meminfo`（MemTotal、MemFree、HeapUsed、HeapTotal，單位 kB）、`/proc/processes`（行程表：pid、ppid、pgid、狀態 R/S/Z、名稱；box 的 `ps` 讀它，`kill [-n] pid` 送訊號）、`/proc/cpuinfo`（每個執行中的處理器一段，格式同 Linux）。內容在 `open` 的那一刻定格（讀到一半不會變）。box 的 `free`、`uptime` 讀它們（`free` 與 shell 內建的 `free` 同名，請打 `box free`）。
 
 ### 遇到 ENOSYS 時怎麼補
 

@@ -651,6 +651,7 @@ test-shell: iso
 		"box cat /proc/cpuinfo=vendor_id" \
 		"seq 20 | grep 1 | wc -l=11" \
 		"dmesg=Kernel Booting" \
+		"ps=PID PPID PGID S NAME" \
 		"seq 1000 | grep 7 | wc -l=271" \
 		"run /bin/forkexec=grandchild chain: 4" \
 		"run /bin/dash /data/test.sh=job finished" \
