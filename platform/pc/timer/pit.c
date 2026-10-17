@@ -12,9 +12,10 @@
 #include "hal/irq.h"
 
 /*
- * Ports, input clock and the 0x36 command (channel 0, lobyte/hibyte,
- * mode 3 square wave, binary) from OSDev Wiki "Programmable Interval
- * Timer".
+ * Ports, input clock and the 0x34 command (channel 0, lobyte/hibyte,
+ * mode 2 rate generator, binary) from OSDev Wiki "Programmable Interval
+ * Timer". Mode 2 gives one rising edge of the output per period. Mode 3 (square wave) would
+ * too, but QEMU delivers it twice per period through the I/O APIC (found by measuring).
  */
 #define PIT_CHANNEL0 0x40
 #define PIT_COMMAND 0x43
@@ -35,7 +36,7 @@ void pit_init(uint32_t frequency)
 
     uint32_t divisor = 1193182 / frequency;
 
-    outb(PIT_COMMAND, 0x36);
+    outb(PIT_COMMAND, 0x34);
 
     outb(PIT_CHANNEL0, divisor & 0xff);
     outb(PIT_CHANNEL0, (divisor >> 8) & 0xff);

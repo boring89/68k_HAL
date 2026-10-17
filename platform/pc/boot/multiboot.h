@@ -137,6 +137,9 @@ void multiboot_init(uint32_t address);
 
 int multiboot2_init(uint32_t address);
 
+/* The kernel command line (a copy), or NULL if the loader gave none. */
+const char *multiboot_cmdline(void);
+
 /* Start and size of the raw Multiboot2 tag list, or 0 for Multiboot 1. */
 uint32_t multiboot_raw_base(void);
 uint32_t multiboot_raw_size(void);

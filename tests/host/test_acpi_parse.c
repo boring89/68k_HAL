@@ -43,10 +43,23 @@ static size_t build_madt(uint8_t *t)
     put32(t + n + 4, 0xFEC00000u);
     n += 12;
 
-    /* An unknown entry type must be skipped. */
+    /* Interrupt source overrides like QEMU's: the timer (IRQ 0) is on input 2, level/low for IRQ 9. */
     t[n] = 2;
     t[n + 1] = 10;
+    t[n + 3] = 0;
+    put32(t + n + 4, 2);
     n += 10;
+    t[n] = 2;
+    t[n + 1] = 10;
+    t[n + 3] = 9;
+    put32(t + n + 4, 9);
+    t[n + 8] = 0x0D; /* level, active low */
+    n += 10;
+
+    /* An unknown entry type must be skipped. */
+    t[n] = 0x42;
+    t[n + 1] = 6;
+    n += 6;
 
     put32(t + 4, (uint32_t)n);
 
@@ -87,6 +100,13 @@ static void test_madt(void)
     TEST_ASSERT_EQ_INT(0xFEC00000u, info.ioapic_base[0]);
     TEST_ASSERT_EQ_INT(0xFEE00000u, info.lapic_base);
     TEST_ASSERT(info.dual_8259);
+    TEST_ASSERT_EQ_INT(0, info.ioapic_gsi_base[0]);
+    TEST_ASSERT_EQ_INT(2, info.irq_override_count);
+    TEST_ASSERT_EQ_INT(0, info.irq_override[0].source);
+    TEST_ASSERT_EQ_INT(2, info.irq_override[0].gsi);
+    TEST_ASSERT_EQ_INT(9, info.irq_override[1].source);
+    TEST_ASSERT_EQ_INT(9, info.irq_override[1].gsi);
+    TEST_ASSERT_EQ_INT(0x0D, info.irq_override[1].flags);
 }
 
 static void test_madt_lapic_override(void)

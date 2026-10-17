@@ -4,6 +4,7 @@
 bits 32
 
 global irq_stub_table
+global irq_spurious_stub
 extern irq_handler
 
 ; Entry stubs for IRQ lines 0-15. Each pushes its line number so every
@@ -32,8 +33,12 @@ irq_common_stub:
     add esp, 4
     iret
 
+; A spurious local APIC interrupt: nothing to acknowledge.
+irq_spurious_stub:
+    iret
+
 %assign i 0
-%rep 16
+%rep 64
 IRQ i
 %assign i i + 1
 %endrep
@@ -42,7 +47,7 @@ section .rodata
 
 irq_stub_table:
 %assign i 0
-%rep 16
+%rep 64
     dd irq %+ i
 %assign i i + 1
 %endrep

@@ -11,7 +11,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -542,6 +542,20 @@ test-qemu: $(BUILD)/test/module_test.txt $(BUILD)/images/disk.img $(BUILD)/test/
 		exit 1; \
 	fi
 
+# The same selftest with "noapic" on the kernel command line: the 8259 delivers the interrupts
+# (the safe mode of the real-hardware USB image). Run after test-qemu: it reuses its kernel.
+test-noapic: test-qemu
+	@timeout 60 qemu-system-i386 -kernel $(BUILD)/test/kernel.elf -append noapic \
+		-initrd "$(BUILD)/test/module_test.txt testmod,$(BUILD)/images/disk.img disk,$(INITRD) initrd" \
+		-drive file=$(BUILD)/test/ata_test.img,format=raw,if=ide,index=0,media=disk $(QEMU_TEST_FLAGS); \
+	status=$$?; \
+	if [ $$status -eq 33 ]; then \
+		echo "QEMU selftest (noapic): PASS"; \
+	else \
+		echo "QEMU selftest (noapic): FAIL (exit status $$status)"; \
+		exit 1; \
+	fi
+
 # Boot the ISO (GRUB, with the initrd module), type shell commands and
 # check what the programs print on the serial port (tools/shell_test.py).
 test-shell: iso
@@ -619,6 +633,13 @@ test-uefi: iso
 	SHELL_TEST_UEFI=1 python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
 		"acpi=Local APIC" "cpuinfo=Vendor" "lspci=Host bridge"
 
+# The Q35 chipset (PCIe, ICH9, MSI-capable e1000e) with the BIOS: APIC interrupts and the network.
+test-q35: iso
+	QEMU_ARGS="-machine q35 -netdev user,id=n0 -device e1000,netdev=n0" \
+	python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
+		"cpuinfo=Vendor" "acpi=Local APIC" "lspci=Host bridge" \
+		"dhcp=Address: 10.0.2.15" "ping 10.0.2.2=reply from 10.0.2.2"
+
 test-fb: all
 	python3 -I tools/fb_check.py
 
@@ -666,4 +687,4 @@ test-boundary:
 	done
 	@echo "boundary check: PASS"
 
-test: test-boundary test-host test-qemu test-shell test-video test-fb test-net test-virtio-net
+test: test-boundary test-host test-qemu test-noapic test-q35 test-shell test-video test-fb test-net test-virtio-net

@@ -11,6 +11,7 @@
  *   PCAT_COMPAT), then variable-length entries { u8 type, u8 length, ... }.
  *     type 0: processor local APIC   { u8 acpi id, u8 apic id, u32 flags (bit 0 = enabled) }
  *     type 1: I/O APIC               { u8 id, u8 reserved, u32 address, u32 gsi base }
+ *     type 2: interrupt source override { u8 bus (0 = ISA), u8 source irq, u32 gsi, u16 flags }
  *     type 5: local APIC address override { u16 reserved, u64 address }
  */
 #define MADT_ENTRIES_OFFSET 44
@@ -57,6 +58,7 @@ int acpi_parse_madt(const uint8_t *madt, size_t length, hal_acpi_info_t *info)
     info->dual_8259 = (read32(madt + 40) & 1) != 0;
     info->cpu_count = 0;
     info->ioapic_count = 0;
+    info->irq_override_count = 0;
 
     size_t offset = MADT_ENTRIES_OFFSET;
 
@@ -81,7 +83,19 @@ int acpi_parse_madt(const uint8_t *madt, size_t length, hal_acpi_info_t *info)
             {
                 info->ioapic_id[info->ioapic_count] = entry[2];
                 info->ioapic_base[info->ioapic_count] = read32(entry + 4);
+                info->ioapic_gsi_base[info->ioapic_count] = read32(entry + 8);
                 info->ioapic_count++;
+            }
+        }
+        else if (type == 2 && size >= 10)
+        {
+            if (entry[2] == 0 && info->irq_override_count < HAL_ACPI_MAX_OVERRIDES)
+            {
+                hal_acpi_irq_override_t *override = &info->irq_override[info->irq_override_count++];
+
+                override->source = entry[3];
+                override->gsi = read32(entry + 4);
+                override->flags = (uint16_t)(entry[8] | entry[9] << 8);
             }
         }
         else if (type == 5 && size >= 12)

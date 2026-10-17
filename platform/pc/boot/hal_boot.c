@@ -30,6 +30,11 @@ int hal_boot_memory_region(unsigned int index, hal_memory_region_t *region)
     return 0;
 }
 
+const char *hal_boot_cmdline(void)
+{
+    return multiboot_cmdline();
+}
+
 static const multiboot_module_t *module_table(void)
 {
     const multiboot_info_t *mbi = multiboot_get_info();

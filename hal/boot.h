@@ -64,4 +64,10 @@ unsigned int hal_boot_module_count(void);
 /* Boot module index. Returns 0, or -1 if index is out of range or module is NULL. */
 int hal_boot_module(unsigned int index, hal_boot_module_t *module);
 
+/*
+ * The kernel command line the boot loader passed ("multiboot /boot/kernel.elf noapic" in GRUB,
+ * QEMU -append), or NULL if there is none. Options are words separated by spaces.
+ */
+const char *hal_boot_cmdline(void);
+
 #endif

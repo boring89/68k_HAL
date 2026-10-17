@@ -60,12 +60,26 @@ static void test_strncmp(void)
     TEST_ASSERT(k_strncmp("ab", "abc", 3) < 0);
 }
 
+static void test_strstr(void)
+{
+    const char *text = "quiet noapic nosmp";
+
+    TEST_ASSERT(k_strstr(text, "noapic") == text + 6);
+    TEST_ASSERT(k_strstr(text, "nosmp") == text + 13);
+    TEST_ASSERT(k_strstr(text, "apic ") == text + 8);
+    TEST_ASSERT(k_strstr(text, "nousb") == NULL);
+    TEST_ASSERT(k_strstr(text, "") == text);
+    TEST_ASSERT(k_strstr("", "x") == NULL);
+    TEST_ASSERT(k_strstr("no", "noapic") == NULL);
+}
+
 int main(void)
 {
     TEST_RUN(test_strlen);
     TEST_RUN(test_strcmp);
     TEST_RUN(test_strcpy);
     TEST_RUN(test_strncmp);
+    TEST_RUN(test_strstr);
     TEST_RUN(test_memory);
 
     return TEST_REPORT("k_string");

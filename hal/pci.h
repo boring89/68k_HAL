@@ -6,6 +6,8 @@
 #ifndef HAL_PCI_H
 #define HAL_PCI_H
 
+#include "hal/irq.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -72,6 +74,21 @@ void hal_pci_config_write(const hal_pci_device_t *device, unsigned int offset, u
 
 /* Turn on the HAL_PCI_COMMAND_* bits given (others are kept). */
 void hal_pci_enable(const hal_pci_device_t *device, uint32_t command_bits);
+
+/* Capability ids of the PCI capability list (PCI Local Bus Specification 3.0, appendix H). */
+#define HAL_PCI_CAP_MSI 0x05
+#define HAL_PCI_CAP_MSIX 0x11
+
+/* Offset of the first capability with this id in the device's configuration space, or 0 if it has none. */
+unsigned int hal_pci_find_capability(const hal_pci_device_t *device, uint8_t id);
+
+/*
+ * Give the device a message signalled interrupt (MSI, or MSI-X if it has no MSI; one vector): handler is called for each interrupt it
+ * raises, on the interrupt line returned. The device's own enable bits (a card's interrupt
+ * mask register) are the driver's business. Returns the line (>= 16), or -1 if the device
+ * has no MSI capability or the platform has no MSI (interrupts then go through the 8259).
+ */
+int hal_pci_enable_msi(const hal_pci_device_t *device, hal_irq_handler_t handler);
 
 /*
  * Map memory BAR number bar so the kernel can use it, uncached. Returns

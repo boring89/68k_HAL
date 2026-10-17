@@ -17,4 +17,7 @@ int k_strcmp(const char *a, const char *b);
 /* Compare at most n characters. */
 int k_strncmp(const char *a, const char *b, size_t n);
 
+/* First occurrence of needle in haystack, or NULL (an empty needle is found at the start). */
+const char *k_strstr(const char *haystack, const char *needle);
+
 #endif

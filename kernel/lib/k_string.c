@@ -53,3 +53,16 @@ int k_strncmp(const char *a, const char *b, size_t n)
     return *(unsigned char *)a -
         *(unsigned char *)b;
 }
+
+const char *k_strstr(const char *haystack, const char *needle)
+{
+    size_t length = k_strlen(needle);
+
+    for (; *haystack != '\0'; haystack++)
+    {
+        if (k_strncmp(haystack, needle, length) == 0)
+            return haystack;
+    }
+
+    return length == 0 ? haystack : NULL;
+}

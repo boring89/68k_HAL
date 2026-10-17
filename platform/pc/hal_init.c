@@ -13,6 +13,7 @@
 
 #include "platform/pc/acpi/acpi.h"
 #include "platform/pc/boot/multiboot.h"
+#include "platform/pc/interrupt/irq.h"
 #include "platform/pc/interrupt/pic.h"
 #include "platform/pc/pci/pci.h"
 #include "hal/pci.h"
@@ -173,6 +174,10 @@ void hal_init(void)
 
     pic_init();
     kernel_log(LOG_INFO, "PIC initialized");
+
+    /* Before the timer and the keyboard unmask their lines: it decides where those lines go. */
+    if (irq_apic_enable() == 0)
+        kernel_log(LOG_INFO, "APIC interrupts enabled");
 
     /* After pic_init: the PIT, the keyboard and the mouse unmask their lines. */
     pit_init(PC_TIMER_FREQUENCY);

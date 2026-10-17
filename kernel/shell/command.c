@@ -27,6 +27,7 @@
 #include "hal/boot.h"
 #include "hal/clock.h"
 #include "hal/acpi.h"
+#include "hal/irq.h"
 #include "hal/cpu.h"
 #include "hal/pci.h"
 #include "hal/framebuffer.h"
@@ -1315,7 +1316,17 @@ static void cmd_acpi(
     {
         write_number_line("I/O APIC id:    ", info->ioapic_id[i], 0);
         write_number_line("  at:           0x", info->ioapic_base[i], 1);
+        write_number_line("  first input:  ", info->ioapic_gsi_base[i], 0);
     }
+
+    for (uint32_t i = 0; i < info->irq_override_count; i++)
+    {
+        write_number_line("IRQ override:   ISA ", info->irq_override[i].source, 0);
+        write_number_line("  -> input:     ", info->irq_override[i].gsi, 0);
+    }
+
+    terminal_write("Interrupts:     ");
+    terminal_write_line(hal_irq_controller());
 }
 
 static void cmd_run(

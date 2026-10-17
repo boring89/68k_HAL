@@ -163,7 +163,9 @@ kernel_main()（kernel/main.c）
 | `hal/mmu.h`（位址空間） | `hal_space_create/switch/destroy/map/copy_page/current`：每個行程一份分頁目錄，kernel 範圍共用（見 `docs/process.md` 第 3 節） |
 | `hal/task.h` | `hal_context_init/switch`（kernel 堆疊上的執行緒切換）、`hal_task_set_kernel_stack`、`hal_task_set_tls`、`hal_fpu_save/restore/reset_area` |
 | `hal/usermode.h` | 另有 `hal_user_enter`、`hal_user_fork`、`hal_user_regs_get/set` |
-| `hal/irq.h` | `hal_irq_count()`：到目前為止的中斷總數（排程器用它判斷有沒有事發生） |
+| `hal/irq.h` | `hal_irq_count()`：到目前為止的中斷總數（排程器用它判斷有沒有事發生）；`hal_irq_msi_alloc`、`hal_irq_controller`（見 `docs/apic.md`）；線 0–15 是 ISA 線，16–63 給 MSI |
+| `hal/pci.h` | 另有 `hal_pci_find_capability`、`hal_pci_enable_msi`（MSI 與 MSI-X） |
+| `hal/boot.h` | 另有 `hal_boot_cmdline()`（GRUB 的 kernel 命令列，例如 `noapic`） |
 
 ### 開機協定：Multiboot 1 與 2
 

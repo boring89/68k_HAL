@@ -15,6 +15,30 @@
 
 static const multiboot_info_t *multiboot_info;
 
+/*
+ * The kernel command line, copied: the loader's memory is not mapped once paging is on, and
+ * the options are read late (interrupt controller set-up).
+ */
+#define CMDLINE_MAX 256
+static char cmdline_copy[CMDLINE_MAX];
+static bool cmdline_present;
+
+static void copy_cmdline(const char *source, uint32_t limit)
+{
+    uint32_t i = 0;
+
+    for (; i < CMDLINE_MAX - 1 && i < limit && source[i] != '\0'; i++)
+        cmdline_copy[i] = source[i];
+
+    cmdline_copy[i] = '\0';
+    cmdline_present = true;
+}
+
+const char *multiboot_cmdline(void)
+{
+    return cmdline_present ? cmdline_copy : NULL;
+}
+
 /* Multiboot2 translation (multiboot2_init). */
 static multiboot_info_t synth_info;
 static multiboot_mmap_entry_t synth_mmap[MULTIBOOT2_MAX_MMAP];
@@ -36,6 +60,11 @@ void multiboot_init(uint32_t address)
     rsdp_copy = NULL;
     mmap_start = 0;
     mmap_end = 0;
+    cmdline_present = false;
+
+    /* flags bit 2 (Multiboot 0.6.96 3.3): the cmdline field points at a string. */
+    if ((multiboot_info->flags & (1u << 2)) && multiboot_info->cmdline != 0)
+        copy_cmdline((const char *)(uintptr_t)multiboot_info->cmdline, CMDLINE_MAX);
 
     if (multiboot_info->flags & MULTIBOOT_INFO_MEM_MAP)
     {
@@ -134,6 +163,7 @@ int multiboot2_init(uint32_t address)
     raw_base = address;
     raw_size = total;
     rsdp_copy = NULL;
+    cmdline_present = false;
     mmap_start = 0;
     mmap_end = 0;
     multiboot_info = &synth_info;
@@ -159,6 +189,10 @@ int multiboot2_init(uint32_t address)
 
         switch (tag->type)
         {
+        case MB2_TAG_CMDLINE:
+            /* A NUL-terminated string in the tag list itself. */
+            copy_cmdline((const char *)body, body_size);
+            break;
         case MB2_TAG_MMAP:
         {
             /* entry_size, entry_version, then the entries. */

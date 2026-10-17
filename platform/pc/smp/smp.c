@@ -9,26 +9,20 @@
 #include "hal/cpu.h"
 #include "hal/mmu.h"
 
+#include "platform/pc/interrupt/lapic.h"
 #include "platform/pc/timer/tsc.h"
-#include "platform/pc/vmap/vmap.h"
 
 #include "arch/x86/cpu/cpu.h"
 
 #include "kernel/lib/k_memory.h"
 #include "kernel/log/log.h"
 
+#include <stddef.h>
+
 /*
  * Local APIC registers (Intel SDM Vol.3A 10.4, Table 10-1; offsets from
  * the APIC base) and ICR bits (10.6.1, Figure 10-12).
  */
-#define LAPIC_ID 0x20
-#define LAPIC_SVR 0xF0
-#define LAPIC_ICR_LOW 0x300
-#define LAPIC_ICR_HIGH 0x310
-
-#define SVR_APIC_ENABLE 0x100u
-#define SVR_DEFAULT_VECTOR 0xFFu
-
 #define ICR_DELIVERY_PENDING (1u << 12)
 #define ICR_LEVEL_ASSERT (1u << 14)
 #define ICR_INIT (5u << 8)
@@ -44,23 +38,11 @@ extern const char ap_tramp_end[];
 extern const char ap_tramp_stack[];
 extern const char ap_tramp_entry[];
 
-static volatile uint32_t *lapic;
-
 static uint8_t ap_stacks[AP_MAX][AP_STACK_SIZE] __attribute__((aligned(16)));
 
 /* Written by the APs (one lock-prefixed increment each), read by the boot CPU. */
 static volatile uint32_t ap_online;
 static unsigned int cpus_online = 1;
-
-static uint32_t lapic_read(uint32_t reg)
-{
-    return lapic[reg / 4];
-}
-
-static void lapic_write(uint32_t reg, uint32_t value)
-{
-    lapic[reg / 4] = value;
-}
 
 static void wait_ns(uint64_t ns)
 {
@@ -146,18 +128,11 @@ unsigned int smp_start(void)
     if (acpi == NULL || acpi->cpu_count <= 1 || tsc_khz() == 0)
         return cpus_online;
 
-    lapic = vmap(acpi->lapic_base, 4096, HAL_MMU_WRITABLE | HAL_MMU_UNCACHED);
-
-    if (lapic == NULL)
+    /* Already done when the interrupts run through the APIC; maps and enables it otherwise. */
+    if (!lapic_ready() && lapic_init(acpi->lapic_base) != 0)
         return cpus_online;
 
-    /* The APIC may be software disabled; keep the BIOS's vector if it is not. */
-    uint32_t svr = lapic_read(LAPIC_SVR);
-
-    if (!(svr & SVR_APIC_ENABLE))
-        lapic_write(LAPIC_SVR, SVR_APIC_ENABLE | SVR_DEFAULT_VECTOR);
-
-    uint32_t bsp_id = lapic_read(LAPIC_ID) >> 24;
+    uint32_t bsp_id = lapic_id();
 
     /* TRAMP_BASE is in the first 1 MiB, which the kernel identity maps. */
     k_memcpy((void *)TRAMP_BASE, ap_tramp_start, (size_t)(ap_tramp_end - ap_tramp_start));

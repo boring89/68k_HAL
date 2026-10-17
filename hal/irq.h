@@ -6,6 +6,8 @@
 #ifndef HAL_IRQ_H
 #define HAL_IRQ_H
 
+#include <stdint.h>
+
 /*
  * Interrupt lines of the platform's interrupt controller. Used by
  * drivers, which know their own line number. Implemented once per
@@ -32,6 +34,24 @@ int hal_irq_register(unsigned int line, hal_irq_handler_t handler);
  * platform has no such line.
  */
 int hal_irq_unmask(unsigned int line);
+
+/*
+ * Lines 0-15 are the classic ISA interrupts (timer 0, keyboard 1, mouse 12...); the platform
+ * routes them to wherever its interrupt controller has them. Higher lines (up to
+ * HAL_IRQ_LINE_COUNT - 1) exist only as targets of message signalled interrupts.
+ */
+#define HAL_IRQ_LINE_COUNT 64
+
+/*
+ * Message signalled interrupts (PCI MSI): a device interrupts by writing data to address, a
+ * memory write the interrupt controller turns into a vector. Pick a free line, register handler
+ * on it and store the address and data the device must be told. Returns the line, or -1 if
+ * the platform does not support it (interrupts go through the 8259) or no line is free.
+ */
+int hal_irq_msi_alloc(hal_irq_handler_t handler, uint32_t *address, uint32_t *data);
+
+/* "8259" or "IOAPIC": which controller delivers the interrupts. */
+const char *hal_irq_controller(void);
 
 /*
  * How many interrupts have arrived since boot (wraps around). The scheduler uses it to see

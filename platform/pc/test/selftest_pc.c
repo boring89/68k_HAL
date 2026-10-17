@@ -6,9 +6,13 @@
 /* PC platform self tests, run by selftest_run (-DKERNEL_SELFTEST builds only). */
 #ifdef KERNEL_SELFTEST
 
+#include "kernel/lib/k_string.h"
+#include "platform/pc/interrupt/lapic.h"
+
 #include "kernel/test/selftest.h"
 
 #include "hal/acpi.h"
+#include "hal/boot.h"
 #include "hal/cpu.h"
 #include "hal/dma.h"
 #include "hal/irq.h"
@@ -209,7 +213,7 @@ static void unused_irq_handler(void)
 
 static void test_hal_irq_register_rejects(void)
 {
-    SELFTEST_ASSERT(hal_irq_register(16, unused_irq_handler) == -1);
+    SELFTEST_ASSERT(hal_irq_register(HAL_IRQ_LINE_COUNT, unused_irq_handler) == -1);
     SELFTEST_ASSERT(hal_irq_register(0xFFFFFFFFu, unused_irq_handler) == -1);
     SELFTEST_ASSERT(hal_irq_register(6, NULL) == -1);
 
@@ -220,6 +224,12 @@ static void test_hal_irq_register_rejects(void)
     uint32_t start = hal_timer_ticks();
     hal_cpu_idle();
     SELFTEST_ASSERT(hal_timer_ticks() != start);
+}
+
+/* The tests of the 8259's mask register only make sense while the 8259 delivers the interrupts. */
+static int using_8259(void)
+{
+    return hal_irq_controller()[0] == '8';
 }
 
 /* 8259A data ports; reading them returns the IMR (OSDev Wiki "8259 PIC"). */
@@ -236,21 +246,124 @@ static void test_hal_irq_register_rejects(void)
 
 static void test_pic_boot_mask(void)
 {
+    if (!using_8259())
+    {
+        /* With the APIC in use the 8259 is silent: every line stays masked. */
+        SELFTEST_ASSERT(inb(PIC_MASTER_DATA) == 0xFF);
+        SELFTEST_ASSERT(inb(PIC_SLAVE_DATA) == 0xFF);
+
+        return;
+    }
+
     SELFTEST_ASSERT(inb(PIC_MASTER_DATA) == BOOT_MASTER_MASK);
     SELFTEST_ASSERT(inb(PIC_SLAVE_DATA) == BOOT_SLAVE_MASK);
+}
+
+/*
+ * QEMU's machines have a MADT with an I/O APIC: the interrupts must run through it (the timer
+ * ticks already prove it works). The ISA timer line goes to input 2 (the MADT override).
+ */
+static void test_apic_in_use(void)
+{
+    const hal_acpi_info_t *info = hal_acpi_info();
+
+    const char *cmdline = hal_boot_cmdline();
+
+    SELFTEST_ASSERT(info != NULL && info->ioapic_count >= 1);
+
+    /* make test-noapic runs this test with "noapic": then the 8259 is the controller. */
+    SELFTEST_ASSERT(using_8259() == (cmdline != NULL && k_strstr(cmdline, "noapic") != NULL));
+    SELFTEST_ASSERT(info->irq_override_count >= 1);
+    SELFTEST_ASSERT(info->irq_override[0].source == 0 && info->irq_override[0].gsi == 2);
+}
+
+static volatile int msi_handler_calls;
+
+static void msi_test_handler(void)
+{
+    msi_handler_calls++;
+}
+
+/*
+ * An MSI line: allocate one, then raise its vector with a self-IPI (an interrupt the local APIC
+ * sends to its own CPU: ICR with destination shorthand "self", Intel SDM Vol.3A 10.6.1). That goes
+ * the same way as a device's message: vector -> IDT stub for line 16 + n -> irq_handler -> handler.
+ */
+static void test_msi_line_delivery(void)
+{
+    uint32_t address = 0;
+    uint32_t data = 0;
+    int line = hal_irq_msi_alloc(msi_test_handler, &address, &data);
+
+    if (using_8259())
+    {
+        SELFTEST_ASSERT(line == -1);
+
+        return;
+    }
+
+    SELFTEST_ASSERT(line >= 16 && line < HAL_IRQ_LINE_COUNT);
+    SELFTEST_ASSERT((address & 0xFFF00000u) == 0xFEE00000u);
+    SELFTEST_ASSERT(data == 0x20u + (uint32_t)line);
+
+    /* A second one gets another line, and its handler cannot be registered again. */
+    SELFTEST_ASSERT(hal_irq_register((unsigned int)line, msi_test_handler) == -1);
+
+    msi_handler_calls = 0;
+    lapic_write(LAPIC_ICR_LOW, (1u << 18) | (1u << 14) | data); /* self, level assert, fixed, vector */
+
+    for (int i = 0; i < 1000000 && msi_handler_calls == 0; i++)
+        asm volatile("pause");
+
+    SELFTEST_ASSERT(msi_handler_calls == 1);
+}
+
+/* The capability list walker finds what QEMU's devices have. */
+static void test_pci_capabilities(void)
+{
+    /* The xHCI controller of the test run (prog_if 0x30) has MSI-X; UHCI and EHCI have no capabilities. */
+    for (int index = hal_pci_find_class(0x0C, 0x03, 0); index >= 0;
+         index = hal_pci_find_class(0x0C, 0x03, (unsigned int)index + 1))
+    {
+        hal_pci_device_t device;
+
+        hal_pci_device(index, &device);
+
+        if (device.prog_if == 0x30)
+        {
+            SELFTEST_ASSERT(hal_pci_find_capability(&device, HAL_PCI_CAP_MSIX) != 0);
+
+            /* Not turned on here (the real driver does that): QEMU's xHCI is MSI-X only. */
+        }
+        else
+        {
+            SELFTEST_ASSERT(hal_pci_find_capability(&device, HAL_PCI_CAP_MSI) == 0);
+            SELFTEST_ASSERT(hal_pci_find_capability(&device, HAL_PCI_CAP_MSIX) == 0);
+        }
+    }
+
+    hal_pci_device_t bridge;
+
+    SELFTEST_ASSERT(hal_pci_device(0, &bridge) == 0);
+    SELFTEST_ASSERT(hal_pci_find_capability(&bridge, 0x7F) == 0);
 }
 
 /* The mouse initialised in hal_init and has its handler on IRQ 12. */
 static void test_ps2_mouse_irq(void)
 {
-    SELFTEST_ASSERT((inb(PIC_SLAVE_DATA) & (1u << 4)) == 0);
+    if (using_8259())
+        SELFTEST_ASSERT((inb(PIC_SLAVE_DATA) & (1u << 4)) == 0);
+
     SELFTEST_ASSERT(hal_irq_register(12, unused_irq_handler) == -1);
 }
 
 static void test_hal_irq_unmask_rejects(void)
 {
-    SELFTEST_ASSERT(hal_irq_unmask(16) == -1);
+    SELFTEST_ASSERT(hal_irq_unmask(HAL_IRQ_LINE_COUNT) == -1);
     SELFTEST_ASSERT(hal_irq_unmask(0xFFFFFFFFu) == -1);
+
+    if (!using_8259())
+        return;
 
     SELFTEST_ASSERT(inb(PIC_MASTER_DATA) == BOOT_MASTER_MASK);
     SELFTEST_ASSERT(inb(PIC_SLAVE_DATA) == BOOT_SLAVE_MASK);
@@ -258,6 +371,9 @@ static void test_hal_irq_unmask_rejects(void)
 
 static void test_hal_irq_unmask_master(void)
 {
+    if (!using_8259())
+        return;
+
     uint8_t master = inb(PIC_MASTER_DATA);
     uint8_t slave = inb(PIC_SLAVE_DATA);
 
@@ -278,6 +394,9 @@ static void test_hal_irq_unmask_master(void)
  */
 static void test_hal_irq_unmask_slave(void)
 {
+    if (!using_8259())
+        return;
+
     uint8_t master = inb(PIC_MASTER_DATA);
     uint8_t slave = inb(PIC_SLAVE_DATA);
 
@@ -299,6 +418,9 @@ static void test_hal_irq_unmask_slave(void)
  */
 static void test_pic_spurious(void)
 {
+    if (!using_8259())
+        return;
+
     hal_cpu_disable_interrupts();
 
     uint32_t before = pic_get_spurious_count();
@@ -321,6 +443,9 @@ static void test_pic_spurious(void)
 /* pic_unmask restores IF as it found it. */
 static void test_pic_unmask_keeps_interrupt_flag(void)
 {
+    if (!using_8259())
+        return;
+
     uint8_t master = inb(PIC_MASTER_DATA);
 
     hal_cpu_disable_interrupts();
@@ -347,6 +472,9 @@ void selftest_platform_run(void)
     SELFTEST_RUN(test_dma_alloc);
     SELFTEST_RUN(test_smp_processors_online);
     SELFTEST_RUN(test_hal_irq_register_rejects);
+    SELFTEST_RUN(test_apic_in_use);
+    SELFTEST_RUN(test_msi_line_delivery);
+    SELFTEST_RUN(test_pci_capabilities);
     SELFTEST_RUN(test_pic_boot_mask);
     SELFTEST_RUN(test_ps2_mouse_irq);
     SELFTEST_RUN(test_hal_irq_unmask_rejects);

@@ -8,7 +8,7 @@
 
 #include <stdint.h>
 
-#define IRQ_STUB_COUNT 16
+#define IRQ_STUB_COUNT 64
 
 /*
  * First IDT vector of the IRQ stubs: line n uses vector
@@ -17,8 +17,17 @@
  */
 #define IRQ_STUB_VECTOR_BASE 0x20
 
-/* Addresses of the entry stubs for lines 0-15 (irq_stub.asm). */
+/*
+ * Addresses of the entry stubs for lines 0-63 (irq_stub.asm): 0-15 are the ISA lines of
+ * the 8259 / I/O APIC, 16-63 are vectors for message signalled interrupts (hal_irq_msi_alloc).
+ */
 extern const uint32_t irq_stub_table[IRQ_STUB_COUNT];
+
+/*
+ * The stub for the local APIC's spurious vector: it just returns, without an end of interrupt
+ * (Intel SDM Vol.3A 10.9). idt_init installs it on vector 0xFF.
+ */
+extern void irq_spurious_stub(void);
 
 /*
  * Called by the stubs with interrupts disabled and the IRQ line number.
