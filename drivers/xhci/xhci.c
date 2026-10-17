@@ -5,6 +5,7 @@
 
 #include "xhci.h"
 
+#include "hal/boot.h"
 #include "hal/cpu.h"
 #include "hal/dma.h"
 #include "hal/irq.h"
@@ -13,6 +14,7 @@
 #include "kernel/block/block.h"
 #include "kernel/input/event_buffer.h"
 #include "kernel/lib/k_memory.h"
+#include "kernel/lib/k_string.h"
 #include "kernel/log/log.h"
 #include "kernel/printf/printf.h"
 #include "kernel/usb/descriptor.h"
@@ -1756,6 +1758,16 @@ static int xhci_probe(const hal_pci_device_t *pci)
 
     if (pci->bar[0].type != HAL_PCI_BAR_MEM)
         return -1;
+
+    /* "noxhci" on the kernel command line: leave the controller alone (to tell a driver problem from other ones). */
+    const char *command_line = hal_boot_cmdline();
+
+    if (command_line != NULL && k_strstr(command_line, "noxhci") != NULL)
+    {
+        kernel_printf("xhci: driver disabled by noxhci on the command line\n");
+
+        return -1;
+    }
 
     volatile uint8_t *registers = hal_pci_map_bar(pci, 0);
 

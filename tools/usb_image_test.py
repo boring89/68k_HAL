@@ -26,7 +26,8 @@ ENTRIES = [
     (1, "safe mode", ["Shell ready", "using the 8259", "CPUs online: 1"]),
     (2, "diagnostics", ["diagnostics 1/8", "Vendor"]),
     (3, "mac", ["Shell ready"]),
-    (4, "graphics (BIOS only)", ["Shell ready", "Framebuffer: 640x480"]),
+    (4, "diagnostics without USB", ["diagnostics 1/8", "driver disabled by noxhci"]),
+    (5, "graphics (BIOS only)", ["Shell ready", "Framebuffer: 640x480"]),
 ]
 
 
@@ -42,7 +43,7 @@ def run_entry(image, uefi, index, name, expect):
                    "-drive", f"if=pflash,format=raw,file={variables}"]
         else:
             cmd = ["qemu-system-i386"]
-        cmd += ["-m", "512", "-smp", "2", "-cdrom", image, "-display", "none", "-no-reboot",
+        cmd += ["-m", "512", "-smp", "2", "-device", "qemu-xhci", "-cdrom", image, "-display", "none", "-no-reboot",
                 "-serial", f"file:{serial}", "-monitor", f"unix:{monitor},server,nowait"]
         process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
@@ -86,7 +87,7 @@ def main():
     failed = 0
     for uefi in (False, True):
         for index, name, expect in ENTRIES:
-            if uefi and index == 4:
+            if uefi and index == 5:
                 continue
             ok, log = run_entry(image, uefi, index, name, expect)
             label = f"{'UEFI' if uefi else 'BIOS'} / {name}"
