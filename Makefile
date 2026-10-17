@@ -652,6 +652,8 @@ test-shell: iso
 		"run /bin/make -f /data/test.mk=make built and ran" \
 		"run /bin/pipes=default SIGPIPE: killed 1 by signal 13" \
 		"run /bin/signals=SIGKILL: signal 9" \
+		"run /bin/hog=" \
+		"{ctrl-c}=[exit 130]" \
 		"sleep 30=" \
 		"{ctrl-c}=[exit 130]" \
 		"seq 3 | sleep 30=" \

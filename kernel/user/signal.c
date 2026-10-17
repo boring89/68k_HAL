@@ -123,6 +123,32 @@ static void die(user_process_t *p, int sig)
     sched_exit(0, sig);
 }
 
+void signal_check_fatal(void)
+{
+    user_process_t *p = user_current;
+    uint32_t set = deliverable(p);
+
+    for (int sig = 1; sig < USER_SIGNAL_COUNT && set != 0; sig++)
+    {
+        if (!(set & BIT(sig)))
+            continue;
+
+        set &= ~BIT(sig);
+
+        if (sig == SIGNAL_KILL)
+        {
+            p->sig_pending &= ~BIT(sig);
+            die(p, sig);
+        }
+
+        if (p->sig_action[sig].handler == SIG_DFL && !((DEFAULT_IGNORED | STOP_SIGNALS) & BIT(sig)))
+        {
+            p->sig_pending &= ~BIT(sig);
+            die(p, sig);
+        }
+    }
+}
+
 int32_t signal_deliver(int32_t result)
 {
     user_process_t *p = user_current;

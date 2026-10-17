@@ -607,6 +607,7 @@ static const struct
     {"crash", 139, NULL, NULL},         /* 128 + SIGSEGV */
     {"dash", 0, "/data/test.sh", NULL}, /* a POSIX shell, a ported program that uses everything */
     {"make", 0, "-f", "/data/test.mk"}, /* GNU make runs dash runs tcc runs the result */
+    {"spin", 0, NULL, NULL},            /* preemption: a spinning program is neither a hog nor unkillable */
     {"forkexec", 0, NULL, NULL},        /* fork, exec, wait */
     {"pipes", 0, NULL, NULL},           /* pipe, dup2, SIGPIPE */
     {"signals", 0, NULL, NULL},         /* handlers, masks, kill */

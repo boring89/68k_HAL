@@ -9,6 +9,7 @@
 
 #include "hal/cpu.h"
 #include "hal/irq.h"
+#include "hal/timer.h"
 #include "hal/mmu.h"
 #include "hal/task.h"
 #include "hal/usermode.h"
@@ -27,6 +28,18 @@ static user_process_t kernel_task;
 static user_process_t *table[USER_MAX_PROCS + 1];
 
 static int next_pid = 1;
+
+/*
+ * Preemption (docs/process.md 11): a program that computes without ever asking the kernel for
+ * anything is put aside when its time slice (PREEMPT_TICKS timer ticks) is used up and another process
+ * is ready. Only programs are interrupted, and only while they run user code, so kernel code never
+ * has to be re-entrant.
+ */
+#define PREEMPT_TICKS 2
+static uint32_t slice_start;
+unsigned int sched_preemptions;
+
+static void preempt(void);
 static uint32_t event_count;
 
 void sched_init(void)
@@ -41,6 +54,7 @@ void sched_init(void)
 
     table[0] = &kernel_task;
     user_current = &kernel_task;
+    hal_irq_set_user_return_hook(preempt);
 }
 
 /* A number that changes whenever a process may have something new to see. */
@@ -104,6 +118,7 @@ static void switch_to(user_process_t *next)
     vfs_set_cwd(next->cwd);
 
     user_current = next;
+    slice_start = hal_timer_ticks();
     hal_space_switch(next->space);
 
     if (!next->is_kernel)
@@ -154,6 +169,35 @@ static void schedule(void)
         hal_cpu_enable_interrupts();
         hal_cpu_idle();
     }
+}
+
+static int someone_else_can_run(void)
+{
+    uint32_t now = stamp();
+
+    for (int i = 0; i <= USER_MAX_PROCS; i++)
+    {
+        user_process_t *p = table[i];
+
+        if (p != NULL && p != user_current && (p->state == PROC_RUNNABLE || (p->state == PROC_WAITING && p->seen != now)))
+            return 1;
+    }
+
+    return 0;
+}
+
+/* The interrupt-return hook (hal_irq_set_user_return_hook): runs on the interrupted program's kernel stack. */
+static void preempt(void)
+{
+    /* A program that never makes a system call can still be killed. */
+    if (!user_current->is_kernel && user_current->sig_pending != 0)
+        signal_check_fatal();
+
+    if (user_current->is_kernel || hal_timer_ticks() - slice_start < PREEMPT_TICKS || !someone_else_can_run())
+        return;
+
+    sched_preemptions++;
+    schedule();
 }
 
 void sched_wait(void)

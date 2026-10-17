@@ -28,6 +28,20 @@ static hal_irq_handler_t handlers[HAL_IRQ_LINE_COUNT];
 /* 1 once the local APIC and I/O APIC have taken over from the 8259. */
 static int apic_mode;
 
+static void (*user_return_hook)(void);
+
+void hal_irq_set_user_return_hook(void (*hook)(void))
+{
+    user_return_hook = hook;
+}
+
+/* Called by the IRQ stubs just before they return to a user program. */
+void irq_user_return(void)
+{
+    if (user_return_hook != NULL)
+        user_return_hook();
+}
+
 static volatile unsigned int irq_total;
 
 unsigned int hal_irq_count(void)

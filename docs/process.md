@@ -99,7 +99,7 @@ shell 的一行 `a | b | c` 是一個 **job**（`user_run_job`）：
 
 ## 9. 限制（已知）
 
-- 協作式：不會自己讓出 CPU 的程式（一直算）會讓全部卡住。之後可升級為搶佔式（計時器中斷裡切換），要先把 kernel 裡共用資料的臨界區處理好。
+- 搶佔只發生在**使用者模式**：一直算、從不呼叫 kernel 的程式在時間片（2 個計時器 tick = 20 ms）用完時會被放到一邊（第 11 節）；但在 kernel 裡（系統呼叫中）絕不會被打斷，所以一個長時間的系統呼叫（例如讀大檔案）仍會讓別人等到它結束或等待。
 - fork 複製整個位址空間（慢、吃記憶體）；沒有 copy-on-write。
 - 沒有執行緒（`CLONE_THREAD`）、`alarm`、作業控制（停止／繼續）、`SA_RESTART`（被訊號打斷的呼叫一律回 `EINTR`）、`SA_ONSTACK`、`siginfo` 的內容（handler 收到的是全 0 的結構，`si_signo` 除外）。
 - 工作結束時還活著的孤兒行程會被殺掉（沒有真正的背景工作）。
@@ -109,6 +109,18 @@ shell 的一行 `a | b | c` 是一個 **job**（`user_run_job`）：
 ## 9.5 移植的程式：dash 與 GNU make
 
 兩個用得到所有行程功能的真實程式已經移植（`tools/build_dash.sh`、`tools/build_make.sh`，下載、校驗與建置方式同 Lua 等）。移植時找到並修正的問題：**`rt_sigsuspend`**：訊號要在**暫時的遮罩**下送達 handler，之後才恢復舊遮罩（原本先恢復舊遮罩，被擋住的 SIGCHLD 就不會再送達，dash 的 `wait` 永遠醒不來；現在 `sig_saved`／`sig_restore`，由 `signal_deliver` 或 `sigreturn` 還原）；缺 `faccessat2`（439，musl 的 `faccessat` 用它）。`make → dash → tcc → 程式` 這條鏈在 OS 裡完整跑通（`userland/data/test.mk`）。
+
+## 11. 搶佔（P7 R14）
+
+比喻：以前是「大家自己說要等的時候才換人」；現在加了一個**碼表**：一個程式在自己的桌子上一直埋頭算（從不叫櫃台），碼表響了（計時器中斷），如果還有別人在排隊，就請它先放下。
+
+做法（`kernel/user/sched.c: preempt`，`hal_irq_set_user_return_hook`）：IRQ 的 stub（`irq_stub.asm`）在處理完中斷、送完 EOI、**準備 `iret` 回使用者模式之前**檢查被中斷的程式碼是不是 ring 3（存起來的 CS 的 RPL = 3）；是的話呼叫 kernel 登記的 hook。hook 在被打斷的那個程式的 kernel 堆疊上執行（中斷把使用者暫存器放在那裡，等於一個隨時可切換的「系統呼叫」），如果它的時間片用完而且有別的行程可以跑，就 `schedule()` 換走；之後被排回來時從這裡繼續，`iret` 回到使用者程式剛才的地方。
+
+**關鍵的限制：絕不在 kernel 程式碼被中斷時切換。**kernel 是單執行緒的、沒有鎖，如果在系統呼叫做到一半時被另一個行程進來改同樣的資料結構就會壞掉。所以只有「被中斷的是使用者程式碼」才會切換（stub 檢查 CS）；kernel task（shell）也不會被搶佔。結果：kernel 還是不需要任何鎖，`sched_wait` 的協作式模型完全不變，搶佔只是讓「純使用者模式的長迴圈」不再獨佔 CPU。
+
+訊號也因此有用：`signal_check_fatal` 在同一個 hook 裡檢查待處理的訊號：SIGKILL 或預設動作是結束的訊號直接結束行程（一個從不呼叫 kernel 的程式以前根本收不到訊號）；有 handler 的訊號仍等下一次系統呼叫（IRQ 的暫存器 frame 和系統呼叫的不同，`hal_user_regs_*` 只認得系統呼叫的）。Ctrl-C 也能停掉 `userland/hog.c` 這種死迴圈（`make test-shell`：`run /bin/hog` + Ctrl-C = `[exit 130]`）。
+
+測試：`userland/spin.c`（一個永遠空轉的子行程：父行程的 `usleep(100ms)` 準時結束、能 SIGKILL 它、兩個各算 3000 萬次的子行程都跑完）；`hog` + Ctrl-C。
 
 ## 10. 測試
 

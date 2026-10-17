@@ -42,6 +42,9 @@ user_process_t *sched_find(int pid);
 /* The table slot i (0 = the kernel task), or NULL if empty. */
 user_process_t *sched_slot(unsigned int i);
 
+/* How many times a running program was preempted (its time slice ran out) since boot. */
+extern unsigned int sched_preemptions;
+
 /* Number of processes in the table, zombies included, without the kernel task. */
 unsigned int sched_process_count(void);
 

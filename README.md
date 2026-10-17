@@ -36,7 +36,7 @@ The long-term vision is simple:
 - Networking: Intel e1000, e1000e/I219 and virtio-net drivers, ARP, IPv4, ICMP, UDP, TCP, DHCP, DNS, BSD sockets for programs ([docs/net.md](docs/net.md))
 - Storage: ATA (read/write), AHCI/SATA and NVMe drivers ([docs/storage.md](docs/storage.md))
 - USB: xHCI host controller with HID keyboards and mice, hot plug ([docs/usb.md](docs/usb.md)); the other controllers are listed
-- Multitasking: processes with their own address spaces, `fork`/`execve`/`wait`, pipes, signals, cooperative scheduling ([docs/process.md](docs/process.md))
+- Multitasking: processes with their own address spaces, `fork`/`execve`/`wait`, pipes, signals, scheduling (cooperative in the kernel, preemptive for user code) ([docs/process.md](docs/process.md))
 - Interrupts through the local APIC and I/O APIC, PCI MSI ([docs/apic.md](docs/apic.md)); Multiboot2 and UEFI boot; big-screen console
 - Real hardware: a USB image for the Lenovo ThinkStation P520 with safe mode and diagnostics ([docs/p520.md](docs/p520.md))
 - Audio: Intel HD Audio driver and a streaming sound interface ([docs/sound.md](docs/sound.md))

@@ -6,6 +6,7 @@ bits 32
 global irq_stub_table
 global irq_spurious_stub
 extern irq_handler
+extern irq_user_return
 
 ; Entry stubs for IRQ lines 0-15. Each pushes its line number so every
 ; IRQ reaches irq_common_stub with the same stack layout.
@@ -27,6 +28,12 @@ irq_common_stub:
     call irq_handler
     add esp, 4
 
+    ; Returning to ring 3 (the saved CS, above the line number and EIP, has RPL 3)? Then the kernel may
+    ; switch to another process first (preemption).
+    test dword [esp + 32 + 4 + 4], 3
+    jz .back
+    call irq_user_return
+.back:
     popa
 
     ; Drop the line number.

@@ -35,4 +35,7 @@ extern void irq_spurious_stub(void);
  */
 void irq_handler(uint32_t irq);
 
+/* Called by the stubs when an interrupt is about to return to ring 3; implemented by the interrupt controller code. */
+void irq_user_return(void);
+
 #endif

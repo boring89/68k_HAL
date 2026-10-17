@@ -1,0 +1,3 @@
+sleep took about as long as asked
+spinner: signaled 1, signal 9
+both finished: 11

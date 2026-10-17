@@ -54,6 +54,14 @@ int hal_irq_msi_alloc(hal_irq_handler_t handler, uint32_t *address, uint32_t *da
 const char *hal_irq_controller(void);
 
 /*
+ * A hook the kernel gets whenever an interrupt is about to return to user mode (the interrupted code
+ * was a user program), after the interrupt has been handled and acknowledged. It runs with interrupts
+ * off on the kernel stack of that program and may switch to another process (the scheduler's preemption).
+ * Never called when the interrupted code was kernel code, so the kernel stays single threaded.
+ */
+void hal_irq_set_user_return_hook(void (*hook)(void));
+
+/*
  * How many interrupts have arrived since boot (wraps around). The scheduler uses it to see
  * whether anything happened while every process was waiting.
  */

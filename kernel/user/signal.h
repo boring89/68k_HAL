@@ -47,6 +47,13 @@ int signal_interrupts(const user_process_t *p);
  */
 int32_t signal_deliver(int32_t result);
 
+/*
+ * For a program that is interrupted in user mode (preemption): act on a pending signal that ends the
+ * process (SIGKILL, or a signal with the default action "terminate"). Handlers are left for the next
+ * system call (the interrupt's register frame is not the system call's). May not return.
+ */
+void signal_check_fatal(void);
+
 /* The system calls (arguments as the program gave them). */
 int32_t signal_sigaction(int sig, uint32_t act, uint32_t old, uint32_t size);
 int32_t signal_sigprocmask(int how, uint32_t set, uint32_t old, uint32_t size);

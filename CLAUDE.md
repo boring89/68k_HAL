@@ -161,7 +161,7 @@ Claude 依照上方工作規則直接實作。
 - 滑鼠事件（`INPUT_EVENT_MOUSE`）進入 input buffer 但主迴圈忽略。
 - HFS 名稱比較只對 ASCII 不分大小寫，查詢是線性掃描（見 `docs/hfs.md`）。
 - ATA 驅動只支援 primary master、LBA28、輪詢（可讀寫，寫入後 FLUSH CACHE）。
-- 使用者程式：協作式多工（fork／execve／wait／pipe／訊號，最多 64 個行程；CPU 密集的程式不會讓出 CPU；fork 複製整個位址空間；沒有執行緒、alarm、作業控制，見 `docs/process.md` 第 9 節）；終端機沒有 UTF-8；沒有 NX（可讀即可執行）；堆疊固定 2 MiB。見 `docs/userland.md` 第 7 節。
+- 使用者程式：多工（fork／execve／wait／pipe／訊號，最多 64 個行程；協作式排程加上「只在使用者模式被計時器打斷」的搶佔；kernel 內不搶佔；fork 複製整個位址空間；沒有執行緒、alarm、作業控制，見 `docs/process.md` 第 9 節）；終端機沒有 UTF-8；沒有 NX（可讀即可執行）；堆疊固定 2 MiB。見 `docs/userland.md` 第 7 節。
 - 網路：TCP 沒有亂序重組、壅塞控制、選擇性確認；沒有 IP 分片、IPv6；一次只用一張網卡；HDA 只有輸出；BGA 只有 32 bpp；AHCI 只用輪詢與一個命令槽；USB：xHCI 的 HID 鍵盤滑鼠可用（沒有 hub 與隨身碟），其餘控制器只列出（見 `docs/usb.md`）；中斷由 I/O APIC + local APIC 處理（沒有 APIC 或命令列有 `noapic` 時用 8259，見 `docs/apic.md`），其他處理器只回報後 `hlt`（沒有 per-CPU 資料）。
 - `vmap`（`0xE0000000`–`0xF0000000`）與 `hal_dma_free` 的虛擬位址不重用。
 - QEMU 的 HDA 透過 CORB/RIRB 只回應第一個命令，驅動改用立即命令暫存器（原因未查明，見 `docs/sound.md`）。
