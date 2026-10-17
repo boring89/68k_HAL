@@ -42,6 +42,7 @@
 #define ADMIN_CREATE_IO_SQ 0x01
 #define ADMIN_CREATE_IO_CQ 0x05
 #define ADMIN_IDENTIFY 0x06
+#define ADMIN_SET_FEATURES 0x09
 #define NVM_FLUSH 0x00
 #define NVM_WRITE 0x01
 #define NVM_READ 0x02
@@ -296,7 +297,12 @@ static int start_controller(controller_t *c, const hal_pci_device_t *pci)
     c->registers = hal_pci_map_bar(pci, 0);
 
     if (c->registers == 0)
+    {
+        /* A 64-bit BAR above 4 GiB cannot be reached by this 32-bit kernel (BIOS: turn "Above 4G Decoding" off). */
+        kernel_log(LOG_WARN, "NVMe: its registers are not reachable (BAR above 4 GiB?)");
+
         return -1;
+    }
 
     hal_pci_enable(pci, HAL_PCI_COMMAND_MEMORY | HAL_PCI_COMMAND_BUS_MASTER);
 
@@ -390,8 +396,15 @@ static int start_controller(controller_t *c, const hal_pci_device_t *pci)
     if (c->max_blocks == 0)
         return -1;
 
-    /* The I/O queue pair: the completion queue first (the submission queue names it). */
+    /* Number of Queues (feature 7): ask for one I/O queue pair (zero based). Real drives want this before queues are made. */
     uint32_t command[16] = {0};
+
+    command[0] = ADMIN_SET_FEATURES;
+    command[10] = 7;
+    run_command(c, &c->admin, command, 0);
+
+    /* The I/O queue pair: the completion queue first (the submission queue names it). */
+    k_memset(command, 0, sizeof(command));
 
     command[0] = ADMIN_CREATE_IO_CQ;
     command[6] = c->io.completions_phys;

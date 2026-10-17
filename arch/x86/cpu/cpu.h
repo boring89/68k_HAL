@@ -78,6 +78,22 @@ static inline void cpu_write_cr4(uint32_t value)
 }
 
 /* Time stamp counter (Intel SDM Vol.2B "RDTSC"). Needs HAL_CPU_FEATURE_TSC. */
+/* Model specific registers (Intel SDM Vol.2B RDMSR / WRMSR). Only for MSRs the CPU has (CPUID.1:EDX bit 5). */
+static inline uint64_t cpu_rdmsr(uint32_t msr)
+{
+    uint32_t low;
+    uint32_t high;
+
+    asm volatile("rdmsr" : "=a"(low), "=d"(high) : "c"(msr));
+
+    return ((uint64_t)high << 32) | low;
+}
+
+static inline void cpu_wrmsr(uint32_t msr, uint64_t value)
+{
+    asm volatile("wrmsr" : : "c"(msr), "a"((uint32_t)value), "d"((uint32_t)(value >> 32)) : "memory");
+}
+
 static inline uint64_t cpu_rdtsc(void)
 {
     uint32_t lo;
