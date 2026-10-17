@@ -44,6 +44,20 @@ typedef struct
     uint32_t irq_override_count;
     hal_acpi_irq_override_t irq_override[HAL_ACPI_MAX_OVERRIDES];
     int dual_8259;           /* the machine also has the legacy 8259 PICs */
+
+    /* From the FADT ("FACP") and the DSDT: how to power off and reset the machine (0 = not found). */
+    uint32_t dsdt_address;
+    uint32_t smi_command_port;
+    uint8_t acpi_enable_value;
+    uint32_t pm1a_control_port;
+    uint32_t pm1b_control_port;
+    int s5_valid;            /* the sleep types for "soft off" were found in the DSDT */
+    uint8_t s5_type_a;
+    uint8_t s5_type_b;
+    int reset_valid;         /* the FADT has a reset register */
+    uint8_t reset_space;     /* ACPI address space: 0 = memory, 1 = I/O port */
+    uint32_t reset_address;
+    uint8_t reset_value;
 } hal_acpi_info_t;
 
 /* The parsed tables; NULL if the machine has no usable ACPI. */

@@ -165,6 +165,7 @@ kernel_main()（kernel/main.c）
 | `hal/usermode.h` | 另有 `hal_user_enter`、`hal_user_fork`、`hal_user_regs_get/set` |
 | `hal/irq.h` | `hal_irq_count()`：到目前為止的中斷總數（排程器用它判斷有沒有事發生）；`hal_irq_msi_alloc`、`hal_irq_controller`（見 `docs/apic.md`）；線 0–15 是 ISA 線，16–63 給 MSI |
 | `hal/pci.h` | 另有 `hal_pci_find_capability`、`hal_pci_enable_msi`（MSI 與 MSI-X） |
+| `hal/power.h` | `hal_power_off()`（ACPI soft off：FADT 的 PM1a_CNT 埠＋DSDT 裡 `\\_S5` 的睡眠型態；失敗時 QEMU／Bochs／VirtualBox 的埠）、`hal_power_reboot()`（FADT 的 reset register → 8042 的 0xFE → 埠 0xCF9 → triple fault）。shell 的 `poweroff`、`reboot`。`make test-power`（QEMU：i440fx、Q35、UEFI 各測一次，QEMU 必須結束） |
 | `hal/boot.h` | 另有 `hal_boot_cmdline()`（GRUB 的 kernel 命令列，例如 `noapic`） |
 
 ### 開機協定：Multiboot 1 與 2

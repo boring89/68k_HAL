@@ -55,4 +55,19 @@ int acpi_rsdp_valid(const acpi_rsdp_t *rsdp);
  */
 int acpi_parse_madt(const uint8_t *madt, size_t length, hal_acpi_info_t *info);
 
+/*
+ * Read the FADT ("FACP", section 5.2.9) of length bytes into info: the DSDT address, the SMI command
+ * port and the value that enables ACPI, the PM1 control block ports, the reset register. Returns -1
+ * if the table is too short or not a FADT.
+ */
+int acpi_parse_fadt(const uint8_t *fadt, size_t length, hal_acpi_info_t *info);
+
+/*
+ * Find the \_S5 object (the sleep state "soft off") in the bytes of the DSDT: a PackageOp whose first two
+ * elements are the SLP_TYP values for PM1a and PM1b. This is not an AML interpreter, only the search for
+ * the one fixed pattern OSDev Wiki "ACPI" describes ("_S5_" then 0x12 PkgLength NumElements, then
+ * (0x0A) value twice). Returns 0 and the two values, or -1.
+ */
+int acpi_find_s5(const uint8_t *dsdt, size_t length, uint8_t *type_a, uint8_t *type_b);
+
 #endif

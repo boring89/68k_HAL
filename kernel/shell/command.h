@@ -42,7 +42,9 @@ typedef enum
     COMMAND_CD,
     COMMAND_PWD,
     COMMAND_DMESG,
-    COMMAND_DIAG
+    COMMAND_DIAG,
+    COMMAND_POWEROFF,
+    COMMAND_REBOOT
 
 } shell_command_id_t;
 

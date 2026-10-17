@@ -28,6 +28,7 @@
 #include "hal/clock.h"
 #include "hal/acpi.h"
 #include "hal/irq.h"
+#include "hal/power.h"
 #include "hal/cpu.h"
 #include "hal/pci.h"
 #include "hal/framebuffer.h"
@@ -141,6 +142,12 @@ static void cmd_dmesg(
     int argc,
     char **argv);
 static void cmd_diag(
+    int argc,
+    char **argv);
+static void cmd_poweroff(
+    int argc,
+    char **argv);
+static void cmd_reboot(
     int argc,
     char **argv);
 
@@ -277,7 +284,15 @@ static shell_command_entry_t commands[] =
         {COMMAND_DIAG,
          "diag",
          "Hardware diagnostics, one page per subsystem (any key = next page)",
-         cmd_diag}};
+         cmd_diag},
+        {COMMAND_POWEROFF,
+         "poweroff",
+         "Turn the computer off (ACPI soft off)",
+         cmd_poweroff},
+        {COMMAND_REBOOT,
+         "reboot",
+         "Restart the computer",
+         cmd_reboot}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -1344,6 +1359,18 @@ static void cmd_acpi(
 
     terminal_write("Interrupts:     ");
     terminal_write_line(hal_irq_controller());
+
+    if (info->s5_valid)
+    {
+        write_number_line("Soft off:       ACPI S5, PM1a port 0x", info->pm1a_control_port, 1);
+        write_number_line("  sleep type:   ", info->s5_type_a, 0);
+    }
+    else
+    {
+        terminal_write_line("Soft off:       no \\_S5 found (virtual machine ports only)");
+    }
+
+    terminal_write_line(info->reset_valid ? "Reset:          ACPI reset register" : "Reset:          keyboard controller / port 0xCF9");
 }
 
 static void cmd_run(
@@ -1985,6 +2012,28 @@ static void cmd_diag(
     (void)argv;
 
     shell_run_diagnostics();
+}
+
+static void cmd_poweroff(
+    int argc,
+    char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    terminal_write_line("Powering off...");
+    hal_power_off();
+}
+
+static void cmd_reboot(
+    int argc,
+    char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    terminal_write_line("Restarting...");
+    hal_power_reboot();
 }
 
 int shell_command_count(void)

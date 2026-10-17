@@ -110,3 +110,83 @@ int acpi_parse_madt(const uint8_t *madt, size_t length, hal_acpi_info_t *info)
 
     return 0;
 }
+
+/*
+ * FADT fields (ACPI Specification 6.x, Table 5.9): offset 36 FIRMWARE_CTRL, 40 DSDT, 48 SMI_CMD (u32 port),
+ * 52 ACPI_ENABLE (u8), 64 PM1a_CNT_BLK, 68 PM1b_CNT_BLK, 112 flags (bit 10 RESET_REG_SUP), 116 RESET_REG
+ * (generic address: u8 space id, width, offset, access size, u64 address), 128 RESET_VALUE.
+ */
+int acpi_parse_fadt(const uint8_t *fadt, size_t length, hal_acpi_info_t *info)
+{
+    if (length < 72 || fadt[0] != 'F' || fadt[1] != 'A' || fadt[2] != 'C' || fadt[3] != 'P')
+        return -1;
+
+    info->dsdt_address = read32(fadt + 40);
+    info->smi_command_port = read32(fadt + 48);
+    info->acpi_enable_value = fadt[52];
+    info->pm1a_control_port = read32(fadt + 64);
+    info->pm1b_control_port = read32(fadt + 68);
+
+    info->reset_valid = 0;
+
+    /* Old FADTs (ACPI 1.0, 116 bytes as in QEMU) end before the reset register. */
+    if (length >= 129 && (read32(fadt + 112) & (1u << 10)) && read32(fadt + 120 + 4) == 0)
+    {
+        info->reset_space = fadt[116];
+        info->reset_address = read32(fadt + 120);
+        info->reset_value = fadt[128];
+        info->reset_valid = info->reset_space <= 1;
+    }
+
+    return 0;
+}
+
+int acpi_find_s5(const uint8_t *dsdt, size_t length, uint8_t *type_a, uint8_t *type_b)
+{
+    /* The table header is 36 bytes; the AML starts after it. */
+    for (size_t i = 36; i + 4 <= length; i++)
+    {
+        if (dsdt[i] != '_' || dsdt[i + 1] != 'S' || dsdt[i + 2] != '5' || dsdt[i + 3] != '_')
+            continue;
+
+        /* Preceded by a NameOp (0x08), possibly with a root prefix ('\\'). */
+        if (!(i >= 1 && dsdt[i - 1] == 0x08) && !(i >= 2 && dsdt[i - 2] == 0x08 && dsdt[i - 1] == '\\'))
+            continue;
+
+        size_t at = i + 4;
+
+        if (at + 2 > length || dsdt[at] != 0x12) /* PackageOp */
+            continue;
+
+        at++;
+
+        /* PkgLength: the top two bits of its first byte say how many bytes follow. */
+        at += 1 + (dsdt[at] >> 6);
+
+        if (at + 1 > length)
+            continue;
+
+        at++; /* NumElements */
+
+        if (at < length && dsdt[at] == 0x0A) /* BytePrefix */
+            at++;
+
+        if (at >= length)
+            continue;
+
+        uint8_t first = dsdt[at++];
+
+        if (at < length && dsdt[at] == 0x0A)
+            at++;
+
+        if (at >= length)
+            continue;
+
+        *type_a = first;
+        *type_b = dsdt[at];
+
+        return 0;
+    }
+
+    return -1;
+}

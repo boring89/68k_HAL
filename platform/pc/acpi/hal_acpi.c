@@ -12,6 +12,7 @@
 #include "platform/pc/vmap/vmap.h"
 
 #include "kernel/log/log.h"
+#include "kernel/printf/printf.h"
 
 /*
  * Finding the RSDP: the firmware puts it on a 16-byte boundary in the
@@ -94,23 +95,47 @@ int acpi_init(void)
     uint32_t entries = (rsdt->length - sizeof(*rsdt)) / 4;
     const uint8_t *list = (const uint8_t *)rsdt + sizeof(*rsdt);
 
+    int found_madt = 0;
+
     for (uint32_t i = 0; i < entries; i++)
     {
         uint32_t phys = (uint32_t)list[4 * i] | (uint32_t)list[4 * i + 1] << 8 |
                         (uint32_t)list[4 * i + 2] << 16 | (uint32_t)list[4 * i + 3] << 24;
         const acpi_table_header_t *table = map_table(phys);
 
-        if (table == NULL || table->signature[0] != 'A' || table->signature[1] != 'P' ||
-            table->signature[2] != 'I' || table->signature[3] != 'C')
+
+        if (table == NULL)
             continue;
 
-        if (acpi_parse_madt((const uint8_t *)table, table->length, &info) == 0)
-        {
-            info_valid = 1;
-            return 0;
-        }
 
-        kernel_log(LOG_WARN, "ACPI: malformed MADT");
+        if (table->signature[0] == 'A' && table->signature[1] == 'P' && table->signature[2] == 'I' &&
+            table->signature[3] == 'C')
+        {
+            if (acpi_parse_madt((const uint8_t *)table, table->length, &info) == 0)
+                found_madt = 1;
+            else
+                kernel_log(LOG_WARN, "ACPI: malformed MADT");
+        }
+        else if (table->signature[0] == 'F' && table->signature[1] == 'A' && table->signature[2] == 'C' &&
+                 table->signature[3] == 'P')
+        {
+            if (acpi_parse_fadt((const uint8_t *)table, table->length, &info) == 0 && info.dsdt_address != 0)
+            {
+                /* The DSDT holds the \_S5 object: the numbers that write "soft off" to PM1a_CNT. */
+                const acpi_table_header_t *dsdt = map_table(info.dsdt_address);
+
+
+                if (dsdt != NULL)
+                    info.s5_valid = acpi_find_s5((const uint8_t *)dsdt, dsdt->length, &info.s5_type_a, &info.s5_type_b) == 0;
+            }
+        }
+    }
+
+    if (found_madt)
+    {
+        info_valid = 1;
+
+        return 0;
     }
 
     return -1;

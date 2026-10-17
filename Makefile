@@ -11,7 +11,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: test-power usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -619,6 +619,7 @@ test-shell: iso
 		"dns localhost=address: 127.0.0.1" \
 		"cpuinfo=Features" \
 		"acpi=Processors" \
+		"acpi=Soft off:       ACPI S5" \
 		"run /bin/hello=Hello from user mode!" \
 		"run /bin/args a b=argv[2]: b" \
 		"run /bin/crash=before" \
@@ -722,6 +723,10 @@ test-e1000e: iso
 	python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
 		"net=Card:     e1000e" "dhcp=Address: 10.0.2.15" \
 		"ping 10.0.2.2=reply from 10.0.2.2" "dns localhost=address: 127.0.0.1"
+
+# poweroff and reboot end QEMU (i440fx, Q35, UEFI); QEMU only.
+test-power: iso
+	python3 -I tools/power_test.py $(BUILD)/68k_HAL.iso
 
 test-fb: all
 	python3 -I tools/fb_check.py

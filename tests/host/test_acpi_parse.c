@@ -155,12 +155,101 @@ static void test_madt_rejects(void)
     TEST_ASSERT_EQ_INT(-1, acpi_parse_madt(table, length, &info));
 }
 
+static void test_fadt(void)
+{
+    uint8_t table[256];
+    hal_acpi_info_t info;
+
+    memset(table, 0, sizeof(table));
+    memcpy(table, "FACP", 4);
+    put32(table + 4, 244);
+    put32(table + 40, 0x7FE1000u);   /* DSDT */
+    put32(table + 48, 0xB2);         /* SMI_CMD */
+    table[52] = 0xF1;                /* ACPI_ENABLE */
+    put32(table + 64, 0x604);        /* PM1a_CNT_BLK */
+    put32(table + 112, 1u << 10);    /* RESET_REG_SUP */
+    table[116] = 1;                  /* I/O port */
+    put32(table + 120, 0xCF9);
+    table[128] = 0x06;
+
+    memset(&info, 0, sizeof(info));
+    TEST_ASSERT_EQ_INT(0, acpi_parse_fadt(table, 244, &info));
+    TEST_ASSERT_EQ_INT(0x7FE1000u, info.dsdt_address);
+    TEST_ASSERT_EQ_INT(0xB2, info.smi_command_port);
+    TEST_ASSERT_EQ_INT(0xF1, info.acpi_enable_value);
+    TEST_ASSERT_EQ_INT(0x604, info.pm1a_control_port);
+    TEST_ASSERT(info.reset_valid);
+    TEST_ASSERT_EQ_INT(1, info.reset_space);
+    TEST_ASSERT_EQ_INT(0xCF9, info.reset_address);
+    TEST_ASSERT_EQ_INT(6, info.reset_value);
+
+    /* Without RESET_REG_SUP, or with a register in PCI config space or above 4 GiB, no reset register. */
+    put32(table + 112, 0);
+    TEST_ASSERT_EQ_INT(0, acpi_parse_fadt(table, 244, &info));
+    TEST_ASSERT(!info.reset_valid);
+    put32(table + 112, 1u << 10);
+    table[116] = 2;
+    acpi_parse_fadt(table, 244, &info);
+    TEST_ASSERT(!info.reset_valid);
+    table[116] = 1;
+    put32(table + 124, 1);
+    acpi_parse_fadt(table, 244, &info);
+    TEST_ASSERT(!info.reset_valid);
+
+    /* An old, short FADT (ACPI 1.0, 116 bytes) still gives the PM1 ports, but no reset register. */
+    memset(&info, 0, sizeof(info));
+    TEST_ASSERT_EQ_INT(0, acpi_parse_fadt(table, 116, &info));
+    TEST_ASSERT_EQ_INT(0x604, info.pm1a_control_port);
+    TEST_ASSERT(!info.reset_valid);
+
+    TEST_ASSERT_EQ_INT(-1, acpi_parse_fadt(table, 60, &info));
+    table[0] = 'X';
+    TEST_ASSERT_EQ_INT(-1, acpi_parse_fadt(table, 244, &info));
+}
+
+static void test_s5(void)
+{
+    /* QEMU's DSDT: Name (\_S5, Package (4) { 0x00, 0x00, 0x00, 0x00 }), here with the byte prefix on the second. */
+    uint8_t dsdt[80];
+    uint8_t a;
+    uint8_t b;
+
+    memset(dsdt, 0, sizeof(dsdt));
+    memcpy(dsdt, "DSDT", 4);
+
+    size_t at = 40;
+
+    dsdt[at++] = 0x08;       /* NameOp */
+    dsdt[at++] = '\\';
+    memcpy(dsdt + at, "_S5_", 4);
+    at += 4;
+    dsdt[at++] = 0x12;       /* PackageOp */
+    dsdt[at++] = 0x06;       /* PkgLength */
+    dsdt[at++] = 0x04;       /* NumElements */
+    dsdt[at++] = 0x0A;       /* BytePrefix */
+    dsdt[at++] = 0x05;       /* SLP_TYPa */
+    dsdt[at++] = 0x0A;
+    dsdt[at++] = 0x07;       /* SLP_TYPb */
+
+    TEST_ASSERT_EQ_INT(0, acpi_find_s5(dsdt, sizeof(dsdt), &a, &b));
+    TEST_ASSERT_EQ_INT(5, a);
+    TEST_ASSERT_EQ_INT(7, b);
+
+    /* Not there, or not preceded by NameOp. */
+    memset(dsdt + 40, 0, 40);
+    TEST_ASSERT_EQ_INT(-1, acpi_find_s5(dsdt, sizeof(dsdt), &a, &b));
+    memcpy(dsdt + 50, "_S5_", 4);
+    TEST_ASSERT_EQ_INT(-1, acpi_find_s5(dsdt, sizeof(dsdt), &a, &b));
+}
+
 int main(void)
 {
     TEST_RUN(test_checksum_and_rsdp);
     TEST_RUN(test_madt);
     TEST_RUN(test_madt_lapic_override);
     TEST_RUN(test_madt_rejects);
+    TEST_RUN(test_fadt);
+    TEST_RUN(test_s5);
 
     return TEST_REPORT("acpi_parse");
 }
