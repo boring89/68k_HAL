@@ -58,6 +58,11 @@ void gdt_set_kernel_stack(uint32_t esp0)
     tss.esp0 = esp0;
 }
 
+uint32_t gdt_get_kernel_stack(void)
+{
+    return tss.esp0;
+}
+
 void gdt_set_tls(uint32_t base)
 {
     /* 0xF2: present, DPL 3, writable data; flags 0xC: 4 KiB granularity, 32-bit. */

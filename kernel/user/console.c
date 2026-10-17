@@ -7,6 +7,7 @@
 
 #include "kernel/console/console.h"
 #include "kernel/input/event_buffer.h"
+#include "kernel/keyboard/keycode.h"
 #include "kernel/keyboard/keyseq.h"
 #include "kernel/keyboard/state.h"
 #include "kernel/lib/k_errno.h"
@@ -18,6 +19,8 @@
 #include "fbdev.h"
 #include "inputdev.h"
 #include "process.h"
+#include "sched.h"
+#include "signal.h"
 
 #include "hal/cpu.h"
 #include "hal/timer.h"
@@ -109,6 +112,43 @@ typedef struct
 } winsize_t;
 
 static termios_t termios;
+
+/* The process group that Ctrl-C and Ctrl-\\ go to; 0 = nobody. */
+static int foreground_group;
+static volatile uint32_t interrupt_keys;
+static volatile uint32_t quit_keys;
+static uint32_t interrupts_seen;
+static uint32_t quits_seen;
+static bool hook_ctrl_down;
+
+void user_console_set_foreground(int pgid)
+{
+    foreground_group = pgid;
+    interrupts_seen = interrupt_keys;
+    quits_seen = quit_keys;
+}
+
+/*
+ * Ctrl-C and Ctrl-\\ must reach the foreground programs even if none of them reads the
+ * keyboard (it waits for a pipe, sleeps...). The keys stay in the event buffer for whoever
+ * reads them later (type-ahead keeps working), but an interrupt handler sees them go by and
+ * counts them; user_console_pump turns the count into signals.
+ */
+static void key_hook(const input_event_t *event)
+{
+    if (event->type != INPUT_EVENT_KEYBOARD)
+        return;
+
+    keycode_t key = event->data.keyboard.key;
+    bool pressed = event->data.keyboard.pressed;
+
+    if (key == KEY_LEFT_CTRL || key == KEY_RIGHT_CTRL)
+        hook_ctrl_down = pressed;
+    else if (pressed && hook_ctrl_down && key == KEY_C)
+        interrupt_keys++;
+    else if (pressed && hook_ctrl_down && key == KEY_BACKSLASH)
+        quit_keys++;
+}
 
 static void termios_defaults(void)
 {
@@ -229,11 +269,8 @@ static void feed_byte(uint8_t c)
     {
         if (c == termios.c_cc[VINTR] || c == termios.c_cc[VQUIT])
         {
-            /* The program ends as if by SIGINT / SIGQUIT (there are no signal handlers for this). */
-            if (termios.c_lflag & ECHO)
-                console_write_line(c == termios.c_cc[VINTR] ? "^C" : "^\\");
-
-            hal_user_exit(c == termios.c_cc[VINTR] ? 130 : 131);
+            /* The signal itself is sent by user_console_pump, which counted the key when it arrived. */
+            return;
         }
     }
 
@@ -288,7 +325,36 @@ static void process_keys(void)
     }
 }
 
-static void wait_for_line(void)
+/* Turn the Ctrl-C and Ctrl-\\ keys counted by key_hook into signals for the foreground group. */
+void user_console_pump(void)
+{
+    if (foreground_group == 0)
+        return;
+
+    while (interrupts_seen != interrupt_keys || quits_seen != quit_keys)
+    {
+        int signal = SIGNAL_INT;
+
+        if (interrupts_seen != interrupt_keys)
+            interrupts_seen++;
+        else
+        {
+            quits_seen++;
+            signal = SIGNAL_QUIT;
+        }
+
+        if (termios.c_lflag & ISIG)
+        {
+            if (termios.c_lflag & ECHO)
+                console_write_line(signal == SIGNAL_INT ? "^C" : "^\\");
+
+            signal_send_group(foreground_group, signal);
+        }
+    }
+}
+
+/* Wait for a complete line: 0, or -EINTR when a signal arrives first. */
+static int32_t wait_for_line(void)
 {
     while (!line_ready)
     {
@@ -296,10 +362,14 @@ static void wait_for_line(void)
 
         if (!line_ready)
         {
-            hal_cpu_enable_interrupts();
-            hal_cpu_idle();
+            if (signal_interrupts(user_current))
+                return -K_EINTR;
+
+            sched_wait();
         }
     }
+
+    return 0;
 }
 
 static uint64_t now_ms(void)
@@ -311,7 +381,7 @@ static uint64_t now_ms(void)
  * Non-canonical read: wait as VMIN / VTIME say (termios(3)): VMIN bytes, or if VMIN is 0
  * the first byte, each limited by the VTIME tenths of a second when that is not 0.
  */
-static void wait_for_raw(uint32_t count)
+static int32_t wait_for_raw(uint32_t count)
 {
     uint32_t want = termios.c_cc[VMIN];
     uint64_t timeout_ms = (uint64_t)termios.c_cc[VTIME] * 100u;
@@ -336,20 +406,22 @@ static void wait_for_raw(uint32_t count)
         {
             /* VMIN = 0: return what is there; with VTIME wait that long for the first byte. */
             if (raw_count > 0 || timeout_ms == 0 || now_ms() - last_change >= timeout_ms)
-                return;
+                return 0;
         }
         else if (raw_count >= want)
         {
-            return;
+            return 0;
         }
         else if (raw_count > 0 && timeout_ms != 0 && now_ms() - last_change >= timeout_ms)
         {
             /* VMIN > 0 with VTIME: the time between bytes. */
-            return;
+            return 0;
         }
 
-        hal_cpu_enable_interrupts();
-        hal_cpu_idle();
+        if (signal_interrupts(user_current))
+            return -K_EINTR;
+
+        sched_wait();
     }
 }
 
@@ -380,7 +452,10 @@ static int32_t console_read(vfs_file_t *file, uint64_t pos, void *buffer, uint32
 
     if (!(termios.c_lflag & ICANON))
     {
-        wait_for_raw(count);
+        int32_t waited = wait_for_raw(count);
+
+        if (waited != 0)
+            return waited;
 
         uint32_t n = raw_count < count ? raw_count : count;
         uint8_t *out = buffer;
@@ -396,7 +471,10 @@ static int32_t console_read(vfs_file_t *file, uint64_t pos, void *buffer, uint32
         return (int32_t)n;
     }
 
-    wait_for_line();
+    int32_t waited = wait_for_line();
+
+    if (waited != 0)
+        return waited;
 
     if (line_eof)
     {
@@ -798,6 +876,8 @@ vfs_fs_t *devfs_create(void)
     k_memset(fs, 0, sizeof(*fs));
     fs->open = devfs_open;
     fs->stat = devfs_stat;
+
+    input_event_set_hook(key_hook);
 
     return fs;
 }

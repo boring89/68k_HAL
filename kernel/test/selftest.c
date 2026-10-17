@@ -26,6 +26,7 @@
 #include "kernel/usb/usb.h"
 #include "kernel/user/console.h"
 #include "kernel/user/process.h"
+#include "kernel/user/sched.h"
 #include "kernel/vfs/vfs.h"
 #include "kernel/memory/heap.h"
 #include "kernel/memory/pmm.h"
@@ -560,6 +561,9 @@ static const struct
     {"termios", 0, NULL, NULL},         /* raw mode, VMIN / VTIME */
     {"protect", 139, NULL, NULL},       /* read-only and unreachable pages; ends by writing a constant */
     {"crash", 139, NULL, NULL},         /* 128 + SIGSEGV */
+    {"forkexec", 0, NULL, NULL},        /* fork, exec, wait */
+    {"pipes", 0, NULL, NULL},           /* pipe, dup2, SIGPIPE */
+    {"signals", 0, NULL, NULL},         /* handlers, masks, kill */
 };
 
 static void test_user_programs(void)
@@ -618,6 +622,69 @@ static void test_user_programs(void)
         SELFTEST_ASSERT(status == user_tests[i].status);
         SELFTEST_ASSERT(k_strcmp(output, expected) == 0);
     }
+}
+
+/* The process table holds USER_MAX_PROCS entries; creating and destroying them leaks no frames. */
+static void test_process_limit(void)
+{
+    size_t free_before = pmm_get_free_frames();
+    user_process_t *created[USER_MAX_PROCS + 1];
+    unsigned int count = 0;
+
+    while (count < USER_MAX_PROCS + 1)
+    {
+        created[count] = sched_create(user_current);
+
+        if (created[count] == NULL)
+            break;
+
+        count++;
+    }
+
+    SELFTEST_ASSERT(count == USER_MAX_PROCS);
+    SELFTEST_ASSERT(sched_process_count() == USER_MAX_PROCS);
+
+    for (unsigned int i = 0; i < count; i++)
+        sched_destroy(created[i]);
+
+    SELFTEST_ASSERT(sched_process_count() == 0);
+    SELFTEST_ASSERT(pmm_get_free_frames() == free_before);
+}
+
+/* Programs that fork, exec and pipe give all their memory back (frames, address spaces, kernel stacks). */
+static void test_process_no_leak(void)
+{
+    vfs_stat_t stat;
+
+    if (vfs_stat("/bin/forkexec", &stat) != 0)
+        return;
+
+    static const char *const environment[] = {"PATH=/bin", NULL};
+    const char *names[] = {"/bin/forkexec", "/bin/pipes", "/bin/signals"};
+
+    size_t before = 0;
+
+    for (int round = 0; round < 3; round++)
+    {
+        for (unsigned int i = 0; i < 3; i++)
+        {
+            const char *args[] = {names[i], NULL};
+            static char output[1024];
+
+            user_console_capture_start(output, sizeof(output));
+            SELFTEST_ASSERT(user_run(names[i], args, environment) == 0);
+            user_console_capture_stop();
+        }
+
+        /* The first round may grow the heap; the later ones must not use more. */
+        if (round == 1)
+            before = pmm_get_free_frames();
+
+        if (round == 2)
+            SELFTEST_ASSERT(pmm_get_free_frames() == before);
+    }
+
+    SELFTEST_ASSERT(sched_process_count() == 0);
 }
 
 /* A recording 80x25 text display for test_user_ansi. */
@@ -853,6 +920,8 @@ void selftest_run(void)
     SELFTEST_RUN(test_net);
     SELFTEST_RUN(test_sound);
     SELFTEST_RUN(test_user_programs);
+    SELFTEST_RUN(test_process_limit);
+    SELFTEST_RUN(test_process_no_leak);
     SELFTEST_RUN(test_user_ansi);
     SELFTEST_RUN(test_user_compiler);
 

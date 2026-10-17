@@ -1,0 +1,7 @@
+child: value 99, parent is alive
+parent: value 5, child exited 1 with 7
+Hello from user mode!
+exec'd program exited with 0
+missing program: child exited with 42
+collected 3 children, status sum 60, then errno ECHILD
+grandchild chain: 4

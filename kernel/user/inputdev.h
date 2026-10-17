@@ -29,4 +29,7 @@ extern const vfs_file_ops_t inputdev_ops;
 /* Forget events that arrived before a program opened the device. */
 void inputdev_flush(void);
 
+/* True while some program has the device open (then the keyboard events are its). */
+int inputdev_is_open(void);
+
 #endif

@@ -4,6 +4,8 @@
  */
 
 #include "process.h"
+#include "sched.h"
+#include "signal.h"
 
 #include "hal/cpu.h"
 #include "hal/timer.h"
@@ -108,8 +110,10 @@ static int32_t wait_for(socket_t *s, int (*ready)(socket_t *), uint32_t timeout_
         if (end != 0 && hal_timer_ns() >= end)
             return -K_EAGAIN;
 
-        hal_cpu_enable_interrupts();
-        hal_cpu_idle();
+        if (signal_interrupts(user_current))
+            return -K_EINTR;
+
+        sched_wait();
     }
 }
 

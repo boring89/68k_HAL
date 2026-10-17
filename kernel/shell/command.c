@@ -693,9 +693,9 @@ typedef struct
 } pipeline_stage_t;
 
 /*
- * A line with "|", "<", ">" or ">>" (each as a word of its own). There is only one program at a time,
- * so the stages run one after the other: each writes its output to a file in /tmp
- * (/tmp/.pipe<n>) that the next one reads. Only programs take part, not built-in commands.
+ * A line with "|", "<", ">" or ">>" (each as a word of its own). The stages run at the same time,
+ * the output of each one a pipe to the next one's input (user_run_job). Only programs take part,
+ * not built-in commands.
  */
 static void run_pipeline(shell_command_t *cmd)
 {
@@ -754,7 +754,7 @@ static void run_pipeline(shell_command_t *cmd)
     }
 
     char paths[PIPELINE_MAX][VFS_PATH_MAX];
-    char pipes[PIPELINE_MAX][16];
+    user_job_stage_t job[PIPELINE_MAX];
 
     for (int i = 0; i < count; i++)
     {
@@ -766,30 +766,31 @@ static void run_pipeline(shell_command_t *cmd)
             return;
         }
 
-        k_strcpy(pipes[i], "/tmp/.pipe0");
-        pipes[i][10] = (char)('0' + i);
+        stages[i].argv[stages[i].argc] = NULL;
+        job[i].path = paths[i];
+        job[i].argv = stages[i].argv;
+        job[i].stdin_path = stages[i].input;
+        job[i].stdout_path = stages[i].output;
+        job[i].append = stages[i].output != NULL && stages[i].append;
+    }
+
+    int32_t status[PIPELINE_MAX];
+
+    if (user_run_job(job, (unsigned int)count, shell_environment(), status) != 0)
+    {
+        terminal_write_line("shell: cannot run the pipeline");
+
+        return;
     }
 
     for (int i = 0; i < count; i++)
     {
-        pipeline_stage_t *stage = &stages[i];
-        const char *input = stage->input != NULL ? stage->input : (i > 0 ? pipes[i - 1] : NULL);
-        const char *output = stage->output != NULL ? stage->output : (i < count - 1 ? pipes[i] : NULL);
+        report_status(stages[i].argv[0], status[i]);
 
-        stage->argv[stage->argc] = NULL;
-
-        int32_t status = user_run_redirect(paths[i], stage->argv, shell_environment(), input, output,
-                                           stage->output != NULL && stage->append);
-
-        report_status(stage->argv[0], status);
-
-        /* A stage that could not run (or failed to open its files) ends the line. */
-        if (status < 0)
+        /* A stage that could not start ended the line: the later ones did not run. */
+        if (status[i] < 0)
             break;
     }
-
-    for (int i = 0; i < count - 1; i++)
-        vfs_unlink(pipes[i]);
 }
 
 void shell_dispatch(shell_command_t *cmd)

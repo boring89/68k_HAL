@@ -111,7 +111,7 @@ compiled by tcc: fib(20)=6765 1099511627 ok 6.28
 /bin/crash: segmentation fault at 100000 (eip 8049123)
 ```
 
-結束碼是 128 + 訊號編號（SIGSEGV = 139）。一次只能執行一個程式（還沒有多工）。
+結束碼是 128 + 訊號編號（SIGSEGV = 139）。可以同時有很多個行程（`fork`、`execve`、管線、訊號，見 `docs/process.md`）。
 
 ## 5. 已實作的系統呼叫
 
@@ -127,7 +127,7 @@ compiled by tcc: fib(20)=6765 1099511627 ok 6.28
 | 時間 | `clock_gettime`、`clock_gettime64`、`gettimeofday`、`time`、`nanosleep`、`clock_nanosleep(_time64)` |
 | 行程資訊 | `getpid`、`gettid`、`getppid`、`getuid32` 等、`uname`、`getrlimit`、`ugetrlimit`、`umask` |
 | 執行緒 | `set_thread_area`（TLS，GDT 項目 0x33）、`set_tid_address` |
-| 訊號 | `rt_sigaction`、`rt_sigprocmask`（接受並忽略）；`kill`/`tgkill` 對自己 = 結束程式 |
+| 行程與訊號 | `fork`、`vfork`、`clone`（fork 語意）、`execve`、`waitpid`、`wait4`、`pipe`、`pipe2`、`dup3`、`kill`、`tkill`、`tgkill`、`rt_sigaction`、`rt_sigprocmask`、`rt_sigpending`、`rt_sigsuspend`、`rt_sigreturn`、`pause`、`getpgid`、`setpgid`、`setsid`（見 `docs/process.md`） |
 | 網路 | `socketcall`（`socket`、`bind`、`connect`、`listen`、`accept`、`send`/`recv`/`sendto`/`recvfrom`/`sendmsg`/`recvmsg`、`shutdown`、`getsockname`/`getpeername`、`setsockopt`/`getsockopt`，見 `docs/net.md` 3.5） |
 | 等待 | `poll`、`ppoll`、`_newselect`、`pselect6`（檔案、console 與 socket） |
 | 其他 | `ioctl`（console：termios、視窗大小、`FIONREAD`，見 5.5；`/dev/fb0`，見 5.6；其他檔案 `ENOTTY`）、`getrandom` |
@@ -200,9 +200,9 @@ shell 內建的 `ls`、`cat`、`echo`、`date` 是舊的（`ls`／`cat` 讀 HFS 
 
 `kernel/terminal/input.c`：← → Home End Delete Backspace、Ctrl-A/E/U/K/W、↑ ↓ 歷史（16 行）、Tab 補全（第一個字：內建指令與 `/bin` 的程式；其他字：目前目錄的檔案，含斜線的路徑在該目錄找；`kernel/shell/complete.c`）、Ctrl-C 放棄這一行、Ctrl-L 清畫面。原理：編輯器記得「這一行第一個字元在螢幕上的線性位置」（列 × 寬 + 欄），每次修改就從改動處往後重畫，並處理換行與畫面捲動（捲動後那一行整體上移，用實際游標位置校正）。序列埠只看到鍵入的字（重畫時暫停鏡射）。沒有顯示器時只支援在行尾輸入與 Backspace。測試：`tests/host/test_input.c`、`test_shell_complete.c`、`make test-shell`。
 
-### 5.9 重導向與管線（一個一個跑的管線）
+### 5.9 重導向與管線
 
-shell 行裡的 `|`、`<`、`>`、`>>`（各自要用空白隔開）：`seq 20 | grep 1 | wc -l`、`seq 3 > /tmp/n.txt`、`wc -l < /tmp/n.txt`、`echo more >> /tmp/n.txt`。因為一次只能跑一個程式，管線是**依序**執行：前一段的標準輸出寫到 `/tmp/.pipe<n>`，下一段從那個檔案讀（`user_run_redirect`；結束後刪除）。對不需要即時互動的過濾器（grep、sort、wc、head…）結果相同；但前一段要先跑完才開始下一段（無限輸出的程式如 `yes | head` 不行），也不能互動。只有程式參與，內建指令不行（行裡有運算子時 `echo`、`cat` 等用 `/bin` 的版本）；最多 4 段。真正的管線需要 `fork`/`pipe`/多工（見 P6_PLAN 的「待決定」）。
+shell 行裡的 `|`、`<`、`>`、`>>`（各自要用空白隔開）：`seq 20 | grep 1 | wc -l`、`seq 3 > /tmp/n.txt`、`wc -l < /tmp/n.txt`、`echo more >> /tmp/n.txt`。各段是**同時執行**的行程，之間用真正的管線（`kernel/user/pipe.c`，見 `docs/process.md` 第 6 節），所以 `seq 1000000 | head` 這種前一段輸出很多的也行；Ctrl-C 對整個管線有效。只有程式參與，內建指令不行（行裡有運算子時 `echo`、`cat` 等用 `/bin` 的版本）；最多 4 段。
 
 ### 5.10 `/proc`
 
@@ -233,7 +233,7 @@ shell 行裡的 `|`、`<`、`>`、`>>`（各自要用空白隔開）：`seq 20 |
 
 ## 7. 限制（已知）
 
-- 一次一個程式；沒有 `fork`/`execve`/`pipe`、執行緒、訊號處理常式（Ctrl-C 直接結束程式）。
+- 協作式多工、沒有執行緒、`alarm`、作業控制（見 `docs/process.md` 第 9 節）。
 - 終端機：沒有 UTF-8（VGA 文字模式只有 CP437）、不是所有 CSI 都支援（沒有捲動區域、替代螢幕、滑鼠）、圖形模式下沒有畫面（只有序列埠）；termios 沒有 `IXON`/`OPOST` 的實際作用、鮑率設定被忽略。
 - 沒有 NX（需要 PAE）：可讀的頁面都能執行；`PROT_EXEC` 被忽略。
 - 堆疊固定 2 MiB，不會自動成長。

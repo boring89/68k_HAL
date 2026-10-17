@@ -156,6 +156,19 @@ kernel_main()（kernel/main.c）
 | `kernel_main()`（`kernel/main.h`） | `kernel/main.c` | `pc_entry` |
 | `selftest_arch_run`、`selftest_platform_run`、`selftest_platform_exit`（`kernel/test/selftest.h`） | `arch/x86/test/`、`platform/pc/test/` | `selftest_run` |
 
+### P7 新增的介面
+
+| 檔案 | 內容 |
+|---|---|
+| `hal/mmu.h`（位址空間） | `hal_space_create/switch/destroy/map/copy_page/current`：每個行程一份分頁目錄，kernel 範圍共用（見 `docs/process.md` 第 3 節） |
+| `hal/task.h` | `hal_context_init/switch`（kernel 堆疊上的執行緒切換）、`hal_task_set_kernel_stack`、`hal_task_set_tls`、`hal_fpu_save/restore/reset_area` |
+| `hal/usermode.h` | 另有 `hal_user_enter`、`hal_user_fork`、`hal_user_regs_get/set` |
+| `hal/irq.h` | `hal_irq_count()`：到目前為止的中斷總數（排程器用它判斷有沒有事發生） |
+
+### 開機協定：Multiboot 1 與 2
+
+`boot.asm` 同時有兩種 header。BIOS 的 GRUB（`multiboot`）、QEMU `-kernel` 走 Multiboot 1；**UEFI 的 GRUB 用 `multiboot2`**（`grub.cfg` 依 `$grub_platform` 選項目），因為只有 Multiboot2 會給 ACPI RSDP（UEFI 下它不在 0xE0000–0xFFFFF）。`multiboot2_init` 把 tag 清單（記憶體表、module、framebuffer、RSDP）翻成同一個 `multiboot_info_t`，其他程式不需要知道用的是哪一版。UEFI 沒有 VGA 文字模式，所以 UEFI 項目用 `kernel-gfx.elf`（要求 framebuffer），console 只有 fbcon 與 serial；需要 `insmod all_video` 才拿得到 GOP framebuffer。`make test-uefi`（q35 + OVMF）檢查這條路。
+
 ## 5. 一個 IRQ 的路徑
 
 ```

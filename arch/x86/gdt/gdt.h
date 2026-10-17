@@ -29,6 +29,9 @@ void gdt_init_tss(void);
 /* Where interrupts from ring 3 put their stack (the TSS's esp0). */
 void gdt_set_kernel_stack(uint32_t esp0);
 
+/* The esp0 last set by gdt_set_kernel_stack. */
+uint32_t gdt_get_kernel_stack(void);
+
 /*
  * Point the thread-local storage descriptor (selector GDT_TLS) at
  * base. The limit is the whole 4 GiB, like Linux's set_thread_area with

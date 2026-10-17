@@ -27,4 +27,11 @@ int input_event_pop(
 bool input_event_available(void);
 
 
+/*
+ * Call hook for every event pushed, in the context of the pusher (an interrupt handler: be
+ * short, no waiting). The event is still queued as usual. NULL removes the hook.
+ */
+void input_event_set_hook(void (*hook)(const input_event_t *event));
+
+
 #endif

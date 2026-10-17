@@ -15,7 +15,10 @@
 #define K_EPERM 1
 #define K_ENOENT 2
 #define K_EIO 5
+#define K_ESRCH 3
 #define K_EINTR 4
+#define K_ENOEXEC 8
+#define K_ECHILD 10
 #define K_EBADF 9
 #define K_EAGAIN 11
 #define K_ENOMEM 12

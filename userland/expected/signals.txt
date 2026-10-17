@@ -1,0 +1,8 @@
+after kill: handler ran 1 time(s)
+blocked: count 1, pending 1
+unblocked: count 2
+SIGCHLD handler ran 1 time(s)
+sleeping child: signaled 1, signal 15
+handler child: exit 21
+SIGKILL: signal 9
+kill of a missing process: -1

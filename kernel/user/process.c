@@ -6,6 +6,8 @@
 #include "process.h"
 
 #include "console.h"
+#include "sched.h"
+#include "signal.h"
 #include "fbdev.h"
 #include "procfiles.h"
 #include "elf.h"
@@ -27,8 +29,6 @@
 #include "kernel/vfs/hfsfs.h"
 #include "kernel/vfs/ramfs.h"
 #include "kernel/vfs/tarfs.h"
-
-user_process_t user_process;
 
 #define PAGE HAL_MMU_PAGE_SIZE
 #define MAX_PROGRAM_SIZE (64u * 1024 * 1024)
@@ -230,6 +230,7 @@ int32_t user_fd_close(int fd)
         return -K_EBADF;
 
     user_process.fd[fd] = NULL;
+    user_process.fd_cloexec[fd / 32] &= ~(1u << (fd % 32));
     vfs_file_close(file);
 
     return 0;
@@ -311,12 +312,18 @@ static int32_t read_whole_file(const char *path, void **data, size_t *size)
     return 0;
 }
 
-static void cleanup(void)
+/* Close every descriptor and free every page of the running process. */
+void user_release_memory(void)
 {
     for (int i = 0; i < USER_MAX_FDS; i++)
         user_fd_close(i);
 
-    /* Free the pages region by region; user_unmap edits the list as it goes. */
+    user_unmap_all();
+}
+
+/* Free the pages region by region; user_unmap edits the list as it goes. */
+void user_unmap_all(void)
+{
     while (user_process.regions.count > 0)
     {
         user_region_t r = user_process.regions.region[0];
@@ -324,7 +331,55 @@ static void cleanup(void)
         user_unmap(r.start, r.end);
     }
 
-    user_process.running = 0;
+    user_process.device_count = 0;
+}
+
+/* Release a process that is not the running one (a fork that failed half way). */
+void user_discard(user_process_t *p)
+{
+    user_process_t *saved = user_current;
+    hal_space_t saved_space = hal_space_current();
+
+    user_current = p;
+    hal_space_switch(p->space);
+    user_release_memory();
+    user_current = saved;
+    hal_space_switch(saved_space);
+}
+
+int32_t user_copy_memory(user_process_t *child)
+{
+    user_process_t *parent = user_current;
+
+    /* The regions first: user_discard frees what the copy got to, whatever happens. */
+    child->regions = parent->regions;
+    child->brk_start = parent->brk_start;
+    child->brk = parent->brk;
+    child->mmap_next = parent->mmap_next;
+    child->device_count = parent->device_count;
+    k_memcpy(child->device, parent->device, sizeof(child->device));
+
+    for (unsigned int i = 0; i < parent->regions.count; i++)
+    {
+        for (uint32_t page = parent->regions.region[i].start; page < parent->regions.region[i].end; page += PAGE)
+        {
+            if (is_device_page(page))
+            {
+                uintptr_t phys;
+                uint32_t flags;
+
+                if (hal_mmu_get_phys(page, &phys) != 0 || hal_mmu_get_flags(page, &flags) != 0 ||
+                    hal_space_map(child->space, page, phys & ~(uintptr_t)(PAGE - 1), flags) != 0)
+                    return -K_ENOMEM;
+            }
+            else if (hal_space_copy_page(child->space, page) != 0)
+            {
+                return -K_ENOMEM;
+            }
+        }
+    }
+
+    return 0;
 }
 
 static int32_t load_image(const uint8_t *file, const elf_image_t *image)
@@ -434,17 +489,28 @@ static int32_t build_stack(const elf_image_t *image, const char *const *argv,
     return 0;
 }
 
-int32_t user_run(const char *path, const char *const *argv, const char *const *envp)
+/* Open the descriptors 0, 1 and 2 of a new process: the console unless the caller gives a file. */
+static int32_t standard_files(user_process_t *p, vfs_file_t *const files[3])
 {
-    return user_run_redirect(path, argv, envp, NULL, NULL, 0);
+    for (int i = 0; i < 3; i++)
+    {
+        vfs_file_t *file = files != NULL ? files[i] : NULL;
+
+        if (file != NULL)
+            p->fd[i] = vfs_file_ref(file);
+        else
+            p->fd[i] = console_file_open(i == 0 ? VFS_O_RDONLY : VFS_O_WRONLY);
+
+        if (p->fd[i] == NULL)
+            return -K_ENOMEM;
+    }
+
+    return 0;
 }
 
-int32_t user_run_redirect(const char *path, const char *const *argv, const char *const *envp,
-                          const char *stdin_path, const char *stdout_path, int append)
+int32_t user_spawn(const char *path, const char *const *argv, const char *const *envp,
+                   vfs_file_t *const files[3], int join_group)
 {
-    if (user_process.running)
-        return -K_EBUSY;
-
     void *file;
     size_t size;
     int32_t status = read_whole_file(path, &file, &size);
@@ -463,11 +529,257 @@ int32_t user_run_redirect(const char *path, const char *const *argv, const char 
         return -K_EACCES;
     }
 
-    k_memset(&user_process, 0, sizeof(user_process));
-    user_process.running = 1;
+    user_process_t *parent = user_current;
+    user_process_t *child = sched_create(parent);
 
-    for (size_t i = 0; i < sizeof(user_process.name) - 1 && path[i] != '\0'; i++)
-        user_process.name[i] = path[i];
+    if (child == NULL)
+    {
+        kfree(file);
+
+        return -K_EAGAIN;
+    }
+
+    if (join_group > 0)
+        child->pgid = join_group;
+
+    for (size_t i = 0; i < sizeof(child->name) - 1 && path[i] != '\0'; i++)
+        child->name[i] = path[i];
+
+    child->name[sizeof(child->name) - 1] = '\0';
+
+    status = standard_files(child, files);
+
+    /* Fill the new address space from here: make it the current one for a moment. */
+    uint32_t sp = 0;
+    hal_space_t saved_space = hal_space_current();
+
+    if (status == 0)
+    {
+        user_current = child;
+        hal_space_switch(child->space);
+
+        status = load_image(file, &image);
+
+        if (status == 0)
+            status = build_stack(&image, argv, envp, &sp);
+
+        if (status != 0)
+            user_release_memory();
+
+        user_current = parent;
+        hal_space_switch(saved_space);
+    }
+
+    kfree(file);
+
+    if (status != 0)
+    {
+        user_discard(child);
+        sched_destroy(child);
+
+        return status;
+    }
+
+    sched_start(child, image.entry, sp);
+
+    return child->pid;
+}
+
+int32_t user_run(const char *path, const char *const *argv, const char *const *envp)
+{
+    return user_run_redirect(path, argv, envp, NULL, NULL, 0);
+}
+
+int32_t user_run_redirect(const char *path, const char *const *argv, const char *const *envp,
+                          const char *stdin_path, const char *stdout_path, int append)
+{
+    user_job_stage_t stage = {path, argv, stdin_path, stdout_path, append};
+    int32_t status;
+    int32_t result = user_run_job(&stage, 1, envp, &status);
+
+    return result != 0 ? result : status;
+}
+
+/* The status of a collected child as user_run reports it: the exit status, or 128 + the signal. */
+static int32_t decode_status(int wait_status)
+{
+    if ((wait_status & 0x7F) != 0)
+        return 128 + (wait_status & 0x7F);
+
+    return (wait_status >> 8) & 0xFF;
+}
+
+/* End every process that is still alive (the job's leftovers) and collect all that ended. */
+static void reap_leftovers(void)
+{
+    user_process_t *self = user_current;
+
+    for (;;)
+    {
+        int alive = 0;
+
+        for (unsigned int i = 1; i <= USER_MAX_PROCS; i++)
+        {
+            user_process_t *p = sched_slot(i);
+
+            if (p != NULL && p->state != PROC_ZOMBIE)
+            {
+                signal_send(p, SIGNAL_KILL);
+                alive++;
+            }
+        }
+
+        if (alive == 0)
+            break;
+
+        sched_wait();
+    }
+
+    for (;;)
+    {
+        int status;
+
+        if (sched_wait_child(-1, &status, 1) <= 0)
+            break;
+    }
+
+    (void)self;
+}
+
+int32_t user_run_job(const user_job_stage_t *stages, unsigned int count, const char *const *envp,
+                     int32_t *status)
+{
+    if (count == 0 || count > USER_JOB_MAX_STAGES)
+        return -K_EINVAL;
+
+    int pids[USER_JOB_MAX_STAGES];
+    vfs_file_t *pipe_read = NULL; /* the read end that feeds the next stage */
+    int32_t result = 0;
+    unsigned int started = 0;
+    int group = 0;
+
+    user_console_reset();
+
+    for (unsigned int i = 0; i < count && result == 0; i++)
+    {
+        vfs_file_t *files[3] = {NULL, NULL, NULL};
+        vfs_file_t *next_read = NULL;
+
+        /* Input: a file, else the pipe from the stage before, else the console. */
+        if (stages[i].stdin_path != NULL)
+            result = vfs_open(stages[i].stdin_path, VFS_O_RDONLY, 0, &files[0]);
+        else if (pipe_read != NULL)
+            files[0] = vfs_file_ref(pipe_read);
+
+        /* Output: a file, else a pipe to the next stage, else the console. */
+        if (result == 0 && stages[i].stdout_path != NULL)
+        {
+            result = vfs_open(stages[i].stdout_path,
+                              VFS_O_WRONLY | VFS_O_CREAT | (stages[i].append ? VFS_O_APPEND : VFS_O_TRUNC),
+                              0644, &files[1]);
+        }
+        else if (result == 0 && i + 1 < count)
+        {
+            result = pipe_create(&next_read, &files[1]);
+        }
+
+        if (result == 0)
+        {
+            result = user_spawn(stages[i].path, stages[i].argv, envp, files, group);
+
+            if (result > 0)
+            {
+                pids[started++] = result;
+
+                if (group == 0)
+                {
+                    group = result;
+                    user_console_set_foreground(group);
+                }
+
+                result = 0;
+            }
+        }
+
+        for (int k = 0; k < 3; k++)
+        {
+            if (files[k] != NULL)
+                vfs_file_close(files[k]);
+        }
+
+        if (pipe_read != NULL)
+            vfs_file_close(pipe_read);
+
+        pipe_read = next_read;
+    }
+
+    if (pipe_read != NULL)
+        vfs_file_close(pipe_read);
+
+    /* A stage that could not start ends the job: the ones that did are stopped. */
+    if (result != 0)
+    {
+        for (unsigned int i = 0; i < started; i++)
+            signal_send(sched_find(pids[i]), SIGNAL_KILL);
+    }
+
+    for (unsigned int i = 0; i < count; i++)
+        status[i] = 0;
+
+    for (unsigned int i = 0; i < started; i++)
+    {
+        int wait_status = 0;
+
+        /* While the job runs, keep reading the keyboard: Ctrl-C is a signal to the job. */
+        while (sched_wait_child(pids[i], &wait_status, 1) == 0)
+        {
+            user_console_pump();
+            sched_wait();
+        }
+
+        status[i] = decode_status(wait_status);
+    }
+
+    if (result != 0)
+        status[started] = result;
+
+    reap_leftovers();
+    user_console_set_foreground(0);
+    user_console_reset();
+    fbdev_program_ended();
+
+    return 0;
+}
+
+int32_t user_exec(const char *path, const char *const *argv, const char *const *envp)
+{
+    void *file;
+    size_t size;
+    int32_t status = read_whole_file(path, &file, &size);
+
+    if (status != 0)
+        return status;
+
+    elf_image_t image;
+    const char *error = NULL;
+
+    if (elf_parse(file, size, &image, &error) != 0)
+    {
+        kfree(file);
+
+        return -K_ENOEXEC;
+    }
+
+    /* Point of no return: the old program's memory goes. */
+    user_process_t *p = user_current;
+
+    user_unmap_all();
+
+    for (int i = 0; i < USER_MAX_FDS; i++)
+    {
+        if (p->fd_cloexec[i / 32] & (1u << (i % 32)))
+            user_fd_close(i);
+    }
 
     uint32_t sp = 0;
 
@@ -477,49 +789,31 @@ int32_t user_run_redirect(const char *path, const char *const *argv, const char 
     if (status == 0)
         status = build_stack(&image, argv, envp, &sp);
 
-    vfs_file_t *in = NULL;
-    vfs_file_t *out = NULL;
-    vfs_file_t *err = console_file_open(VFS_O_WRONLY);
-
-    if (status == 0 && stdin_path != NULL)
-        status = vfs_open(stdin_path, VFS_O_RDONLY, 0, &in);
-    else
-        in = console_file_open(VFS_O_RDONLY);
-
-    if (status == 0 && stdout_path != NULL)
-        status = vfs_open(stdout_path, VFS_O_WRONLY | VFS_O_CREAT | (append ? VFS_O_APPEND : VFS_O_TRUNC), 0644, &out);
-    else if (status == 0)
-        out = console_file_open(VFS_O_WRONLY);
-
-    if (status == 0 && (in == NULL || out == NULL || err == NULL))
-        status = -K_ENOMEM;
-
-    user_process.fd[0] = in;
-    user_process.fd[1] = out;
-    user_process.fd[2] = err;
-
     if (status != 0)
-    {
-        cleanup();
+        sched_exit(0, SIGNAL_SEGV);
 
-        return status;
-    }
+    signal_reset_for_exec(p);
+    p->tls_base = 0;
+    hal_task_set_tls(0);
 
-    user_console_reset();
+    uint8_t fresh[HAL_FPU_AREA_SIZE + 16];
+    void *area = (void *)(((uintptr_t)fresh + 15) & ~(uintptr_t)15);
 
-    /* A program that changes directory does not move the shell. */
-    char saved_cwd[VFS_PATH_MAX];
+    hal_fpu_reset_area(area);
+    hal_fpu_restore(area);
 
-    k_strcpy(saved_cwd, vfs_getcwd());
+    for (size_t i = 0; i < sizeof(p->name) - 1 && path[i] != '\0'; i++)
+        p->name[i] = path[i];
 
-    int exit_status = hal_user_run(image.entry, sp);
+    hal_user_regs_t regs;
 
-    vfs_chdir(saved_cwd);
-    user_console_reset();
-    cleanup();
-    fbdev_program_ended();
+    k_memset(&regs, 0, sizeof(regs));
+    regs.eip = image.entry;
+    regs.esp = sp;
+    regs.eflags = 0x202;
+    hal_user_regs_set(&regs);
 
-    return exit_status & 0xFF;
+    return 0;
 }
 
 /* --- start-up --- */
@@ -559,7 +853,7 @@ static void on_fault(const hal_user_fault_t *fault)
 
     kernel_printf("%s: %s at %x (eip %x)\n", user_process.name, what,
                   fault->address, fault->eip);
-    hal_user_exit(128 + signal);
+    sched_exit(0, signal);
 }
 
 static int32_t on_syscall(const hal_user_syscall_t *call)
@@ -576,6 +870,7 @@ static void mount_or_warn(const char *path, vfs_fs_t *fs)
 void user_init(void)
 {
     hal_user_init(on_syscall, on_fault);
+    sched_init();
 
     /* "/" is the program disk if the boot loader gave one, else an empty RAM disk. */
     vfs_fs_t *root = NULL;

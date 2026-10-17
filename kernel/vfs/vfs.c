@@ -120,6 +120,11 @@ const char *vfs_getcwd(void)
     return cwd;
 }
 
+void vfs_set_cwd(const char *path)
+{
+    k_strcpy(cwd, path);
+}
+
 int32_t vfs_chdir(const char *path)
 {
     char normal[VFS_PATH_MAX];

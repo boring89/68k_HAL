@@ -15,6 +15,13 @@
 /* Zeroed with the rest of .bss when the kernel is loaded. */
 static hal_irq_handler_t handlers[PIC_LINE_COUNT];
 
+static volatile unsigned int irq_total;
+
+unsigned int hal_irq_count(void)
+{
+    return irq_total;
+}
+
 int hal_irq_register(unsigned int line, hal_irq_handler_t handler)
 {
     if (line >= PIC_LINE_COUNT)
@@ -44,6 +51,8 @@ int hal_irq_unmask(unsigned int line)
 /* Called by the x86 IRQ stubs (irq_stub.asm). */
 void irq_handler(uint32_t irq)
 {
+    irq_total++;
+
     if (pic_handle_spurious(irq))
         return;
 

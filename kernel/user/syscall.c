@@ -4,6 +4,8 @@
  */
 
 #include "process.h"
+#include "sched.h"
+#include "signal.h"
 
 #include "hal/clock.h"
 #include "hal/mmu.h"
@@ -15,6 +17,7 @@
 #include "kernel/lib/k_memory.h"
 #include "kernel/lib/k_string.h"
 #include "kernel/lib/k_time.h"
+#include "kernel/memory/heap.h"
 #include "kernel/net/net.h"
 #include "kernel/printf/printf.h"
 #include "kernel/vfs/vfs.h"
@@ -117,6 +120,30 @@
 #define SYS_getpgid 132
 #define SYS_getsid 147
 
+#define SYS_fork 2
+#define SYS_waitpid 7
+#define SYS_execve 11
+#define SYS_alarm 27
+#define SYS_pause 29
+#define SYS_pipe 42
+#define SYS_setpgid 57
+#define SYS_getpgrp 65
+#define SYS_setsid 66
+#define SYS_sigreturn 119
+#define SYS_clone 120
+#define SYS_wait4 114
+#define SYS_rt_sigsuspend 179
+#define SYS_rt_sigpending 176
+#define SYS_vfork 190
+#define SYS_dup3 330
+#define SYS_pipe2 331
+
+#define O_CLOEXEC 02000000u
+#define O_NONBLOCK_FLAG 04000u
+#define CLONE_VM 0x00000100u
+#define CLONE_THREAD 0x00010000u
+#define WNOHANG 1u
+
 #define AT_FDCWD (-100)
 #define PAGE 4096u
 
@@ -175,6 +202,8 @@ static int32_t get_path(char *buffer, uint32_t address)
     return 0;
 }
 
+static void set_cloexec(int fd, int on);
+
 /* --- files --- */
 
 static int32_t sys_open(uint32_t path_address, uint32_t flags, uint32_t mode)
@@ -196,8 +225,18 @@ static int32_t sys_open(uint32_t path_address, uint32_t flags, uint32_t mode)
 
     if (fd < 0)
         vfs_file_close(file);
+    else
+        set_cloexec(fd, (flags & O_CLOEXEC) != 0);
 
     return fd;
+}
+
+static void set_cloexec(int fd, int on)
+{
+    if (on)
+        user_process.fd_cloexec[fd / 32] |= 1u << (fd % 32);
+    else
+        user_process.fd_cloexec[fd / 32] &= ~(1u << (fd % 32));
 }
 
 static int32_t sys_read(int fd, uint32_t address, uint32_t count)
@@ -409,13 +448,20 @@ static int32_t sys_fcntl(int fd, uint32_t cmd, uint32_t arg)
         int32_t n = user_fd_install(file, (int)arg);
 
         if (n >= 0)
+        {
             vfs_file_ref(file);
+            set_cloexec(n, cmd == 1030);
+        }
 
         return n;
     }
 
-    case 1: /* F_GETFD */
+    case 1: /* F_GETFD: FD_CLOEXEC is 1 */
+        return (user_process.fd_cloexec[fd / 32] >> (fd % 32)) & 1;
+
     case 2: /* F_SETFD */
+        set_cloexec(fd, arg & 1);
+
         return 0;
 
     case 3: /* F_GETFL */
@@ -465,6 +511,60 @@ static int32_t sys_dup2(int old_fd, int new_fd)
     user_process.fd[new_fd] = vfs_file_ref(file);
 
     return new_fd;
+}
+
+static int32_t sys_dup3(int old_fd, int new_fd, uint32_t flags)
+{
+    if (old_fd == new_fd || (flags & ~O_CLOEXEC) != 0)
+        return -K_EINVAL;
+
+    int32_t result = sys_dup2(old_fd, new_fd);
+
+    if (result >= 0)
+        set_cloexec(new_fd, (flags & O_CLOEXEC) != 0);
+
+    return result;
+}
+
+static int32_t sys_pipe(uint32_t fds_address, uint32_t flags)
+{
+    if ((flags & ~(O_CLOEXEC | O_NONBLOCK_FLAG)) != 0)
+        return -K_EINVAL;
+
+    if (!user_range_writable(fds_address, 8))
+        return -K_EFAULT;
+
+    vfs_file_t *read_end;
+    vfs_file_t *write_end;
+    int32_t status = pipe_create(&read_end, &write_end);
+
+    if (status != 0)
+        return status;
+
+    read_end->flags |= flags & O_NONBLOCK_FLAG;
+    write_end->flags |= flags & O_NONBLOCK_FLAG;
+
+    int32_t rfd = user_fd_install(read_end, 0);
+    int32_t wfd = rfd >= 0 ? user_fd_install(write_end, 0) : -K_EMFILE;
+
+    if (rfd < 0 || wfd < 0)
+    {
+        if (rfd >= 0)
+            user_fd_close(rfd);
+        else
+            vfs_file_close(read_end);
+
+        vfs_file_close(write_end);
+
+        return -K_EMFILE;
+    }
+
+    set_cloexec(rfd, (flags & O_CLOEXEC) != 0);
+    set_cloexec(wfd, (flags & O_CLOEXEC) != 0);
+
+    int32_t fds[2] = {rfd, wfd};
+
+    return copy_out(fds_address, fds, 8);
 }
 
 static int32_t sys_ioctl(int fd, uint32_t request, uint32_t arg)
@@ -545,6 +645,160 @@ static int32_t sys_chdir(uint32_t path_address)
     int32_t status = get_path(path, path_address);
 
     return status != 0 ? status : vfs_chdir(path);
+}
+
+/* --- processes --- */
+
+static int32_t sys_fork(uint32_t clone_flags, uint32_t child_stack)
+{
+    (void)clone_flags;
+
+    return sched_fork(child_stack);
+}
+
+static int32_t sys_kill(int pid, int sig)
+{
+    if (sig < 0 || sig >= USER_SIGNAL_COUNT)
+        return -K_EINVAL;
+
+    int found = 0;
+
+    if (pid > 0)
+    {
+        user_process_t *p = sched_find(pid);
+
+        if (p != NULL && p->state != PROC_ZOMBIE)
+        {
+            found = 1;
+
+            if (sig != 0)
+                signal_send(p, sig);
+        }
+    }
+    else if (pid == 0 || pid < -1)
+    {
+        int group = pid == 0 ? user_current->pgid : -pid;
+
+        for (unsigned int i = 1; i <= USER_MAX_PROCS; i++)
+        {
+            user_process_t *p = sched_slot(i);
+
+            if (p != NULL && p->pgid == group && p->state != PROC_ZOMBIE)
+            {
+                found++;
+
+                if (sig != 0)
+                    signal_send(p, sig);
+            }
+        }
+    }
+    else
+    {
+        for (unsigned int i = 1; i <= USER_MAX_PROCS; i++)
+        {
+            user_process_t *p = sched_slot(i);
+
+            if (p != NULL && p->state != PROC_ZOMBIE && p != user_current)
+            {
+                found++;
+
+                if (sig != 0)
+                    signal_send(p, sig);
+            }
+        }
+    }
+
+    return found ? 0 : -K_ESRCH;
+}
+
+static int32_t sys_wait4(int pid, uint32_t status_address, uint32_t options)
+{
+    int status = 0;
+
+    if (status_address != 0 && !user_range_writable(status_address, 4))
+        return -K_EFAULT;
+
+    int32_t result = sched_wait_child(pid, &status, (options & WNOHANG) != 0);
+
+    if (result > 0 && status_address != 0)
+        copy_out(status_address, &status, 4);
+
+    return result;
+}
+
+/* Copy a NULL-terminated array of strings from user memory into area; the pointers go to out. */
+static int32_t copy_string_array(uint32_t address, const char **out, unsigned int max, char **area, uint32_t *room)
+{
+    unsigned int n = 0;
+
+    if (address == 0)
+    {
+        out[0] = NULL;
+
+        return 0;
+    }
+
+    for (;; n++)
+    {
+        uint32_t pointer;
+
+        if (n + 1 >= max)
+            return -K_ENOMEM; /* E2BIG */
+
+        int32_t status = copy_in(&pointer, address + n * 4, 4);
+
+        if (status != 0)
+            return status;
+
+        if (pointer == 0)
+            break;
+
+        int32_t length = user_copy_string(*area, *room, pointer);
+
+        if (length < 0)
+            return length == -K_ENAMETOOLONG ? -K_ENOMEM : length;
+
+        out[n] = *area;
+        *area += length + 1;
+        *room -= (uint32_t)length + 1;
+    }
+
+    out[n] = NULL;
+
+    return 0;
+}
+
+#define EXEC_MAX_ARGS 256
+#define EXEC_STRING_SPACE 24576u
+
+static int32_t sys_execve(uint32_t path_address, uint32_t argv_address, uint32_t envp_address)
+{
+    char path[VFS_PATH_MAX];
+    int32_t status = get_path(path, path_address);
+
+    if (status != 0)
+        return status;
+
+    const char **argv = kmalloc(2 * EXEC_MAX_ARGS * sizeof(char *) + EXEC_STRING_SPACE);
+
+    if (argv == NULL)
+        return -K_ENOMEM;
+
+    const char **envp = argv + EXEC_MAX_ARGS;
+    char *area = (char *)(envp + EXEC_MAX_ARGS);
+    uint32_t room = EXEC_STRING_SPACE;
+
+    status = copy_string_array(argv_address, argv, EXEC_MAX_ARGS, &area, &room);
+
+    if (status == 0)
+        status = copy_string_array(envp_address, envp, EXEC_MAX_ARGS, &area, &room);
+
+    if (status == 0)
+        status = user_exec(path, argv, envp);
+
+    kfree(argv);
+
+    return status;
 }
 
 /* --- memory --- */
@@ -887,14 +1141,20 @@ static int32_t sys_gettimeofday(uint32_t address)
     return copy_out(address, out, 8);
 }
 
-static void sleep_ns(uint64_t ns)
+/* Sleep for ns; 0, or -EINTR when a signal cuts it short. */
+static int32_t sleep_ns(uint64_t ns)
 {
     uint64_t end = hal_timer_ns() + ns;
 
-    hal_cpu_enable_interrupts();
-
     while (hal_timer_ns() < end)
-        hal_cpu_idle();
+    {
+        if (signal_interrupts(user_current))
+            return -K_EINTR;
+
+        sched_wait();
+    }
+
+    return 0;
 }
 
 static int32_t sys_nanosleep(uint32_t address, int wide)
@@ -928,19 +1188,22 @@ static int32_t sys_nanosleep(uint32_t address, int wide)
     if (nsec >= 1000000000u)
         return -K_EINVAL;
 
-    sleep_ns(sec * 1000000000u + nsec);
-
-    return 0;
+    return sleep_ns(sec * 1000000000u + nsec);
 }
 
 /* --- poll and select --- */
 
 /* Wait: let the network and the time move on, for a while. */
-static void wait_a_little(void)
+static int32_t wait_a_little(void)
 {
     net_poll();
-    hal_cpu_enable_interrupts();
-    hal_cpu_idle();
+
+    if (signal_interrupts(user_current))
+        return -K_EINTR;
+
+    sched_wait();
+
+    return 0;
 }
 
 /*
@@ -991,7 +1254,8 @@ static int32_t sys_poll(uint32_t fds_address, uint32_t count, int32_t timeout_ms
         if (ready > 0 || timeout_ms == 0 || (end != 0 && hal_timer_ns() >= end))
             return ready;
 
-        wait_a_little();
+        if (wait_a_little() != 0)
+            return -K_EINTR;
     }
 }
 
@@ -1070,7 +1334,8 @@ static int32_t sys_select(uint32_t n, uint32_t read_set, uint32_t write_set, uin
             return ready;
         }
 
-        wait_a_little();
+        if (wait_a_little() != 0)
+            return -K_EINTR;
     }
 }
 
@@ -1170,15 +1435,6 @@ static int32_t sys_getrlimit(uint32_t resource, uint32_t address)
     return copy_out(address, limit, 8);
 }
 
-static int32_t sys_kill_self(uint32_t signal)
-{
-    if (signal == 0)
-        return 0;
-
-    kernel_printf("%s: killed by signal %u\n", user_process.name, signal);
-    hal_user_exit(128 + (int)signal);
-}
-
 static int32_t sys_openat(int dirfd, uint32_t path, uint32_t flags, uint32_t mode)
 {
     if (dirfd != AT_FDCWD)
@@ -1193,7 +1449,7 @@ static int32_t sys_openat(int dirfd, uint32_t path, uint32_t flags, uint32_t mod
     return sys_open(path, flags, mode);
 }
 
-int32_t user_syscall(const hal_user_syscall_t *call)
+static int32_t dispatch(const hal_user_syscall_t *call)
 {
     const uint32_t *a = call->arg;
 
@@ -1204,7 +1460,7 @@ int32_t user_syscall(const hal_user_syscall_t *call)
     {
     case SYS_exit:
     case SYS_exit_group:
-        hal_user_exit((int)a[0]);
+        sched_exit((int)a[0] & 0xFF, 0);
 
     case SYS_read:
         return sys_read((int)a[0], a[1], a[2]);
@@ -1279,13 +1535,23 @@ int32_t user_syscall(const hal_user_syscall_t *call)
         int32_t n = user_fd_install(file, 0);
 
         if (n >= 0)
+        {
             vfs_file_ref(file);
+            set_cloexec(n, 0);
+        }
 
         return n;
     }
 
     case SYS_dup2:
-        return sys_dup2((int)a[0], (int)a[1]);
+    {
+        int32_t result = sys_dup2((int)a[0], (int)a[1]);
+
+        if (result >= 0)
+            set_cloexec(result, 0);
+
+        return result;
+    }
 
     case SYS_ioctl:
         return sys_ioctl((int)a[0], a[1], a[2]);
@@ -1396,14 +1662,85 @@ int32_t user_syscall(const hal_user_syscall_t *call)
 
     case SYS_getpid:
     case SYS_gettid:
-        return 1;
+        return user_current->pid;
 
     case SYS_getppid:
-        return 0;
+        return user_current->ppid;
 
     case SYS_getpgid:
+    {
+        user_process_t *p = a[0] == 0 ? user_current : sched_find((int)a[0]);
+
+        return p == NULL ? -K_ESRCH : p->pgid;
+    }
+
+    case SYS_getpgrp:
+        return user_current->pgid;
+
     case SYS_getsid:
-        return 1;
+        return user_current->pgid;
+
+    case SYS_setpgid:
+    {
+        user_process_t *p = a[0] == 0 ? user_current : sched_find((int)a[0]);
+        int group = a[1] == 0 ? (p != NULL ? p->pid : 0) : (int)a[1];
+
+        if (p == NULL || (p != user_current && p->ppid != user_current->pid) || group < 0)
+            return -K_ESRCH;
+
+        p->pgid = group;
+
+        return 0;
+    }
+
+    case SYS_setsid:
+        user_current->pgid = user_current->pid;
+
+        return user_current->pid;
+
+    case SYS_fork:
+    case SYS_vfork:
+        return sys_fork(0, 0);
+
+    case SYS_clone:
+        /* (flags, child_stack, ...): only the fork flavour; threads need a shared address space. */
+        if (a[0] & CLONE_THREAD)
+            return -K_ENOSYS;
+
+        return sys_fork(a[0], a[1]);
+
+    case SYS_execve:
+        return sys_execve(a[0], a[1], a[2]);
+
+    case SYS_waitpid:
+        return sys_wait4((int)a[0], a[1], a[2]);
+
+    case SYS_wait4:
+        return sys_wait4((int)a[0], a[1], a[2]);
+
+    case SYS_pipe:
+        return sys_pipe(a[0], 0);
+
+    case SYS_pipe2:
+        return sys_pipe(a[0], a[1]);
+
+    case SYS_dup3:
+        return sys_dup3((int)a[0], (int)a[1], a[2]);
+
+    case SYS_rt_sigpending:
+        return signal_pending(a[0], a[1]);
+
+    case SYS_pause:
+        return signal_pause();
+
+    case SYS_rt_sigsuspend:
+        return signal_suspend(a[0], a[1]);
+
+    case SYS_rt_sigreturn:
+        return signal_sigreturn(0);
+
+    case SYS_sigreturn:
+        return signal_sigreturn(1);
 
     case SYS_getuid32:
     case SYS_getgid32:
@@ -1424,23 +1761,19 @@ int32_t user_syscall(const hal_user_syscall_t *call)
         return sys_uname(a[0]);
 
     case SYS_rt_sigaction:
+        /* (signal, new*, old*, size of the set) */
+        return signal_sigaction((int)a[0], a[1], a[2], a[3]);
+
     case SYS_rt_sigprocmask:
-        /* No signals are ever delivered: accept and forget the settings. */
-        if (call->number == SYS_rt_sigprocmask && a[2] != 0)
-        {
-            uint8_t zero[8] = {0};
-
-            return copy_out(a[2], zero, a[3] < 8 ? a[3] : 8);
-        }
-
-        return 0;
+        /* (how, set*, old*, size) */
+        return signal_sigprocmask((int)a[0], a[1], a[2], a[3]);
 
     case SYS_kill:
     case SYS_tkill:
-        return sys_kill_self(a[1]);
+        return sys_kill((int)a[0], (int)a[1]);
 
     case SYS_tgkill:
-        return sys_kill_self(a[2]);
+        return sys_kill((int)a[1], (int)a[2]);
 
     case SYS_gettimeofday:
         return sys_gettimeofday(a[0]);
@@ -1526,4 +1859,15 @@ int32_t user_syscall(const hal_user_syscall_t *call)
     default:
         return enosys(call->number);
     }
+}
+
+int32_t user_syscall(const hal_user_syscall_t *call)
+{
+    int32_t result = dispatch(call);
+
+    /* About to return to the program: a signal sent to it meanwhile is acted on now. */
+    if (user_current->sig_pending != 0)
+        result = signal_deliver(result);
+
+    return result;
 }

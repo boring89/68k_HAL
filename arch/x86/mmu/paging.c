@@ -4,6 +4,7 @@
  */
 
 #include "paging.h"
+#include "space.h"
 
 #include "kernel/memory/memory.h"
 #include "kernel/memory/pmm.h"
@@ -104,6 +105,10 @@ static paging_entry_t *paging_get_or_create_table(uint32_t dir_index)
      */
     directory[dir_index] =
         paging_entry_make(table_phys, PAGING_KERNEL_FLAGS | PAGING_USER);
+
+    /* The other address spaces need the kernel's new table too. */
+    if (!space_index_is_private(dir_index))
+        space_propagate_entry(dir_index, directory[dir_index]);
 
     /* Also drops any paging-structure cache entry (Intel SDM Vol.3A 4.10.4.1). */
     cpu_invlpg((uintptr_t)table);

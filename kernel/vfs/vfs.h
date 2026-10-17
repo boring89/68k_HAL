@@ -157,6 +157,9 @@ int32_t vfs_normalize(const char *path, char *out);
 const char *vfs_getcwd(void);
 int32_t vfs_chdir(const char *path);
 
+/* Make path (already normalised, e.g. from vfs_getcwd) the current directory without checking it. */
+void vfs_set_cwd(const char *path);
+
 /* Open a file or directory. Returns 0 and a file with refcount 1, or -errno. */
 int32_t vfs_open(const char *path, uint32_t flags, uint32_t mode, vfs_file_t **file);
 

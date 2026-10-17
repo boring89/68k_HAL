@@ -586,6 +586,14 @@ test-shell: iso
 		"uptime=up 0:" \
 		"box cat /proc/cpuinfo=vendor_id" \
 		"seq 20 | grep 1 | wc -l=11" \
+		"seq 1000 | grep 7 | wc -l=271" \
+		"run /bin/forkexec=grandchild chain: 4" \
+		"run /bin/pipes=default SIGPIPE: killed 1 by signal 13" \
+		"run /bin/signals=SIGKILL: signal 9" \
+		"sleep 30=" \
+		"{ctrl-c}=[exit 130]" \
+		"seq 3 | sleep 30=" \
+		"{ctrl-c}=[exit 130]" \
 		"seq 3 > nums.txt=" \
 		"echo more >> nums.txt=" \
 		"wc -l < nums.txt=4" \

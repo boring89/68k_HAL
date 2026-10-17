@@ -1,0 +1,5 @@
+read 35 bytes, 5 lines, last: line 5
+a writer of 100000 bytes was read as 100000 bytes
+hello said: Hello from user mode!
+write to a closed pipe: -1, EPIPE
+default SIGPIPE: killed 1 by signal 13

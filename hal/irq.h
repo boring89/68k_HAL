@@ -33,4 +33,10 @@ int hal_irq_register(unsigned int line, hal_irq_handler_t handler);
  */
 int hal_irq_unmask(unsigned int line);
 
+/*
+ * How many interrupts have arrived since boot (wraps around). The scheduler uses it to see
+ * whether anything happened while every process was waiting.
+ */
+unsigned int hal_irq_count(void);
+
 #endif

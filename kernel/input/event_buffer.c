@@ -15,6 +15,13 @@ static input_event_t storage[INPUT_EVENT_BUFFER_SIZE];
 
 static ring_buffer_t buffer;
 
+static void (*push_hook)(const input_event_t *event);
+
+void input_event_set_hook(void (*hook)(const input_event_t *event))
+{
+    push_hook = hook;
+}
+
 
 void input_event_buffer_init(void)
 {
@@ -31,6 +38,9 @@ int input_event_push(
     input_event_t *event
 )
 {
+    if (push_hook != 0)
+        push_hook(event);
+
     return ring_buffer_push(
         &buffer,
         event

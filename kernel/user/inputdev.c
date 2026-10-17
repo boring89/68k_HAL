@@ -5,6 +5,10 @@
 
 #include "inputdev.h"
 
+#include "process.h"
+#include "sched.h"
+#include "signal.h"
+
 #include "kernel/input/event.h"
 #include "kernel/input/event_buffer.h"
 #include "kernel/input/linux_keys.h"
@@ -97,9 +101,24 @@ static void fill(void)
         convert(&event);
 }
 
+static int open_count;
+
+int inputdev_is_open(void)
+{
+    return open_count > 0;
+}
+
+static void inputdev_close(vfs_file_t *file)
+{
+    (void)file;
+    open_count--;
+}
+
 void inputdev_flush(void)
 {
     input_event_t event;
+
+    open_count++; /* called when the device is opened */
 
     head = 0;
     count = 0;
@@ -128,8 +147,10 @@ static int32_t inputdev_read(vfs_file_t *file, uint64_t pos, void *buffer, uint3
         if (file->flags & 04000u) /* O_NONBLOCK */
             return -K_EAGAIN;
 
-        hal_cpu_enable_interrupts();
-        hal_cpu_idle();
+        if (signal_interrupts(user_current))
+            return -K_EINTR;
+
+        sched_wait();
     }
 
     uint32_t n = size / EVENT_SIZE;
@@ -172,4 +193,5 @@ const vfs_file_ops_t inputdev_ops = {
     .read = inputdev_read,
     .stat = inputdev_stat,
     .poll = inputdev_poll,
+    .close = inputdev_close,
 };

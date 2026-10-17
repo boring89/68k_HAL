@@ -54,4 +54,39 @@ int hal_mmu_get_flags(uintptr_t virt, uint32_t *flags);
  */
 int hal_mmu_get_phys(uintptr_t virt, uintptr_t *phys);
 
+/*
+ * Address spaces. Every user process has its own: the kernel's mappings are the same in all of
+ * them, the addresses the architecture reserves for user programs (x86: 0x08000000-0x0FFFFFFF
+ * and 0x50000000-0x7FFFFFFF) belong to one space each. hal_mmu_* above always works on the
+ * current space. A handle of 0 is never valid.
+ */
+typedef uintptr_t hal_space_t;
+
+/* The space the CPU is using now. */
+hal_space_t hal_space_current(void);
+
+/* A new space with the kernel's mappings and nothing else, or 0 if memory or table slots ran out (see HAL_SPACE_MAX). */
+hal_space_t hal_space_create(void);
+
+/* Make space the current one. */
+void hal_space_switch(hal_space_t space);
+
+/*
+ * Free a space's page tables and directory. space must not be the current one, and the user
+ * frames mapped in it must have been released already (this only frees the tables). Returns 0 or -1.
+ */
+int hal_space_destroy(hal_space_t space);
+
+/* Like hal_mmu_map, in any space (not only the current one). Only user addresses may be mapped in another space. */
+int hal_space_map(hal_space_t space, uintptr_t virt, uintptr_t phys, uint32_t flags);
+
+/*
+ * Copy the page at virt of the current space into a new frame and map that frame at virt in
+ * space dst with the same flags (fork). Returns 0 or -1 (out of memory, already mapped).
+ */
+int hal_space_copy_page(hal_space_t dst, uintptr_t virt);
+
+/* Most spaces that exist at the same time, kernel's included. */
+#define HAL_SPACE_MAX 72
+
 #endif
