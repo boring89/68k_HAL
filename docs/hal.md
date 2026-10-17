@@ -286,3 +286,7 @@ IDT[0x20 + n] = irq_stub_table[n]（arch/x86/interrupt/irq_stub.asm）  ▼
 - console sink 目前只能註冊不能移除。
 - `kernel/terminal/terminal.c` 的 `terminal_scroll` 沒有宣告在 header，但也不是 `static`。
 - `drivers/vga` 的 `vga_init`、`vga_get_cell` 沒有使用者。
+
+## 11. x86-64（P8）
+
+kernel 預設是 64 位元（`make`），32 位元用 `make ARCH=i386`。`hal/` 的介面沒有改（位址用 `uintptr_t`）；新增 `hal_phys_to_virt()`（32 位元 identity、64 位元 HHDM）與 `HAL_MMU_WRITE_COMBINING`。64 位元專屬的程式碼在 `arch/x86_64/`（GDT、IDT、分頁、context switch、使用者模式）與 `platform/pc/boot/boot64.asm`；`arch/x86/` 保留 32 位元專用與兩者共用的部分（`cpu`、`io`），Makefile 依 `ARCH` 排除另一邊。位址空間、開機流程與限制見 `docs/x86_64.md`。

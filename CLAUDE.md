@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-68k_HAL：在 x86（32-bit 保護模式）上執行的實驗性 OS 核心，長期目標是讓 Classic Mac OS 的架構在現代硬體上延續（參見 README.md）。目前為早期開發階段。
+68k_HAL：在 x86-64（預設；長模式，使用者程式是 i386 compatibility mode）上執行的實驗性 OS 核心，也可建成 32 位元（`make ARCH=i386`，輸出 `build/i386/`），長期目標是讓 Classic Mac OS 的架構在現代硬體上延續（參見 README.md）。目前為早期開發階段。
 
 ## 回應規則
 
@@ -10,7 +10,7 @@
 ## 建置與執行
 
 ```bash
-make            # 產生 build/kernel.elf
+make            # 產生 build/kernel.elf（64 位元；`make ARCH=i386` 產生 32 位元的 build/i386/kernel.elf，兩者的測試都要過，見 docs/x86_64.md）
 make iso        # 產生 build/68k_HAL.iso（需要 grub-mkrescue）
 make run        # 在 QEMU 中開機，serial 輸出到 stdio
 make test       # test-boundary + test-host + test-qemu + test-shell + test-video，修改後必須通過（第一次會下載 musl、Lua、TinyCC 的原始碼，需要網路）
@@ -37,7 +37,7 @@ make clean
 
 - 需要的套件：見 README.md 的 Building 一節（含 `binutils-m68k-linux-gnu`，組譯 `tests/m68k/*.s`；`python3` 與 `hfsutils`，產生 `build/images/` 的測試磁碟映像；`curl`，下載 musl、Lua、TinyCC）。下載的原始碼放在 `third_party/downloads/`（gitignore，不進 repo）。
 - `make` 同時產生 `build/kernel.elf`（文字模式）與 `build/kernel-gfx.elf`（Multiboot header 要求 640x480x32 framebuffer；ISO 兩者都放，GRUB 選單兩個項目）。
-- 尚未建立：cross compiler（i686-elf-gcc）。
+- 不需要 cross compiler（用 host 的 gcc；64 位元用 `-mcmodel=kernel -mno-red-zone -mno-sse…`，32 位元用 `-m32`）。kernel 的 C 標準固定 `-std=gnu11`（本機 gcc 15 預設 gnu23，CI 的 gcc 13 預設 gnu17，沒固定會讓本機與 CI 結果不同）。
 - CI：`.github/workflows/test.yml` 在 push 到 main 與 PR 時執行 `make test` 與 `make iso`。
 
 ### 測試
@@ -55,7 +55,8 @@ make clean
 
 ```
 hal/           HAL 介面（只有 .h）：cpu、irq、timer、mmu（含位址空間）、task（context 切換）、usermode、boot（含 module）、framebuffer、clock、init、acpi、pci、dma、usermode
-arch/x86/      CPU：cpu（hal_cpu、CPUID、控制暫存器）、gdt（含 TSS）、interrupt（IDT、例外、IRQ stub）、mmu（分頁、hal_mmu、space = 每個行程一份分頁目錄）、task（context 切換、FPU）、io（port I/O）、user（ring 3、int 0x80）、test
+arch/x86_64/   64 位元專屬：gdt、interrupt（16 位元組 IDT）、mmu（4 層分頁、HHDM）、task、user（compatibility mode 執行 i386 程式）、test；見 docs/x86_64.md
+arch/x86/      CPU（32 位元專用與兩者共用的 cpu、io）：cpu（hal_cpu、CPUID、控制暫存器）、gdt（含 TSS）、interrupt（IDT、例外、IRQ stub）、mmu（分頁、hal_mmu、space = 每個行程一份分頁目錄）、task（context 切換、FPU）、io（port I/O）、user（ring 3、int 0x80）、test
 platform/pc/   PC 平台：boot（Multiboot 進入點、hal_boot）、video（framebuffer、BGA 模式設定）、rtc（CMOS 時鐘）、interrupt（8259 PIC、local APIC、I/O APIC、hal_irq；見 docs/apic.md）、timer（PIT、TSC、hal_timer）、acpi、smp（INIT-SIPI-SIPI）、pci（列舉、驅動清單）、dma、vmap（0xE0000000 視窗）、hal_init.c、test
 drivers/       裝置驅動：vga、serial、ps2_keyboard、ps2_mouse、ata（讀寫，見 docs/storage.md）、ahci（SATA）、e1000 與 virtio_net（網卡）、hda（Intel HD Audio）、bga（Bochs VBE 顯示）、usb_host（列舉 USB 控制器）、xhci（xHCI 控制器、HID 鍵盤滑鼠）、nvme（NVMe，輪詢）、e1000e（82574L 與 I219）
 kernel/        與硬體無關的核心：main.c、panic、memory（pmm、heap）、block（區塊裝置、ramdisk）、fs（apm、hfs 唯讀、volume；見 docs/hfs.md）、display（含 fb_scale、fbcon 圖形模式文字終端）、console、terminal（含 mirror、ANSI 解析器 ansi）、keyboard（keycode、state、keychar、keyseq 按鍵序列）、input、shell、log、printf、lib、m68k（guest RAM 與示範）、mac（在 kernel 裡執行 Mac；見 docs/mac.md）、user（ELF 載入器、系統呼叫、console；見 docs/userland.md）、vfs（ramfs、tarfs、hfsfs、devfs 的 console；見 docs/userland.md）、net（packet 純函式、tcp、net 堆疊；見 docs/net.md）、usb（控制器註冊表；見 docs/usb.md）、sound（見 docs/sound.md）、pci（名稱表；見 docs/pci.md）、test
@@ -149,6 +150,7 @@ Claude 依照上方工作規則直接實作。
 
 - `emu/mac`：Mac IIci 機器模型與 `kernel/mac`（P3，見 `docs/mac.md`）。同樣是由自動排程一次做完的，沒有走協作模式的逐步確認，使用者尚未審核；之後修改時請先帶使用者過一遍 `docs/mac.md`
 
+- P8（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：x86-64 kernel（`docs/x86_64.md`）、PCI 全 bus 掃描與 4 GiB 以上 BAR、PAT write-combining 的 framebuffer 與 Mac 的效能數據、Mac 執行時 fbcon 暫停、Mac 的空 slot 與 GDevice 數量（`docs/mac.md` 第 4 節）、UEFI 的 1920x1080 解析度（`docs/p520.md`）。P8 的規劃與紀錄在 `P8_PLAN.md`（不進 git）。
 - P7（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：Multiboot2 與 UEFI 開機（`docs/hal.md`）、行程與排程與訊號與管線（`docs/process.md`）、APIC 與 MSI（`docs/apic.md`）、xHCI 與 USB 鍵盤滑鼠（`docs/usb.md`）、NVMe（`docs/storage.md`）、實機的顯示（`docs/gpu.md` 4.5）、e1000e（`docs/net.md`）。P7 的規劃與紀錄在 `P7_PLAN.md`（不進 git）。
 - P6（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：CPU（`docs/cpu.md`）、使用者模式與 C SDK 與 VFS（`docs/userland.md`）、PCI 與驅動框架（`docs/pci.md`）、網路（`docs/net.md`）、聲音（`docs/sound.md`）、顯示（`docs/gpu.md`）、Mac 的聲音／時鐘／磁碟寫入（`docs/mac.md` 第 11、12 節）。P6 的規劃與紀錄在 `P6_PLAN.md`（不進 git）。
 
@@ -165,6 +167,6 @@ Claude 依照上方工作規則直接實作。
 - 網路：TCP 沒有亂序重組、壅塞控制、選擇性確認；沒有 IP 分片、IPv6；一次只用一張網卡；HDA 只有輸出；BGA 只有 32 bpp；AHCI 只用輪詢與一個命令槽；USB：xHCI 的 HID 鍵盤滑鼠、hub、隨身碟（Bulk-Only）可用，其餘控制器只列出（見 `docs/usb.md`）；中斷由 I/O APIC + local APIC 處理（沒有 APIC 或命令列有 `noapic` 時用 8259，見 `docs/apic.md`），其他處理器只回報後 `hlt`（沒有 per-CPU 資料）。
 - `vmap`（`0xE0000000`–`0xF0000000`）與 `hal_dma_free` 的虛擬位址不重用。
 - QEMU 的 HDA 透過 CORB/RIRB 只回應第一個命令，驅動改用立即命令暫存器（原因未查明，見 `docs/sound.md`）。
-- 開機時的 identity map 只有前 4 MiB（kernel 結尾約 0x225000）：kernel 超過 4 MiB 會在 `paging_init` panic。heap 已搬到專用虛擬位址，不佔這 4 MiB。
+- （32 位元建置）開機時的 identity map 只有前 4 MiB（kernel 結尾約 0x225000）：kernel 超過 4 MiB 會在 `paging_init` panic。heap 已搬到專用虛擬位址，不佔這 4 MiB。
 - heap 不會歸還記憶體：用完會自動擴充（`heap_vm_init`，每次至少 64 KiB，最多到 `HEAP_VIRT_LIMIT`），但擴充後 frame 不會還給 PMM。
 - `emu/m68k`（Musashi）的限制：guest 視為沒有 FPU 的 68030（F-line 指令在 `m68k_vm_instr_hook` 轉成 vector 11 例外，不進入 Musashi 的 FPU）；SingleStepTests 中 address error 的測試全部不同（Musashi 沒有 prefetch queue，決定不補，見 `docs/m68k.md` 第 8 節）；其餘差異見 `docs/m68k.md`。guest RAM 預設 8 MiB（`m68k_guest_set_size` 可改），映射在虛擬位址 `0x10000000`。

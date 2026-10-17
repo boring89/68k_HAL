@@ -66,7 +66,7 @@ The goal is to preserve the simplicity, usability, and software philosophy of th
 
 | Tool | Debian/Ubuntu package | Used for |
 |---|---|---|
-| `make`, `gcc` | `build-essential` | Build the kernel (`-m32`) and host unit tests |
+| `make`, `gcc` | `build-essential` | Build the kernel (64-bit by default; `make ARCH=i386` builds the 32-bit kernel with `-m32`) and host unit tests |
 | `nasm` | `nasm` | Assemble boot and interrupt stubs |
 | `ld` | `binutils` | Link the kernel ELF |
 | `m68k-linux-gnu-as` | `binutils-m68k-linux-gnu` | Assemble the 68k test programs in `tests/m68k/` |
@@ -88,7 +88,7 @@ sudo apt install build-essential nasm binutils binutils-m68k-linux-gnu grub2-com
 ### Commands
 
 ```bash
-make            # build/kernel.elf
+make            # build/kernel.elf (64-bit kernel; make ARCH=i386 builds the 32-bit one into build/i386, see docs/x86_64.md)
 make iso        # build/68k_HAL.iso (BIOS and UEFI)
 make usb-image  # build/68k_HAL_usb.img for a USB stick, with a boot menu (see docs/p520.md)
 make run        # boot the ISO in QEMU, serial output on stdio

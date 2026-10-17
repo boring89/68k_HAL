@@ -320,3 +320,7 @@ page fault 測試用 `.byte` 寫死 2 bytes 的 `mov` 指令，hook 記錄 CR2 �
 - **higher half kernel**：如果之後需要每個程式獨立的低位址空間。
 - **多個位址空間**：每個程式一個 directory，共用 kernel 的 PDE；需要修改非目前位址空間的機制（暫時對應視窗）。
 - ~~page fault handler 逐位解讀 error code；`exception.c` 改用 `cpu_read_cr2()`；`EXCEPTION_PAGE_FAULT` 移到 `exception.h`~~：已完成。
+
+## 附：64 位元（P8）
+
+這份文件描述 32 位元的 2 層分頁（`arch/x86/mmu`）。64 位元 kernel（預設）用 4 層分頁（`arch/x86_64/mmu`）：kernel 半邊（PML4 的 256–511）所有位址空間共用，所有 RAM 由 HHDM 直接映射，所以不需要遞迴映射與視窗；細節見 `docs/x86_64.md`。
