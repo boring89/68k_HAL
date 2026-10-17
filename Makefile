@@ -679,7 +679,7 @@ test-q35: iso
 		"dhcp=Address: 10.0.2.15" "ping 10.0.2.2=reply from 10.0.2.2"
 
 # USB keyboard and mouse through xHCI, with the PS/2 controller switched off (the P520 has none):
-# typing, the mouse, and a keyboard plugged in while the system runs.
+# typing, the mouse, a keyboard plugged in while the system runs, and devices behind a hub.
 test-usb: iso
 	QEMU_ARGS="-machine q35,i8042=off -device qemu-xhci -device usb-kbd -device usb-mouse" \
 	python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
@@ -691,6 +691,11 @@ test-usb: iso
 		"{hmp device_add usb-kbd,id=k1}@@" "usb=keyboard" "cpuinfo=Vendor" \
 		"{hmp device_add usb-mouse,id=m1}@@" "usb=mouse" \
 		"{hmp device_del m1}@@" "cpuinfo=Vendor"
+	QEMU_ARGS="-machine q35,i8042=off -device qemu-xhci,id=xhci -device usb-hub,bus=xhci.0,port=1 -device usb-kbd,bus=xhci.0,port=1.1" \
+	python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
+		"cpuinfo=Vendor" "usb=keyboard" \
+		"{hmp device_add usb-mouse,bus=xhci.0,port=1.2,id=m2}@@" "usb=mouse" \
+		"run /bin/evtest=reading events" "{mouse_move 7 3}=rel 0 7" "a{up}q=key 103 1"
 
 # The e1000e card (82574L): DHCP, ping, DNS, with the Q35 chipset.
 test-e1000e: iso

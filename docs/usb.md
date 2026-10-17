@@ -2,7 +2,7 @@
 
 `drivers/usb_host/`（列舉控制器）、`drivers/xhci/`（xHCI 控制器與 HID 鍵盤滑鼠）、`kernel/usb/`（描述子、HID 報告解析、裝置清單）。
 
-**P7 R4 完成（自動排程一次做完，使用者尚未審核）**：xHCI 啟動、port 重置、裝置列舉、HID boot 鍵盤與滑鼠、熱插拔、MSI。集線器（hub）與隨身碟（Mass Storage）還沒有。
+**P7 R4 完成（自動排程一次做完，使用者尚未審核）**：xHCI 啟動、port 重置、裝置列舉、HID boot 鍵盤與滑鼠、熱插拔、MSI。集線器（hub，R10）也有；隨身碟（Mass Storage）還沒有。
 
 ## 1. 概念
 
@@ -58,7 +58,9 @@
 
 HID 報告 → `kernel/usb/hid.c`：鍵盤 8 位元組（修飾鍵位元 + 最多 6 個按下的鍵）與上一份比較，產生 release → 修飾鍵變化 → press 的事件（所以 Ctrl+C 是 Ctrl 先、C 後）；滑鼠 3–4 位元組（按鈕、dx、dy）直接成為滑鼠事件。使用 `input_event_push`，和 PS/2 驅動一樣，所以 shell、使用者程式、Mac 都不需要知道輸入來自 USB。
 
-限制：只用第一個 xHCI 控制器；**還沒有 hub**（接在 hub 後面的裝置不會被找到，`usb` 會列出 hub 為 `hub (unsupported)`）；interrupt endpoint 出錯（stall）時停止輪詢該 endpoint 而不做 Reset Endpoint 復原；沒有 USB 3 的 stream、isochronous、電源管理（U1/U2）；沒有 Mass Storage。
+**Hub（P7 R10）**：class 9 的裝置：`SET_CONFIGURATION`，讀 hub descriptor（USB2：型別 0x29；USB3：0x2A）得知 port 數，用 `Configure Endpoint`（只改 slot context：Hub 位元、port 數、TT think time）告訴控制器它是 hub（SuperSpeed hub 另送 `SET_HUB_DEPTH`），對每個 port `SET_FEATURE(PORT_POWER)`，等 300 ms，再逐 port 用 `GET_STATUS`（class request）看有沒有裝置：有就 `SET_FEATURE(PORT_RESET)`、等 reset 完成、從 port status 取得速度（USB2 hub：bit 9 低速、bit 10 高速、否則全速；USB3 hub 一律 SuperSpeed），然後和 root port 上的裝置同一套流程（`enumerate_device`），差別是 slot context 要填 **route string**（從 root 往下每層 hub 一個 4 位元的 port 編號）與 **root hub port number**，低／全速裝置接在高速 hub 後面時還要填 **TT**（transaction translator）所在的 hub slot 與 port。熱插拔：`poll_hubs` 每 250 ms 輪詢所有 hub 的所有 port（不用 hub 的狀態變化 interrupt endpoint，比較簡單；代價是最多 250 ms 的延遲）。拔掉 hub 會遞迴移除後面所有裝置。深度上限 5 層。測試：`make test-usb` 的第三輪（QEMU `usb-hub` 後面的 usb-kbd、熱插拔的 usb-mouse）。**SuperSpeed hub 與多 TT hub 沒有測試**（QEMU 沒有）。
+
+限制：只用第一個 xHCI 控制器；interrupt endpoint 出錯（stall）時停止輪詢該 endpoint 而不做 Reset Endpoint 復原；沒有 USB 3 的 stream、isochronous、電源管理（U1/U2）；沒有 Mass Storage。
 
 測試：`tests/host/test_usb_hid.c`、`test_usb_descriptor.c`（純函式）；`make test-usb`：q35 + `-machine q35,i8042=off`（沒有 PS/2）+ `qemu-xhci` + `usb-kbd` + `usb-mouse`，用 monitor 的 `sendkey` 打字、`mouse_move` 移動滑鼠（`/bin/evtest` 看到事件）；另一輪從只有控制器開始，`device_add usb-kbd`／`usb-mouse` 熱插拔。
 

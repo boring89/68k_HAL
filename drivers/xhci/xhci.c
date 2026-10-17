@@ -214,6 +214,18 @@ typedef struct
     uint8_t device_class;
     int list_id; /* entry in the kernel's device list */
 
+    /* Where it is in the tree: port is the port of its parent (the root hub when parent_slot is 0). */
+    uint8_t parent_slot;
+    uint8_t root_port;
+    uint8_t depth;      /* hubs between it and the root hub */
+    uint32_t route;     /* route string: 4 bits per hub on the way (xHCI 8.9) */
+    uint8_t tt_slot;    /* the high speed hub whose transaction translator serves a low/full speed device */
+    uint8_t tt_port;
+    uint8_t is_hub;
+    uint8_t hub_ports;
+    uint8_t hub_multi_tt;
+    uint8_t hub_think_time;
+
     void *output_context; /* the controller's view of the device */
     uint32_t output_phys;
     void *input_context;  /* what we ask it to change */
@@ -472,21 +484,27 @@ static int control_transfer(device_t *device, const uint8_t setup[8], unsigned i
     return device->control_code == COMPLETION_SUCCESS || device->control_code == COMPLETION_SHORT_PACKET ? 0 : -1;
 }
 
-static int get_descriptor(device_t *device, uint8_t type, uint8_t index, unsigned int length)
+/* Any control request; an IN request's data (length bytes) arrives in device->data. */
+static int control_request(device_t *device, uint8_t request_type, uint8_t request, uint16_t value, uint16_t index,
+                           unsigned int length)
 {
-    uint8_t setup[8] = {0x80, 6, index, type, 0, 0, (uint8_t)length, (uint8_t)(length >> 8)};
+    uint8_t setup[8] = {request_type, request, (uint8_t)value, (uint8_t)(value >> 8), (uint8_t)index,
+                        (uint8_t)(index >> 8), (uint8_t)length, (uint8_t)(length >> 8)};
 
-    k_memset(device->data, 0, length);
+    if (length != 0 && (request_type & 0x80))
+        k_memset(device->data, 0, length);
 
     return control_transfer(device, setup, length);
 }
 
+static int get_descriptor(device_t *device, uint8_t type, uint8_t index, unsigned int length)
+{
+    return control_request(device, 0x80, 6, (uint16_t)(type << 8 | index), 0, length);
+}
+
 static int send_request(device_t *device, uint8_t request_type, uint8_t request, uint16_t value, uint16_t index)
 {
-    uint8_t setup[8] = {request_type, request, (uint8_t)value, (uint8_t)(value >> 8), (uint8_t)index,
-                        (uint8_t)(index >> 8), 0, 0};
-
-    return control_transfer(device, setup, 0);
+    return control_request(device, request_type, request, value, index, 0);
 }
 
 /* --- contexts (xHCI 6.2) --- */
@@ -700,11 +718,21 @@ static int allocate_device(device_t *device)
     return 0;
 }
 
-static void enumerate(unsigned int port)
+static const char *speed_name(unsigned int speed)
+{
+    return speed == 1 ? "full" : speed == 2 ? "low" : speed == 3 ? "high" : "super";
+}
+
+static void enumerate_children(device_t *hub);
+static void remove_slot(unsigned int slot_id);
+
+/*
+ * Bring up the device that just appeared on `port` of `parent` (NULL: the root hub) at `speed`
+ * (an xHCI port speed id).
+ */
+static void enumerate_device(unsigned int root_port, device_t *parent, unsigned int port, unsigned int speed)
 {
     xhci_t *x = &xhci;
-    uint32_t portsc = read32(x->operational, OP_PORT(port));
-    uint32_t speed = PORT_SPEED(portsc);
 
     if (speed == 0)
         return;
@@ -724,7 +752,28 @@ static void enumerate(unsigned int port)
     k_memset(device, 0, sizeof(*device));
     device->slot = (uint8_t)slot_id;
     device->port = (uint8_t)port;
+    device->root_port = (uint8_t)root_port;
     device->speed = (uint8_t)speed;
+    device->list_id = -1;
+
+    if (parent != NULL)
+    {
+        device->parent_slot = parent->slot;
+        device->depth = (uint8_t)(parent->depth + 1);
+        device->route = parent->route | ((uint32_t)(port > 15 ? 15 : port) << (4 * parent->depth));
+
+        /* A low or full speed device behind a high speed hub talks through that hub's transaction translator. */
+        if (parent->speed == 3 && (speed == 1 || speed == 2))
+        {
+            device->tt_slot = parent->slot;
+            device->tt_port = (uint8_t)port;
+        }
+        else
+        {
+            device->tt_slot = parent->tt_slot;
+            device->tt_port = parent->tt_port;
+        }
+    }
 
     if (allocate_device(device) != 0)
     {
@@ -738,9 +787,11 @@ static void enumerate(unsigned int port)
     x->dcbaa[slot_id * 2] = device->output_phys;
     x->dcbaa[slot_id * 2 + 1] = 0;
     device->in_use = 1;
-    x->port_slot[port] = (uint8_t)slot_id;
 
-    /* Address Device: the slot context (speed, port) and endpoint 0 (control, ring, packet size). */
+    if (parent == NULL)
+        x->port_slot[port] = (uint8_t)slot_id;
+
+    /* Address Device: the slot context (route, speed, root port) and endpoint 0 (control, ring, packet size). */
     clear_input(device);
 
     uint32_t *control = input_context(device, 0);
@@ -749,11 +800,12 @@ static void enumerate(unsigned int port)
     unsigned int packet_size = initial_control_packet_size(speed);
 
     control[1] = 3; /* add the slot context and endpoint 0 */
-    slot[0] = (speed << 20) | (1u << 27);       /* speed; one context entry (endpoint 0) */
-    slot[1] = (uint32_t)port << 16;             /* root hub port number */
+    slot[0] = device->route | (speed << 20) | (1u << 27); /* route string; speed; one context entry (endpoint 0) */
+    slot[1] = (uint32_t)root_port << 16;                  /* root hub port number */
+    slot[2] = (uint32_t)device->tt_slot | ((uint32_t)device->tt_port << 8);
     endpoint[1] = (3u << 1) | (4u << 3) | ((uint32_t)packet_size << 16); /* error count 3, control, max packet */
     endpoint[2] = device->control_ring.phys | 1u;
-    endpoint[4] = 8;                            /* average TRB length */
+    endpoint[4] = 8; /* average TRB length */
 
     code = run_command(device->input_phys, TRB_TYPE(TRB_ADDRESS_DEVICE) | (slot_id << 24), 0);
 
@@ -811,18 +863,73 @@ static void enumerate(unsigned int port)
     usb_hid_interface_t found[USB_MAX_HID_INTERFACES];
     int is_hub = 0;
     int count = usb_parse_configuration(device->data, total, found, USB_MAX_HID_INTERFACES, &is_hub);
+    uint8_t configuration_value = ((uint8_t *)device->data)[5];
 
-    const char *use = is_hub ? "hub (unsupported)" : count > 0 ? "HID" : "not used";
+    /* A hub is a device of class 9 (in the device descriptor or in its interface). */
+    is_hub = is_hub || description.device_class == USB_CLASS_HUB;
 
-    kernel_printf("usb: port %u: %x:%x class %u, %s speed, %s\n", port, description.vendor_id,
-                  description.product_id, description.device_class,
-                  speed == 1 ? "full" : speed == 2 ? "low" : speed == 3 ? "high" : "super", use);
+    const char *use = is_hub ? "hub" : count > 0 ? "HID" : "not used";
 
-    if (count > 0)
+    kernel_printf("usb: %s port %u: %x:%x class %u, %s speed, %s\n", parent != NULL ? "hub" : "root", port,
+                  description.vendor_id, description.product_id, description.device_class, speed_name(speed), use);
+
+    if (is_hub)
     {
-        uint8_t configuration = found[0].configuration_value;
+        if (device->depth >= 5)
+        {
+            kernel_printf("xhci: hubs nested too deep\n");
+            use = "not used";
+        }
+        else if (send_request(device, 0x00, 9, configuration_value, 0) != 0)
+        {
+            goto fail;
+        }
+        else
+        {
+            /* The hub descriptor (USB 2.0 11.23.2.1; USB 3.0 10.13.2.1): number of ports, characteristics. */
+            int super = speed >= 4;
 
-        if (send_request(device, 0x00, 9, configuration, 0) != 0)
+            if (control_request(device, 0xA0, 6, (uint16_t)((super ? 0x2A : 0x29) << 8), 0, super ? 12 : 8) != 0)
+            {
+                kernel_printf("xhci: slot %u: no hub descriptor\n", slot_id);
+
+                goto fail;
+            }
+
+            const uint8_t *hub_descriptor = device->data;
+
+            device->hub_ports = hub_descriptor[2] > 15 ? 15 : hub_descriptor[2];
+            device->hub_think_time = (hub_descriptor[3] >> 5) & 3;
+
+            /* Tell the controller it is a hub (Configure Endpoint with the slot context only; xHCI 6.2.2). */
+            clear_input(device);
+            k_memcpy(input_context(device, 1), output_context(device, 0), x->context_size);
+            input_context(device, 0)[1] = 1;
+
+            uint32_t *hub_slot = input_context(device, 1);
+
+            hub_slot[0] |= 1u << 26;                               /* hub */
+            hub_slot[1] = (hub_slot[1] & 0x00FFFFFFu) | ((uint32_t)device->hub_ports << 24);
+            hub_slot[2] = (hub_slot[2] & ~(3u << 16)) | ((uint32_t)device->hub_think_time << 16);
+
+            if (run_command(device->input_phys, TRB_TYPE(TRB_CONFIGURE_ENDPOINT) | (slot_id << 24), 0) != COMPLETION_SUCCESS)
+            {
+                kernel_printf("xhci: slot %u: cannot make it a hub\n", slot_id);
+
+                goto fail;
+            }
+
+            /* SuperSpeed hubs also want to know how deep they are (SET_HUB_DEPTH). */
+            if (super)
+                send_request(device, 0x20, 12, device->depth, 0);
+
+            device->is_hub = 1;
+            use = "hub";
+        }
+    }
+    else if (count > 0)
+    {
+        if (send_request(device, 0x00, 9, configuration_value, 0) != 0)
         {
             kernel_printf("xhci: port %u: SET_CONFIGURATION failed\n", port);
 
@@ -848,34 +955,189 @@ static void enumerate(unsigned int port)
 
     device->list_id = usb_device_add(&listed);
 
+    if (device->is_hub)
+        enumerate_children(device);
+
     return;
 
 fail:
-    x->port_slot[port] = 0;
+    if (parent == NULL)
+        x->port_slot[port] = 0;
+
     x->dcbaa[slot_id * 2] = 0;
     run_command(0, TRB_TYPE(TRB_DISABLE_SLOT) | (slot_id << 24), 0);
     free_device(device);
 }
 
-static void remove_device(unsigned int port)
-{
-    xhci_t *x = &xhci;
-    unsigned int slot_id = x->port_slot[port];
+/* --- hubs (USB 2.0 chapter 11, USB 3.0 chapter 10) --- */
 
-    if (slot_id == 0)
+#define HUB_PORT_POWER 8
+#define HUB_PORT_RESET 4
+#define HUB_C_PORT_CONNECTION 16
+#define HUB_C_PORT_RESET 20
+
+static int hub_port_status(device_t *hub, unsigned int port, uint32_t *status)
+{
+    if (control_request(hub, 0xA3, 0, 0, (uint16_t)port, 4) != 0)
+        return -1;
+
+    const uint8_t *data = hub->data;
+
+    *status = (uint32_t)data[0] | (uint32_t)data[1] << 8 | (uint32_t)data[2] << 16 | (uint32_t)data[3] << 24;
+
+    return 0;
+}
+
+static device_t *child_on_port(const device_t *hub, unsigned int port)
+{
+    for (unsigned int slot = 1; slot <= XHCI_MAX_DEVICES; slot++)
+    {
+        device_t *d = &xhci.devices[slot];
+
+        if (d->in_use && d->parent_slot == hub->slot && d->port == port)
+            return d;
+    }
+
+    return NULL;
+}
+
+/* Look at one port of a hub: a device that arrived is reset and brought up; one that left is removed. */
+static void scan_hub_port(device_t *hub, unsigned int port)
+{
+    uint32_t status;
+    int super = hub->speed >= 4;
+
+    if (hub_port_status(hub, port, &status) != 0)
         return;
 
+    uint16_t port_status = (uint16_t)status;
+    uint16_t port_change = (uint16_t)(status >> 16);
+
+    if (port_change & 1)
+        send_request(hub, 0x23, 1, HUB_C_PORT_CONNECTION, (uint16_t)port);
+
+    device_t *child = child_on_port(hub, port);
+
+    if (!(port_status & 1))
+    {
+        if (child != NULL)
+            remove_slot(child->slot);
+
+        return;
+    }
+
+    if (child != NULL)
+        return;
+
+    /* Reset the port and wait for the reset to finish (the hub sets the reset-change bit). */
+    send_request(hub, 0x23, 3, HUB_PORT_RESET, (uint16_t)port);
+
+    uint64_t end = hal_timer_ns() + 500000000u;
+
+    for (;;)
+    {
+        delay_ms(10);
+
+        if (hub_port_status(hub, port, &status) != 0)
+            return;
+
+        if (((status >> 16) & (1u << 4)) || hal_timer_ns() > end)
+            break;
+    }
+
+    send_request(hub, 0x23, 1, HUB_C_PORT_RESET, (uint16_t)port);
+    delay_ms(10);
+
+    if (hub_port_status(hub, port, &status) != 0 || !(status & 2)) /* not enabled */
+        return;
+
+    /* The speed: USB 3 hub ports are always SuperSpeed; USB 2 hub ports say low (bit 9) or high (bit 10), else full. */
+    unsigned int speed = super ? 4 : (status & (1u << 9)) ? 2 : (status & (1u << 10)) ? 3 : 1;
+
+    enumerate_device(hub->root_port, hub, port, speed);
+}
+
+static void enumerate_children(device_t *hub)
+{
+    unsigned int hub_slot = hub->slot;
+
+    /* Power the ports, then give the devices time to appear (and the power to settle). */
+    for (unsigned int port = 1; port <= hub->hub_ports; port++)
+        send_request(hub, 0x23, 3, HUB_PORT_POWER, (uint16_t)port);
+
+    delay_ms(300);
+
+    for (unsigned int port = 1; port <= hub->hub_ports; port++)
+    {
+        if (!xhci.devices[hub_slot].in_use)
+            return;
+
+        scan_hub_port(&xhci.devices[hub_slot], port);
+    }
+}
+
+/* Hot plug behind hubs: look at every hub's ports now and then (every 250 ms). */
+static void poll_hubs(void)
+{
+    static uint64_t next;
+    uint64_t now = hal_timer_ns();
+
+    if (now < next)
+        return;
+
+    next = now + 250000000u;
+
+    for (unsigned int slot = 1; slot <= XHCI_MAX_DEVICES; slot++)
+    {
+        if (!xhci.devices[slot].in_use || !xhci.devices[slot].is_hub)
+            continue;
+
+        for (unsigned int port = 1; port <= xhci.devices[slot].hub_ports; port++)
+        {
+            if (!xhci.devices[slot].in_use)
+                break;
+
+            scan_hub_port(&xhci.devices[slot], port);
+        }
+    }
+}
+
+/* Take a device (and everything behind it, if it is a hub) away. */
+static void remove_slot(unsigned int slot_id)
+{
+    xhci_t *x = &xhci;
     device_t *device = &x->devices[slot_id];
+
+    if (!device->in_use)
+        return;
+
+    for (unsigned int slot = 1; slot <= XHCI_MAX_DEVICES; slot++)
+    {
+        if (x->devices[slot].in_use && x->devices[slot].parent_slot == slot_id)
+            remove_slot(slot);
+    }
 
     for (unsigned int i = 0; i < device->hid_count; i++)
         device->hid[i].active = 0;
 
-    x->port_slot[port] = 0;
+    if (device->parent_slot == 0)
+        x->port_slot[device->port] = 0;
+
+    unsigned int port = device->port;
+
     usb_device_remove(device->list_id);
     run_command(0, TRB_TYPE(TRB_DISABLE_SLOT) | ((uint32_t)slot_id << 24), 0);
     x->dcbaa[slot_id * 2] = 0;
     free_device(device);
     kernel_printf("usb: port %u: device removed\n", port);
+}
+
+static void remove_device(unsigned int port)
+{
+    unsigned int slot_id = xhci.port_slot[port];
+
+    if (slot_id != 0)
+        remove_slot(slot_id);
 }
 
 /* --- ports --- */
@@ -942,7 +1204,7 @@ static void scan_port(unsigned int port)
         return;
 
     if (reset_port(port))
-        enumerate(port);
+        enumerate_device(port, NULL, port, PORT_SPEED(read32(x->operational, OP_PORT(port))));
 }
 
 /* Called from the polling hook (never from an interrupt): look at ports whose status changed. */
@@ -955,6 +1217,7 @@ static void service(void)
 
     /* The interrupt may not work (or not exist): run the event ring here as well. */
     poll_events();
+    poll_hubs();
 
     if (!x->any_port_dirty)
         return;
