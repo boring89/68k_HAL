@@ -29,6 +29,12 @@ multiboot_header:
 	dd 32           ; depth
 %endif
 
+; The size the Multiboot2 header asks for (kernel-gfx.elf); 0 x 0 = no preference.
+%ifndef GFX_WIDTH
+GFX_WIDTH equ 0
+GFX_HEIGHT equ 0
+%endif
+
 ; Multiboot2 header (Multiboot2 Specification 2.0, 3.1). A loader that speaks
 ; Multiboot2 (GRUB's "multiboot2" command, the only way to get the ACPI RSDP
 ; and a framebuffer under UEFI) uses this one; the Multiboot 1 header above
@@ -42,11 +48,13 @@ mb2_header:
 	dd mb2_header_end - mb2_header    ; header length
 	dd -(MB2_MAGIC + 0 + (mb2_header_end - mb2_header))
 %ifdef GRAPHICS
-	; Framebuffer tag: type 5, size 20, width, height, depth.
+	; Framebuffer tag: type 5, size 20, width, height, depth. 0 x 0 = no preference: the loader
+	; keeps the mode it set up itself (grub.cfg: gfxmode, e.g. the monitor's own size under UEFI).
+	; The Multiboot 1 header above keeps asking for 640x480 for the BIOS tests.
 	align 8
 	dw 5, 0
 	dd 20
-	dd 640, 480, 32
+	dd GFX_WIDTH, GFX_HEIGHT, 32
 %else
 	; No preference (0 x 0 x 0 would mean "any"); the text image keeps VGA
 	; text mode, so ask for the EGA text console (console flags tag, type 4,

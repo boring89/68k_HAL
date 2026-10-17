@@ -103,6 +103,24 @@ void hal_init_early(void)
                   boot_magic == MULTIBOOT2_BOOTLOADER_MAGIC ? 2 : 1);
 
     kernel_printf("Multiboot flags: %x\n", multiboot_get_info()->flags);
+
+    /* What the loader says about the screen: useful when the console stays dark on a new machine. */
+    const multiboot_info_t *mbi = multiboot_get_info();
+
+    if (mbi->flags & MULTIBOOT_INFO_FRAMEBUFFER)
+    {
+        kernel_printf("Loader framebuffer: %x %ux%u pitch %u %u bpp type %u%s\n",
+                      (unsigned int)mbi->framebuffer_addr, mbi->framebuffer_width, mbi->framebuffer_height,
+                      mbi->framebuffer_pitch, mbi->framebuffer_bpp, mbi->framebuffer_type,
+                      multiboot_framebuffer_usable() ? "" : " (not usable)");
+
+        if (multiboot_colors_known())
+        {
+            kernel_printf("  colors (position/size): red %u/%u green %u/%u blue %u/%u\n", mbi->color_info[0],
+                          mbi->color_info[1], mbi->color_info[2], mbi->color_info[3], mbi->color_info[4],
+                          mbi->color_info[5]);
+        }
+    }
     kernel_printf("Multiboot info: %x\n", boot_info);
 }
 

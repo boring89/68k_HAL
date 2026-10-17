@@ -153,7 +153,8 @@ static uint32_t crc32(const uint32_t *pixels, uint32_t count)
 }
 
 
-static uint32_t screen_scale = 1;
+/* 0: the largest whole-number enlargement that fits the screen (see fb_best_scale). */
+static uint32_t screen_scale = 0;
 
 void mac_machine_set_scale(uint32_t scale)
 {

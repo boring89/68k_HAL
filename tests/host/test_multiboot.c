@@ -330,6 +330,12 @@ static void test_framebuffer_usable(void)
     mbi->framebuffer_height = 480;
     TEST_ASSERT(multiboot_framebuffer_usable());
 
+    /* A Multiboot 1 loader's colour bytes are not trusted (GRUB puts them at another offset). */
+    static const uint8_t rgbx[6] = {0, 8, 8, 8, 16, 8};
+
+    memcpy(mbi->color_info, rgbx, 6);
+    TEST_ASSERT(multiboot_framebuffer_usable());
+
     /* Text mode: the loader leaves flags bit 12 clear. */
     mbi->flags = 0;
     TEST_ASSERT(!multiboot_framebuffer_usable());
@@ -408,6 +414,37 @@ static void test_multiboot2_tags(void)
     TEST_ASSERT_EQ_INT(7680, multiboot_get_info()->framebuffer_pitch);
 }
 
+/* A Multiboot2 framebuffer tag with colour fields: blue in the low byte is usable, red in the low byte is not. */
+static void test_multiboot2_colors(void)
+{
+    uint8_t fb_body[30] = {0};
+    uint64_t fb_addr = 0xFD000000u;
+    uint32_t fb_dims[3] = {7680, 1920, 1080};
+    static const uint8_t bgrx[6] = {16, 8, 8, 8, 0, 8};
+    static const uint8_t rgbx[6] = {0, 8, 8, 8, 16, 8};
+
+    memcpy(fb_body, &fb_addr, 8);
+    memcpy(fb_body + 8, fb_dims, 12);
+    fb_body[20] = 32;
+    fb_body[21] = 1;
+
+    for (int variant = 0; variant < 2; variant++)
+    {
+        reset();
+        memcpy(fb_body + 24, variant == 0 ? bgrx : rgbx, 6);
+
+        uint8_t *pos = put_tag(area + 8, 8, fb_body, sizeof(fb_body));
+
+        pos = put_tag(pos, 0, NULL, 0);
+
+        uint32_t total = (uint32_t)(pos - area);
+
+        memcpy(area, &total, 4);
+        TEST_ASSERT_EQ_INT(0, multiboot2_init(addr32(area)));
+        TEST_ASSERT_EQ_INT(variant == 0, multiboot_framebuffer_usable());
+    }
+}
+
 static void test_multiboot2_malformed(void)
 {
     reset();
@@ -458,6 +495,7 @@ int main(void)
     TEST_RUN(test_hal_modules);
     TEST_RUN(test_hal_modules_flag_clear);
     TEST_RUN(test_multiboot2_tags);
+    TEST_RUN(test_multiboot2_colors);
     TEST_RUN(test_multiboot2_malformed);
 
     munmap(area, AREA_SIZE);

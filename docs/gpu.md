@@ -102,6 +102,24 @@ Mac IIci 的畫面是 640×480。在現代螢幕上很小，所以 `mac 2` 先�
 
 世代差異極大（Haiku 單 `pll.cpp` 就 1000 行、`Ports.cpp` 2700 行），建議先只支援一個世代（例如手邊那台機器的世代），並先做階段 1。
 
+## 4.5 實機（P7 R6）：用韌體給的 framebuffer，不寫 NVIDIA 驅動
+
+P520 的顯示卡是 GeForce GTX 1070（NVIDIA GP104，PCI 10de:1b81）。**不寫它的驅動**（沒有公開的暫存器文件，GPU 初始化與模式設定要幾十萬行程式；Nouveau 是 GPL-2.0-only，也不能複製）。我們只用**開機時韌體已經設定好的 framebuffer**：
+
+```
+UEFI：韌體的 GOP（Graphics Output Protocol）已經設好模式（通常是螢幕的原生解析度，例如 1920x1080）
+      GRUB 的 efi_gop 驅動沿用它 → Multiboot2 的 framebuffer tag → kernel（platform/pc/boot/multiboot.c）
+CSM（傳統 BIOS）：顯示卡的 VBIOS 提供 VBE 模式，GRUB 用 Multiboot 1 標頭要求 640x480x32（kernel-gfx.elf）
+```
+
+- 同一個 `kernel-gfx.elf` 有兩個標頭：Multiboot 1 要 640x480x32（BIOS 測試與舊行為不變），Multiboot2 的 framebuffer tag 寫 0x0x32＝**沒有偏好**，GRUB 就保留韌體選的模式。（試過 `gfxpayload`、`gfxmode`＋`gfxterm`：GRUB 對 Multiboot2 不理會它們；`all_video` 還會讓 Bochs/Cirrus 驅動搶走並設成 800x600x24，所以 UEFI 項目只載入 `efi_gop`。）
+- `kernel-gfx1080.elf`（只給測試用）的 Multiboot2 標頭要 1920x1080x32。
+- 像素格式：所有繪圖程式都假設 `0x00RRGGBB`（藍在低位元組，UEFI 的 BGRX，GOP 最常見的格式）。`multiboot_framebuffer_usable` 檢查 loader 回報的顏色位置（red 16/8、green 8/8、blue 0/8），不符就**不使用** framebuffer（只剩序列埠，實機看不到畫面）。開機訊息會印 `Loader framebuffer: …` 一行（位址、大小、pitch、bpp、顏色位置、是否可用），實機畫面全黑或沒有畫面時請拍下它。
+- 文字大小：`fbcon_scale_for`：每 960 像素寬放大一倍（1920x1080：2 倍，字格 16x32，120x33 格；4K：4 倍），所以大螢幕上字不會太小。Mac 畫面本來就用 `fb_best_scale` 置中並用最大的整數倍放大（`mac` 指令的預設現在是「自動」，`mac 2` 仍是指定兩倍）；1920x1080 下是 2 倍（1280x960，置中）。
+- BGA 驅動只在 PCI 1234:1111 且 VBE ID 暫存器合理時啟用，GTX 1070 不會碰到它。
+- 測試：`make test-uefi`（OVMF：GRUB 保留韌體模式 1280x800 → 字 1 倍；暫時的 ISO 要求 1920x1080 → 字 2 倍、120x33 格，並檢查螢幕截圖的色條與文字像素）；Mac 在 UEFI 1080p 的畫面是本機手動檢查（需要 ROM）。
+- **未在實機驗證**：GTX 1070 的 GOP 模式清單、像素格式（BGRX 是假設）、HiDPI 螢幕是否真的給 1920x1080 以上。
+
 ## 5. 不做的事
 
 - **NVIDIA**：需要專有韌體與未公開的文件，不做。

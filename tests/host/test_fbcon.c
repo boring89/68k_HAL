@@ -182,9 +182,61 @@ static void test_with_terminal(void)
     text_display_reset();
 }
 
+static void test_scale_rule(void)
+{
+    TEST_ASSERT_EQ_INT(1, fbcon_scale_for(640, 480));
+    TEST_ASSERT_EQ_INT(1, fbcon_scale_for(1280, 960));
+    TEST_ASSERT_EQ_INT(2, fbcon_scale_for(1920, 1080));
+    TEST_ASSERT_EQ_INT(2, fbcon_scale_for(2560, 1440));
+    TEST_ASSERT_EQ_INT(4, fbcon_scale_for(3840, 2160));
+    TEST_ASSERT_EQ_INT(1, fbcon_scale_for(1920, 400)); /* wide but not tall */
+    TEST_ASSERT_EQ_INT(1, fbcon_scale_for(100, 70));
+}
+
+/* 1920x1080: glyph pixels are 2x2, so a cell is 16x32 and the grid 120 x 33 (below a 16 pixel margin). */
+static uint32_t big_pixels[1920 * 1080];
+static uint8_t big_heap[256 * 1024];
+
+static void test_big_screen(void)
+{
+    heap_init((uintptr_t)big_heap, sizeof(big_heap));
+
+    hal_framebuffer_t fb = {(uint8_t *)big_pixels, 1920, 1080, 1920 * 4, 32};
+
+    memset(big_pixels, 0x55, sizeof(big_pixels));
+    TEST_ASSERT_EQ_INT(0, fbcon_init(&fb, 16));
+    TEST_ASSERT_EQ_INT(120, fbcon_display()->width);
+    TEST_ASSERT_EQ_INT(33, fbcon_display()->height);
+
+    /* origin: x (1920 - 120*16) / 2 = 0; y 16 + (1064 - 33*32) / 2 = 16 + 4 = 20. */
+    fbcon_display()->clear();
+    fbcon_display()->put_cell(1, 0, 'A', COLOR_WHITE, COLOR_BLUE);
+
+    /* The top left corner of the cell is background, and a lit glyph pixel is a 2x2 block of foreground. */
+    int lit = 0;
+
+    for (int py = 0; py < 32; py++)
+    {
+        for (int px = 0; px < 16; px++)
+        {
+            uint32_t value = big_pixels[(20 + py) * 1920 + 16 + px];
+
+            if (value == 0x00FFFFFF)
+                lit++;
+            else
+                TEST_ASSERT_EQ_INT(0x000000AA, value);
+        }
+    }
+
+    TEST_ASSERT(lit > 0);
+    TEST_ASSERT_EQ_INT(0, lit % 4); /* only whole 2x2 blocks */
+}
+
 int main(void)
 {
     TEST_RUN(test_geometry_and_rejects);
+    TEST_RUN(test_scale_rule);
+    TEST_RUN(test_big_screen);
     TEST_RUN(test_clear_paints_everything_black);
     TEST_RUN(test_glyph_drawing);
     TEST_RUN(test_out_of_range_is_ignored);

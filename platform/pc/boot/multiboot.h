@@ -159,6 +159,9 @@ const multiboot_info_t *multiboot_get_info(void);
  */
 bool multiboot_framebuffer_usable(void);
 
+/* True if the loader told us where the colour bits are (Multiboot2); then multiboot_get_info()->color_info is valid. */
+bool multiboot_colors_known(void);
+
 /* First memory map entry, or NULL if flags bit 6 is clear or the map is empty. */
 const multiboot_mmap_entry_t *multiboot_mmap_first(void);
 

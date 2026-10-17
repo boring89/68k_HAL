@@ -94,6 +94,7 @@ void kernel_main(void)
         {
             console_init();
             fb_draw_color_bars(&framebuffer, FB_BARS_HEIGHT);
+            kernel_printf("Console: %d x %d cells\n", fbcon_display()->width, fbcon_display()->height);
         }
         else
         {

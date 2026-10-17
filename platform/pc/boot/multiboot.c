@@ -39,6 +39,13 @@ const char *multiboot_cmdline(void)
     return cmdline_present ? cmdline_copy : NULL;
 }
 
+/*
+ * True when color_info came from a Multiboot2 tag. In a Multiboot 1 info structure the colour
+ * fields sit where GRUB's compiler put them (offset 112, not the 110 of the specification), so
+ * they are not trusted there.
+ */
+static bool colors_known;
+
 /* Multiboot2 translation (multiboot2_init). */
 static multiboot_info_t synth_info;
 static multiboot_mmap_entry_t synth_mmap[MULTIBOOT2_MAX_MMAP];
@@ -61,6 +68,7 @@ void multiboot_init(uint32_t address)
     mmap_start = 0;
     mmap_end = 0;
     cmdline_present = false;
+    colors_known = false;
 
     /* flags bit 2 (Multiboot 0.6.96 3.3): the cmdline field points at a string. */
     if ((multiboot_info->flags & (1u << 2)) && multiboot_info->cmdline != 0)
@@ -89,9 +97,27 @@ bool multiboot_framebuffer_usable(void)
         mbi->framebuffer_bpp != 32)
         return false;
 
+    /*
+     * Everything that draws on the framebuffer assumes 0x00RRGGBB (blue in the low byte: UEFI's
+     * "BGRX"). A loader that says otherwise (red in the low byte) would get swapped colours.
+     */
+    static const uint8_t bgrx[6] = {16, 8, 8, 8, 0, 8};
+    int same = 1;
+
+    for (int i = 0; i < 6; i++)
+        same &= mbi->color_info[i] == bgrx[i];
+
+    if (colors_known && !same)
+        return false;
+
     return mbi->framebuffer_addr != 0 && (mbi->framebuffer_addr >> 32) == 0 &&
            mbi->framebuffer_width != 0 && mbi->framebuffer_height != 0 &&
            mbi->framebuffer_pitch / 4 >= mbi->framebuffer_width;
+}
+
+bool multiboot_colors_known(void)
+{
+    return colors_known;
 }
 
 /* Return the entry at address if it lies completely inside the map. */
@@ -164,6 +190,7 @@ int multiboot2_init(uint32_t address)
     raw_size = total;
     rsdp_copy = NULL;
     cmdline_present = false;
+    colors_known = false;
     mmap_start = 0;
     mmap_end = 0;
     multiboot_info = &synth_info;
@@ -242,6 +269,15 @@ int multiboot2_init(uint32_t address)
                 synth_info.framebuffer_height = ((const uint32_t *)body)[4];
                 synth_info.framebuffer_bpp = body[20];
                 synth_info.framebuffer_type = body[21];
+
+                /* Direct colour: where the red, green and blue bits sit (position, size; bytes 24-29). */
+                if (body[21] == MULTIBOOT_FRAMEBUFFER_RGB && body_size >= 30)
+                {
+                    for (int i = 0; i < 6; i++)
+                        synth_info.color_info[i] = body[24 + i];
+
+                    colors_known = true;
+                }
             }
             break;
         case MB2_TAG_ACPI_OLD:

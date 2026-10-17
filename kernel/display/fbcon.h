@@ -20,10 +20,18 @@
  * characters 0-127; others show as blanks) with every row drawn twice. The
  * 16 text colours are the standard VGA palette. The cursor is an underline.
  * The grid is centred in the framebuffer, below top_margin pixel rows that
- * are left alone. 640x480 gives 80x30 cells (80x29 with a 16 pixel margin).
+ * are left alone. 640x480 gives 80x30 cells (80x29 with a 16 pixel margin); 1920x1080 is
+ * drawn at twice the size (see fbcon_scale_for): 120x33 cells.
  */
 #define FBCON_CELL_WIDTH 8
 #define FBCON_CELL_HEIGHT 16
+
+/*
+ * On a big screen the text would be tiny: every glyph pixel becomes scale x scale screen pixels,
+ * scale = width / 960 (1080p: 2, 4K: 4), limited so the height still gives 540 pixels per step.
+ * Cells are then 8*scale x 16*scale pixels. fbcon_init chooses it; this is the rule.
+ */
+uint32_t fbcon_scale_for(uint32_t width, uint32_t height);
 
 /* Character glyphs: font[c][row], bit 0 = leftmost pixel. */
 extern const uint8_t fbcon_font[128][8];

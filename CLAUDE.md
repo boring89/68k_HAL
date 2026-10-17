@@ -27,7 +27,7 @@ make test-shell # 開機 ISO、用 QEMU monitor 打字執行 shell 指令並檢�
 make test-video # 設定 1280x960 並檢查 QEMU screendump
 make test-usb    # USB 鍵盤滑鼠經 xHCI（關掉 PS/2，含熱插拔）
 make test-noapic # selftest 帶 "noapic"（8259 路徑）；make test-q35：q35 晶片組的 APIC 與網路
-make test-uefi   # 同一個 ISO 用 UEFI 韌體（OVMF、q35）開機：Multiboot2、ACPI RSDP、fbcon（需要 ovmf 套件；不在 make test 中）
+make test-uefi   # 同一個 ISO 用 UEFI 韌體（OVMF、q35）開機：Multiboot2、ACPI RSDP、fbcon 的字大小與解析度（需要 ovmf 套件；不在 make test 中）
 make test-fb      # GRUB 的 640x480 圖形模式：色條、framebuffer 文字終端、打指令看輸出（tools/fb_check.py；擋住「驅動啟動時把螢幕關掉」這類退步）
 make test-mac-keys # Alt-N（= Command-N）在 Mac 建立資料夾（本機專用）
 make test-net / test-virtio-net  # TCP（host 的 http.server 經 slirp 10.0.2.2）、socket、DNS；virtio-net 網卡
@@ -149,7 +149,7 @@ Claude 依照上方工作規則直接實作。
 
 - `emu/mac`：Mac IIci 機器模型與 `kernel/mac`（P3，見 `docs/mac.md`）。同樣是由自動排程一次做完的，沒有走協作模式的逐步確認，使用者尚未審核；之後修改時請先帶使用者過一遍 `docs/mac.md`
 
-- P7（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：Multiboot2 與 UEFI 開機（`docs/hal.md`）、行程與排程與訊號與管線（`docs/process.md`）、APIC 與 MSI（`docs/apic.md`）、xHCI 與 USB 鍵盤滑鼠（`docs/usb.md`）、NVMe（`docs/storage.md`）。P7 的規劃與紀錄在 `P7_PLAN.md`（不進 git）。
+- P7（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：Multiboot2 與 UEFI 開機（`docs/hal.md`）、行程與排程與訊號與管線（`docs/process.md`）、APIC 與 MSI（`docs/apic.md`）、xHCI 與 USB 鍵盤滑鼠（`docs/usb.md`）、NVMe（`docs/storage.md`）、實機的顯示（`docs/gpu.md` 4.5）。P7 的規劃與紀錄在 `P7_PLAN.md`（不進 git）。
 - P6（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：CPU（`docs/cpu.md`）、使用者模式與 C SDK 與 VFS（`docs/userland.md`）、PCI 與驅動框架（`docs/pci.md`）、網路（`docs/net.md`）、聲音（`docs/sound.md`）、顯示（`docs/gpu.md`）、Mac 的聲音／時鐘／磁碟寫入（`docs/mac.md` 第 11、12 節）。P6 的規劃與紀錄在 `P6_PLAN.md`（不進 git）。
 
 （之後新增的元件加入此清單）

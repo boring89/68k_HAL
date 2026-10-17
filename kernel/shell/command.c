@@ -203,7 +203,7 @@ static shell_command_entry_t commands[] =
          cmd_cat},
         {COMMAND_MAC,
          "mac",
-         "Run the Macintosh IIci on boot modules mac_rom and mac_disk (` stops); mac 2 enlarges it twofold",
+         "Run the Macintosh IIci on boot modules mac_rom and mac_disk (` stops); fills the screen in whole multiples, mac 2 asks for exactly twofold",
          cmd_mac},
         {COMMAND_CPUINFO,
          "cpuinfo",
@@ -1184,7 +1184,7 @@ static void cmd_mac(
     int argc,
     char **argv)
 {
-    int scale = 1;
+    int scale = 0; /* as large as the screen allows, in whole multiples */
 
     if (argc > 1)
         k_atoi(argv[1], &scale);

@@ -24,6 +24,7 @@ static uint32_t origin_x; /* pixel position of cell (0, 0) */
 static uint32_t origin_y;
 static int cursor_x = -1;
 static int cursor_y = -1;
+static uint32_t scale = 1; /* every glyph pixel is scale x scale screen pixels */
 
 /* The standard VGA palette (0x00RRGGBB), indexed by color_t. */
 static const uint32_t palette[16] = {
@@ -43,17 +44,19 @@ static void draw_cell(int x, int y)
     const uint8_t *glyph = (cell->c >= 0) ? fbcon_font[(int)cell->c] : fbcon_font[0];
     bool underline = x == cursor_x && y == cursor_y;
 
-    for (int row = 0; row < FBCON_CELL_HEIGHT; row++)
+    uint32_t cell_width = FBCON_CELL_WIDTH * scale;
+    uint32_t cell_height = FBCON_CELL_HEIGHT * scale;
+
+    for (uint32_t row = 0; row < cell_height; row++)
     {
-        uint32_t *out = pixel(origin_x + (uint32_t)x * FBCON_CELL_WIDTH,
-                              origin_y + (uint32_t)y * FBCON_CELL_HEIGHT + (uint32_t)row);
-        uint8_t bits = glyph[row / 2];
+        uint32_t *out = pixel(origin_x + (uint32_t)x * cell_width, origin_y + (uint32_t)y * cell_height + row);
+        uint8_t bits = glyph[row / (2 * scale)];
 
-        /* The cursor: the bottom two pixel rows in the foreground colour. */
-        bool full = underline && row >= FBCON_CELL_HEIGHT - 2;
+        /* The cursor: the bottom two glyph pixel rows in the foreground colour. */
+        bool full = underline && row >= cell_height - 2 * scale;
 
-        for (int col = 0; col < FBCON_CELL_WIDTH; col++)
-            out[col] = (full || (bits & (1u << col))) ? fg : bg;
+        for (uint32_t col = 0; col < cell_width; col++)
+            out[col] = (full || (bits & (1u << (col / scale)))) ? fg : bg;
     }
 }
 
@@ -135,14 +138,29 @@ void fbcon_redraw(void)
     }
 }
 
+uint32_t fbcon_scale_for(uint32_t width, uint32_t height)
+{
+    /* About 960 pixels of width per step, as long as the height keeps up (1080p: 2, 4K: 4). */
+    uint32_t wanted = width / 960;
+    uint32_t possible = height / 540;
+
+    if (wanted > possible)
+        wanted = possible;
+
+    return wanted < 1 ? 1 : wanted > 4 ? 4 : wanted;
+}
+
 int fbcon_init(const hal_framebuffer_t *framebuffer, uint32_t top_margin)
 {
     if (framebuffer == NULL || framebuffer->base == NULL || framebuffer->bpp != 32 ||
         top_margin >= framebuffer->height)
         return -1;
 
-    int columns = (int)(framebuffer->width / FBCON_CELL_WIDTH);
-    int rows = (int)((framebuffer->height - top_margin) / FBCON_CELL_HEIGHT);
+    uint32_t new_scale = fbcon_scale_for(framebuffer->width, framebuffer->height);
+    uint32_t cell_width = FBCON_CELL_WIDTH * new_scale;
+    uint32_t cell_height = FBCON_CELL_HEIGHT * new_scale;
+    int columns = (int)(framebuffer->width / cell_width);
+    int rows = (int)((framebuffer->height - top_margin) / cell_height);
 
     if (columns < 1 || rows < 1)
         return -1;
@@ -163,8 +181,9 @@ int fbcon_init(const hal_framebuffer_t *framebuffer, uint32_t top_margin)
     display.copy_cell = copy_cell;
     display.set_cursor = set_cursor;
     display.clear = clear;
-    origin_x = (framebuffer->width - (uint32_t)columns * FBCON_CELL_WIDTH) / 2;
-    origin_y = top_margin + (framebuffer->height - top_margin - (uint32_t)rows * FBCON_CELL_HEIGHT) / 2;
+    scale = new_scale;
+    origin_x = (framebuffer->width - (uint32_t)columns * cell_width) / 2;
+    origin_y = top_margin + (framebuffer->height - top_margin - (uint32_t)rows * cell_height) / 2;
     cursor_x = -1;
     cursor_y = -1;
 
