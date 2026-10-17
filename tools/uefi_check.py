@@ -20,6 +20,8 @@ import sys
 import tempfile
 import time
 
+# The build directory of the kernel under test (make exports BUILD for ARCH=x86_64 builds).
+BUILD = os.environ.get("BUILD", "build")
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 BAR_COLORS = [(255, 255, 255), (255, 255, 0), (0, 255, 255), (0, 255, 0),
@@ -48,7 +50,8 @@ def make_1080_iso(tmp):
     root = os.path.join(tmp, "iso")
     os.makedirs(os.path.join(root, "boot", "grub"))
     for name in ("kernel-gfx1080.elf", "initrd.tar"):
-        subprocess.run(["cp", os.path.join("build", name), os.path.join(root, "boot", name)], check=True)
+        subprocess.run(["cp", os.path.join(BUILD, name) if name != "initrd.tar" else os.path.join("build", name),
+                        os.path.join(root, "boot", name)], check=True)
     with open(os.path.join(root, "boot", "grub", "grub.cfg"), "w") as f:
         f.write("set default=0\nset timeout=0\ninsmod efi_gop\n"
                 'menuentry "1080" {\n  multiboot2 /boot/kernel-gfx1080.elf\n'
@@ -150,9 +153,9 @@ def check(iso, want_size=None):
 
 
 def main():
-    iso = "build/68k_HAL.iso"
-    if not os.path.exists(iso) or not os.path.exists("build/kernel-gfx1080.elf"):
-        sys.exit("run make iso and make build/kernel-gfx1080.elf first")
+    iso = os.path.join(BUILD, "68k_HAL.iso")
+    if not os.path.exists(iso) or not os.path.exists(os.path.join(BUILD, "kernel-gfx1080.elf")):
+        sys.exit("run make iso and make kernel-gfx1080.elf first")
 
     check(iso)
 

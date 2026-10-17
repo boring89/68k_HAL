@@ -26,8 +26,16 @@ jobs:
 
       # Downloads the sources of musl, Lua and TinyCC on the first run (the
       # SDK, the example programs and the QEMU self tests need them).
+      # The 64-bit kernel (the default).
       - name: Boundary, host, QEMU, shell and video tests
         run: make test
 
       - name: Build the bootable ISO
         run: make iso
+
+      # The 32-bit kernel (build/i386).
+      - name: Tests of the 32-bit kernel
+        run: make ARCH=i386 test
+
+      - name: Build the bootable ISO of the 32-bit kernel
+        run: make ARCH=i386 iso

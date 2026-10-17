@@ -1,11 +1,12 @@
-# The kernel's architecture: i386 (32-bit protected mode, the default) or x86_64 (docs/x86_64.md).
-# make ARCH=x86_64 builds into build/x86_64 and runs the tests with qemu-system-x86_64.
-ARCH ?= i386
+# The kernel's architecture: x86_64 (the default, docs/x86_64.md) or i386 (32-bit protected mode).
+# make ARCH=i386 builds into build/i386 and runs the tests with qemu-system-i386. The programs
+# for the program disk (build/initrd, build/sdk) are i386 programs for both.
+ARCH ?= x86_64
 
 ifeq ($(ARCH),x86_64)
-BUILD ?= build/x86_64
-else ifeq ($(ARCH),i386)
 BUILD ?= build
+else ifeq ($(ARCH),i386)
+BUILD ?= build/i386
 else
 $(error ARCH must be i386 or x86_64)
 endif
@@ -128,8 +129,6 @@ ASM_OBJECTS := $(ASM_SOURCES:%.asm=$(BUILD)/%.o)
 
 OBJECTS := $(C_OBJECTS) $(ASM_OBJECTS) $(KMUSASHI_OBJECTS)
 
-$(info C sources: $(C_SOURCES))
-$(info ASM sources: $(ASM_SOURCES))
 
 $(BUILD)/%.o: %.c
 	mkdir -p $(dir $@)
@@ -749,7 +748,7 @@ test-shell: iso
 # The same ISO started by UEFI firmware (OVMF, q35): Multiboot2, the ACPI RSDP
 # from the boot loader, the framebuffer console. Needs the ovmf package.
 test-uefi: iso $(BUILD)/kernel-gfx1080.elf
-	python3 -I tools/uefi_check.py
+	BUILD=$(BUILD) python3 -I tools/uefi_check.py
 	SHELL_TEST_UEFI=1 python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
 		"acpi=Local APIC" "cpuinfo=Vendor" "lspci=Host bridge"
 
@@ -791,7 +790,7 @@ test-power: iso
 	python3 -I tools/power_test.py $(BUILD)/68k_HAL.iso
 
 test-fb: all
-	python3 -I tools/fb_check.py
+	python3 -I tools/fb_check.py $(BUILD)/kernel-gfx.elf
 
 # The standard VGA card's mode can be chosen: set 1280x960 from the shell and
 # check a QEMU screendump (in graphics mode, GRUB's 640x480, and in text mode).
