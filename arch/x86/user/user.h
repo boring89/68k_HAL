@@ -17,7 +17,7 @@ void user_syscall_stub(void);
 int user_run_asm(uint32_t entry, uint32_t user_esp);
 void user_leave_asm(int status) __attribute__((noreturn));
 
-/* hal_user.c: an exception that happened in ring 3. Does not return. */
-void user_fault(struct interrupt_frame *frame) __attribute__((noreturn));
+/* hal_user.c: an exception that happened in ring 3. Returns only if the handler fixed the cause; then the instruction is repeated. */
+void user_fault(struct interrupt_frame *frame);
 
 #endif

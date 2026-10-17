@@ -238,7 +238,7 @@ shell 行裡的 `|`、`<`、`>`、`>>`（各自要用空白隔開）：`seq 20 |
 - 協作式多工、沒有執行緒、`alarm`、作業控制（見 `docs/process.md` 第 9 節）。
 - 終端機：沒有 UTF-8（VGA 文字模式只有 CP437）、不是所有 CSI 都支援（沒有捲動區域、替代螢幕、滑鼠）、圖形模式下沒有畫面（只有序列埠）；termios 沒有 `IXON`/`OPOST` 的實際作用、鮑率設定被忽略。
 - 沒有 NX（需要 PAE）：可讀的頁面都能執行；`PROT_EXEC` 被忽略。
-- 堆疊固定 2 MiB，不會自動成長。
+- 堆疊固定 2 MiB（用到的頁面才配置，見 `docs/process.md`），超過就 segmentation fault。
 - `mmap` 的位址只增不減（`munmap` 釋放頁面，但位址不重用）；不支援 `MAP_FIXED`。
 - FPU/SSE 狀態不會在 kernel 與程式之間保存（kernel 不用浮點）。
 - 檔案系統沒有權限、時間戳記（`mtime` 為 0）、符號連結。

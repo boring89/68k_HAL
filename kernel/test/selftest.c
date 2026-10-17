@@ -651,6 +651,7 @@ static const struct
     {"dash", 0, "/data/test.sh", NULL}, /* a POSIX shell, a ported program that uses everything */
     {"make", 0, "-f", "/data/test.mk"}, /* GNU make runs dash runs tcc runs the result */
     {"spin", 0, NULL, NULL},            /* preemption: a spinning program is neither a hog nor unkillable */
+    {"stackdeep", 0, NULL, NULL},       /* the stack fills in on demand */
     {"forkexec", 0, NULL, NULL},        /* fork, exec, wait */
     {"pipes", 0, NULL, NULL},           /* pipe, dup2, SIGPIPE */
     {"signals", 0, NULL, NULL},         /* handlers, masks, kill */
@@ -775,6 +776,33 @@ static void test_process_no_leak(void)
     }
 
     SELFTEST_ASSERT(sched_process_count() == 0);
+}
+
+/* fork until the process table is full: EAGAIN, every child collected, nothing left behind. */
+static void test_fork_limit(void)
+{
+    vfs_stat_t stat;
+
+    if (vfs_stat("/bin/forklimit", &stat) != 0)
+        return;
+
+    static const char *const environment[] = {"PATH=/bin", NULL};
+    const char *args[] = {"/bin/forklimit", NULL};
+    static char output[512];
+    size_t free_before = pmm_get_free_frames();
+
+    user_console_capture_start(output, sizeof(output));
+
+    int32_t status = user_run("/bin/forklimit", args, environment);
+
+    user_console_capture_stop();
+
+    kernel_printf("  forklimit said: %s", output);
+    SELFTEST_ASSERT(status == 0);
+    SELFTEST_ASSERT(k_strstr(output, "failed with EAGAIN") != 0);
+    SELFTEST_ASSERT(k_strstr(output, "collected all: yes") != 0);
+    SELFTEST_ASSERT(sched_process_count() == 0);
+    SELFTEST_ASSERT(pmm_get_free_frames() == free_before);
 }
 
 /* A recording 80x25 text display for test_user_ansi. */
@@ -1014,6 +1042,7 @@ void selftest_run(void)
     SELFTEST_RUN(test_user_programs);
     SELFTEST_RUN(test_process_limit);
     SELFTEST_RUN(test_process_no_leak);
+    SELFTEST_RUN(test_fork_limit);
     SELFTEST_RUN(test_user_ansi);
     SELFTEST_RUN(test_user_compiler);
 

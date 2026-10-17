@@ -90,6 +90,22 @@ static void unmap_page(uint32_t virt)
         pmm_free_frame(phys & ~(uintptr_t)(PAGE - 1));
 }
 
+int user_demand_map(uint32_t address)
+{
+    uint32_t page = page_down(address);
+
+    if (page < USER_STACK_TOP - USER_STACK_SIZE || page >= USER_STACK_TOP - USER_STACK_EAGER ||
+        !user_regions_contains(&user_process.regions, page, PAGE))
+        return 0;
+
+    uintptr_t phys;
+
+    if (hal_mmu_get_phys(page, &phys) == 0)
+        return 0; /* mapped already: the fault has another reason (write to a read-only page...) */
+
+    return map_page(page) == 0;
+}
+
 int32_t user_map(uint32_t start, uint32_t end)
 {
     if (user_regions_add(&user_process.regions, start, end) != 0)
@@ -158,7 +174,14 @@ static int pages_allow(uint32_t address, uint32_t length, uint32_t need)
     {
         uint32_t flags;
 
-        if (hal_mmu_get_flags(page, &flags) != 0 || (flags & need) != need)
+        if (hal_mmu_get_flags(page, &flags) != 0)
+        {
+            /* A stack page the program never touched: it exists once something asks for it. */
+            if (!user_demand_map(page) || hal_mmu_get_flags(page, &flags) != 0)
+                return 0;
+        }
+
+        if ((flags & need) != need)
             return 0;
 
         if (page + PAGE < page)
@@ -372,9 +395,16 @@ int32_t user_copy_memory(user_process_t *child)
                     hal_space_map(child->space, page, phys & ~(uintptr_t)(PAGE - 1), flags) != 0)
                     return -K_ENOMEM;
             }
-            else if (hal_space_copy_page(child->space, page) != 0)
+            else
             {
-                return -K_ENOMEM;
+                uintptr_t phys;
+
+                /* A stack page nobody has touched yet does not exist: the child gets none either. */
+                if (hal_mmu_get_phys(page, &phys) != 0)
+                    continue;
+
+                if (hal_space_copy_page(child->space, page) != 0)
+                    return -K_ENOMEM;
             }
         }
     }
@@ -446,10 +476,17 @@ static int32_t load_image(const uint8_t *file, const elf_image_t *image)
 static int32_t build_stack(const elf_image_t *image, const char *const *argv,
                            const char *const *envp, uint32_t *sp)
 {
-    int32_t status = user_map(USER_STACK_TOP - USER_STACK_SIZE, USER_STACK_TOP);
+    /* The whole stack is the program's (a region), but only its top pages exist yet (user_demand_map does the rest). */
+    if (user_regions_add(&user_process.regions, USER_STACK_TOP - USER_STACK_SIZE, USER_STACK_TOP) != 0)
+        return -K_ENOMEM;
 
-    if (status != 0)
-        return status;
+    for (uint32_t page = USER_STACK_TOP - USER_STACK_EAGER; page < USER_STACK_TOP; page += PAGE)
+    {
+        int32_t status = map_page(page);
+
+        if (status != 0)
+            return status;
+    }
 
     enum { CAPACITY = 32768 };
     uint8_t *buffer = kmalloc(CAPACITY);
@@ -819,8 +856,12 @@ int32_t user_exec(const char *path, const char *const *argv, const char *const *
 /* --- start-up --- */
 
 /* A fault ends the program like a fatal signal: status 128 + signal number. */
-static void on_fault(const hal_user_fault_t *fault)
+static int on_fault(const hal_user_fault_t *fault)
 {
+    /* A touch of a stack page that does not exist yet (page not present, error bit 0 clear) is not an error. */
+    if (fault->vector == 14 && !(fault->error & 1) && user_demand_map(fault->address))
+        return 1;
+
     int signal = 11; /* SIGSEGV */
     const char *what = "segmentation fault";
 

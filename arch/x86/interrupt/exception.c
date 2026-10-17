@@ -70,7 +70,11 @@ void exception_handler(struct interrupt_frame *frame)
 
     /* The program in ring 3 did it: stop the program, not the kernel. */
     if ((frame->cs & 3) == 3)
+    {
         user_fault(frame);
+
+        return;
+    }
 
     const char *name = frame->int_no < EXCEPTION_COUNT
         ? exception_names[frame->int_no]

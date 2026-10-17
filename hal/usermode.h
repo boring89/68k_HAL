@@ -43,11 +43,11 @@ typedef struct
  * Handlers, called in kernel mode on the kernel stack with interrupts
  * disabled (the syscall handler may enable them to wait). The syscall
  * handler returns the value for the program's EAX (a negative errno on
- * failure). The fault handler must not return: it ends the program
- * with hal_user_exit().
+ * failure). The fault handler returns 1 if it fixed the cause (a page that was filled in on demand): the program
+ * then runs the faulting instruction again. Otherwise it must not return: it ends the program.
  */
 typedef int32_t (*hal_user_syscall_handler_t)(const hal_user_syscall_t *call);
-typedef void (*hal_user_fault_handler_t)(const hal_user_fault_t *fault);
+typedef int (*hal_user_fault_handler_t)(const hal_user_fault_t *fault);
 
 /* Set up the mode switch machinery. Call once, before hal_user_run. */
 void hal_user_init(hal_user_syscall_handler_t syscall,

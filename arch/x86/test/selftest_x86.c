@@ -711,7 +711,7 @@ static int32_t user_test_syscall(const hal_user_syscall_t *call)
 }
 
 /* A fault ends the program with 100 + the exception vector. */
-static void user_test_fault(const hal_user_fault_t *fault)
+static int user_test_fault(const hal_user_fault_t *fault)
 {
     hal_user_exit(100 + (int)fault->vector);
 }

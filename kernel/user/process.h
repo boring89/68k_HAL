@@ -39,6 +39,13 @@
 #define USER_STACK_TOP 0x80000000u
 #define USER_STACK_SIZE (2u * 1024 * 1024)
 
+/*
+ * Only the top of the stack (the arguments and the first frames) is mapped when a program starts; the
+ * rest of the 2 MiB fills in page by page when the program touches it (user_demand_map). So a process costs
+ * a few pages, and fork copies only what exists.
+ */
+#define USER_STACK_EAGER (64u * 1024)
+
 #define USER_MAX_FDS 64
 
 /* Most processes alive at once (zombies included); slot 0 is the kernel itself and not counted. */
@@ -132,6 +139,12 @@ int32_t user_map_device(uint32_t start, uint32_t size, uintptr_t phys);
 
 /* Undo user_map for [start, end): unmap and free the frames, forget the regions. */
 void user_unmap(uint32_t start, uint32_t end);
+
+/*
+ * A page fault at address inside the stack (and not yet mapped): map a zeroed page there. Returns 1 if
+ * the fault is fixed (the program can retry), 0 if address is anywhere else.
+ */
+int user_demand_map(uint32_t address);
 
 /* True if the program may read the whole range (it is the program's and not a guard page). */
 int user_range_ok(uint32_t address, uint32_t length);

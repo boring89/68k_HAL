@@ -117,6 +117,9 @@ void user_fault(struct interrupt_frame *frame)
     if (fault_handler == 0)
         panic("fault in user mode (vector %u) at %x", frame->int_no, frame->eip);
 
-    fault_handler(&fault);
+    /* 1 = fixed (a page was mapped): return and let the program try again. */
+    if (fault_handler(&fault))
+        return;
+
     panic("user fault handler returned");
 }

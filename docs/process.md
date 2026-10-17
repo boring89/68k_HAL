@@ -64,7 +64,7 @@ while (!條件())
 
 **spawn**（shell 啟動程式）：讀 ELF → 建一個行程（空的位址空間）→ 暫時切到它的空間把程式載進去、建堆疊 → 切回來 → `sched_start`（設好從 `hal_user_enter` 開始）。
 
-**fork**（`sched_fork`）：建立子行程；複製**整個**使用者記憶體（沒有 copy-on-write，每頁配一個新 frame 複製；映射到裝置的頁面如 `/dev/fb0` 共用）；複製描述符（共用同一個開檔物件，refcount+1）、訊號設定、目前目錄；`hal_user_fork` 把父行程的系統呼叫 frame 複製到子行程的 kernel 堆疊並把 `eax` 設成 0，所以子行程第一次被排到就像「從 fork 回來」，傳回 0。父行程得到子行程的 pid。
+**fork**（`sched_fork`）：建立子行程；複製使用者記憶體中**存在的頁面**（沒有 copy-on-write，每頁配一個新 frame 複製；映射到裝置的頁面如 `/dev/fb0` 共用；堆疊的 2 MiB 只有用到的頁面才存在，見下）；複製描述符（共用同一個開檔物件，refcount+1）、訊號設定、目前目錄；`hal_user_fork` 把父行程的系統呼叫 frame 複製到子行程的 kernel 堆疊並把 `eax` 設成 0，所以子行程第一次被排到就像「從 fork 回來」，傳回 0。父行程得到子行程的 pid。
 
 **execve**（`user_exec`）：先讀檔、檢查 ELF（失敗就回傳錯誤，原程式不受影響）→ 到這裡不能回頭：釋放舊記憶體、關掉 close-on-exec 的描述符、載入新程式、訊號 handler 回到預設（被忽略的維持忽略）→ 把系統呼叫要回去的位置（`eip`、`esp`）換成新程式的進入點。
 
@@ -96,6 +96,8 @@ shell 的一行 `a | b | c` 是一個 **job**（`user_run_job`）：
 ## 8. 新增的系統呼叫
 
 `fork`、`vfork`、`clone`（只有 fork 語意；`CLONE_THREAD` 回 `ENOSYS`；`child_stack` 有效）、`execve`、`waitpid`、`wait4`、`pipe`、`pipe2`、`dup3`、`dup`／`dup2`／`fcntl(F_DUPFD、F_GETFD、F_SETFD)` 與 `O_CLOEXEC`、`kill` 等訊號呼叫、`getpid`／`getppid`／`getpgid`／`getpgrp`／`setpgid`／`setsid`、`pause`、`rt_sigsuspend`、`rt_sigpending`、`rt_sigreturn`、`sigreturn`。
+
+**堆疊隨需配置**：行程的堆疊是 2 MiB 的一個 region，但啟動時只映射最上面 64 KiB（參數與第一批 frame）；其餘的頁面在程式第一次碰到時才由 page fault 配（`on_fault` → `user_demand_map`：錯誤碼的 present 位元為 0、位址在堆疊 region 的未映射部分 → 配一頁零頁、回傳 1，CPU 重做那個指令；`hal_user_fault_handler_t` 因此改成回傳 int）。系統呼叫的指標檢查（`pages_allow`）也會替沒碰過的堆疊頁面配頁，所以 `read()` 到一個還沒碰過的大緩衝區沒問題。好處：一個行程只要幾頁，fork 只複製存在的頁（以前每個行程固定 2 MiB，64 個行程要 128 MiB）。測試：`userland/stackdeep.c`、`forklimit.c`（fork 到 63 個孩子後 `EAGAIN`，全部收回，沒有 frame 洩漏）。
 
 ## 9. 限制（已知）
 
