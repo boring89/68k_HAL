@@ -40,7 +40,9 @@ typedef enum
     COMMAND_HTTP,
     COMMAND_USB,
     COMMAND_CD,
-    COMMAND_PWD
+    COMMAND_PWD,
+    COMMAND_DMESG,
+    COMMAND_DIAG
 
 } shell_command_id_t;
 
@@ -68,5 +70,13 @@ void shell_dispatch(shell_command_t *cmd);
 /* The built-in commands, for completion. */
 int shell_command_count(void);
 const char *shell_command_name(int index);
+
+/*
+ * The hardware diagnostics (the `diag` command; run before the first prompt when the kernel
+ * command line has "diag"): one page each for cpuinfo, acpi, lspci, usb, disks, net and the
+ * boot messages, each held until a key is pressed or a few seconds pass, so that every page
+ * can be photographed (docs/p520.md).
+ */
+void shell_run_diagnostics(void);
 
 #endif

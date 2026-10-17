@@ -36,6 +36,8 @@
 #include "kernel/net/net.h"
 #include "kernel/sound/sound.h"
 #include "kernel/usb/usb.h"
+#include "kernel/console/history.h"
+#include "kernel/input/event_buffer.h"
 #include "kernel/pci/pci_names.h"
 
 static void cmd_help(
@@ -132,6 +134,13 @@ static void cmd_cd(
     int argc,
     char **argv);
 static void cmd_pwd(
+    int argc,
+    char **argv);
+
+static void cmd_dmesg(
+    int argc,
+    char **argv);
+static void cmd_diag(
     int argc,
     char **argv);
 
@@ -260,7 +269,15 @@ static shell_command_entry_t commands[] =
         {COMMAND_PWD,
          "pwd",
          "Show the current directory of the file tree",
-         cmd_pwd}};
+         cmd_pwd},
+        {COMMAND_DMESG,
+         "dmesg",
+         "Show the boot messages again (dmesg [number of last lines])",
+         cmd_dmesg},
+        {COMMAND_DIAG,
+         "diag",
+         "Hardware diagnostics, one page per subsystem (any key = next page)",
+         cmd_diag}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -1829,6 +1846,145 @@ static void cmd_usb(
         terminal_write(" speed, ");
         terminal_write_line(device.use);
     }
+}
+
+static void cmd_dmesg(
+    int argc,
+    char **argv)
+{
+    static char buffer[CONSOLE_HISTORY_SIZE + 1];
+    int lines = 0;
+
+    if (argc > 1)
+        k_atoi(argv[1], &lines);
+
+    console_history_last_lines(buffer, sizeof(buffer), lines > 0 ? (unsigned int)lines : 0);
+    terminal_write(buffer);
+}
+
+/* Wait for a key press or for `seconds` to pass, whichever is first; keep the network and USB going meanwhile. */
+static void wait_for_key(unsigned int seconds)
+{
+    uint64_t end = hal_timer_ns() + (uint64_t)seconds * 1000000000u;
+
+    while (hal_timer_ns() < end)
+    {
+        input_event_t event;
+        int pressed = 0;
+
+        while (input_event_pop(&event) == 0)
+        {
+            if (event.type == INPUT_EVENT_KEYBOARD && event.data.keyboard.pressed)
+                pressed = 1;
+        }
+
+        if (pressed)
+            return;
+
+        net_poll();
+        usb_poll();
+        hal_cpu_enable_interrupts();
+        hal_cpu_idle();
+    }
+}
+
+#define DIAG_PAGE_SECONDS 10
+#define DIAG_BOOT_LOG_LINES 22
+
+static void diag_page(unsigned int number, unsigned int total, const char *title)
+{
+    char text[16];
+
+    terminal_clear();
+    terminal_write("=== 68k_HAL diagnostics ");
+    k_utoa(number, text);
+    terminal_write(text);
+    terminal_write("/");
+    k_utoa(total, text);
+    terminal_write(text);
+    terminal_write(": ");
+    terminal_write(title);
+    terminal_write_line(" (any key = next page) ===");
+}
+
+static void run_named(const char *name, int argc, char **argv)
+{
+    for (int i = 0; i < COMMAND_TABLE_SIZE; i++)
+    {
+        if (k_strcmp(commands[i].name, name) == 0)
+        {
+            commands[i].handler(argc, argv);
+
+            return;
+        }
+    }
+}
+
+void shell_run_diagnostics(void)
+{
+    static const char *const pages[] = {"cpuinfo", "acpi", "lspci -v", "usb", "disks", "net"};
+    unsigned int total = sizeof(pages) / sizeof(pages[0]) + 2;
+    char *none[1] = {0};
+
+    for (unsigned int i = 0; i < sizeof(pages) / sizeof(pages[0]); i++)
+    {
+        diag_page(i + 1, total, pages[i]);
+
+        if (k_strcmp(pages[i], "lspci -v") == 0)
+        {
+            char *args[3] = {"lspci", "-v", 0};
+
+            run_named("lspci", 2, args);
+        }
+        else
+        {
+            run_named(pages[i], 1, none);
+        }
+
+        wait_for_key(DIAG_PAGE_SECONDS);
+    }
+
+    /* The boot messages: what each driver reported while starting. The end of the log first (the drivers), then the start. */
+    static char log[CONSOLE_HISTORY_SIZE + 1];
+
+    console_history_last_lines(log, sizeof(log), 0);
+
+    size_t length = k_strlen(log);
+    unsigned int line_count = 0;
+
+    for (size_t i = 0; i < length; i++)
+        line_count += log[i] == '\n';
+
+    for (unsigned int part = 0; part < 2; part++)
+    {
+        diag_page(sizeof(pages) / sizeof(pages[0]) + 1 + part, total, part == 0 ? "boot messages (start)" : "boot messages (end)");
+
+        unsigned int first = part == 0 ? 0 : (line_count > DIAG_BOOT_LOG_LINES ? line_count - DIAG_BOOT_LOG_LINES : 0);
+        unsigned int last = part == 0 ? (line_count > DIAG_BOOT_LOG_LINES ? DIAG_BOOT_LOG_LINES : line_count) : line_count;
+        unsigned int line = 0;
+
+        for (size_t i = 0; i < length && line < last; i++)
+        {
+            if (line >= first)
+                terminal_put_char(log[i]);
+
+            line += log[i] == '\n';
+        }
+
+        wait_for_key(DIAG_PAGE_SECONDS);
+    }
+
+    terminal_clear();
+}
+
+static void cmd_diag(
+    int argc,
+    char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    shell_run_diagnostics();
 }
 
 int shell_command_count(void)

@@ -33,18 +33,22 @@ The long-term vision is simple:
 - Ring 3 user mode running static Linux i386 programs, with a C SDK (musl) so that C programs can be ported; Lua, SQLite, the Kilo editor and the Tiny C Compiler already run, and the OS can compile C itself; there is a terminal (ANSI, termios), a toolbox of shell commands with pipes and redirection, `/proc`, `/dev/fb0` and Linux input events ([docs/userland.md](docs/userland.md)). The text console also works in graphics mode
 - Virtual file tree (initrd, RAM disk `/tmp`, `/dev`, the Mac disk's HFS volume at `/hfs`)
 - PCI bus, driver framework and DMA memory ([docs/pci.md](docs/pci.md))
-- Networking: Intel e1000 and virtio-net drivers, ARP, IPv4, ICMP, UDP, TCP, DHCP, DNS, BSD sockets for programs ([docs/net.md](docs/net.md))
-- Storage: ATA (read/write) and AHCI/SATA drivers ([docs/storage.md](docs/storage.md)); USB host controllers are listed ([docs/usb.md](docs/usb.md))
+- Networking: Intel e1000, e1000e/I219 and virtio-net drivers, ARP, IPv4, ICMP, UDP, TCP, DHCP, DNS, BSD sockets for programs ([docs/net.md](docs/net.md))
+- Storage: ATA (read/write), AHCI/SATA and NVMe drivers ([docs/storage.md](docs/storage.md))
+- USB: xHCI host controller with HID keyboards and mice, hot plug ([docs/usb.md](docs/usb.md)); the other controllers are listed
+- Multitasking: processes with their own address spaces, `fork`/`execve`/`wait`, pipes, signals, cooperative scheduling ([docs/process.md](docs/process.md))
+- Interrupts through the local APIC and I/O APIC, PCI MSI ([docs/apic.md](docs/apic.md)); Multiboot2 and UEFI boot; big-screen console
+- Real hardware: a USB image for the Lenovo ThinkStation P520 with safe mode and diagnostics ([docs/p520.md](docs/p520.md))
 - Audio: Intel HD Audio driver and a streaming sound interface ([docs/sound.md](docs/sound.md))
 - Graphics: Bochs/QEMU VGA mode setting at any resolution ([docs/gpu.md](docs/gpu.md))
 
 ### Planned
 
 - 68k compatibility layer
-- Modern memory management (multitasking, per-process address spaces)
+- Preemptive multitasking, copy-on-write fork, threads
 - Modern filesystem (writable, on disk)
-- USB devices (keyboard, mass storage), native GPUs
-- Interrupts through the APIC and using the other processors
+- USB hubs and mass storage, native GPUs
+- Using the other processors (SMP scheduling)
 
 ---
 
@@ -72,6 +76,8 @@ The goal is to preserve the simplicity, usability, and software philosophy of th
 | `xorriso` | `xorriso` | Used by `grub-mkrescue` to write the ISO |
 | `mformat` | `mtools` | Used by `grub-mkrescue` to build the EFI image |
 | `qemu-system-i386` | `qemu-system-x86` | Run the kernel and the in-kernel self tests |
+| OVMF (UEFI firmware for QEMU) | `ovmf` | Only for `make test-uefi` and `make test-usb-image` (not part of `make test`) |
+| GRUB UEFI modules | `grub-efi-amd64-bin` | The UEFI half of the ISO and the USB image (`grub-mkrescue` adds it when present) |
 | `python3` | `python3` | Generate the test disk images (`tools/make_*_image.py`); also the optional `tools/boot_log.py` and `tools/fb_check.py` |
 | `hformat`, `hcopy`, ... | `hfsutils` | Build the HFS test volume (`tools/make_hfs_image.sh`). It keeps its "current volume" in `~/.hcwd`; the script uses a temporary `HOME` so yours is untouched |
 
@@ -83,7 +89,8 @@ sudo apt install build-essential nasm binutils binutils-m68k-linux-gnu grub2-com
 
 ```bash
 make            # build/kernel.elf
-make iso        # build/68k_HAL.iso
+make iso        # build/68k_HAL.iso (BIOS and UEFI)
+make usb-image  # build/68k_HAL_usb.img for a USB stick, with a boot menu (see docs/p520.md)
 make run        # boot the ISO in QEMU, serial output on stdio
 make test       # boundary check, host unit tests, QEMU self tests, shell and video tests
 make sdk        # the C SDK (musl) in build/sdk; downloads musl on the first run

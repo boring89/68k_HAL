@@ -11,7 +11,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -132,6 +132,26 @@ iso: $(BUILD)/kernel.elf $(BUILD)/kernel-gfx.elf $(INITRD)
 	cp grub.cfg $(ISO_ROOT)/boot/grub/
 	grub-mkrescue -o $(BUILD)/68k_HAL.iso $(ISO_ROOT)
 
+# A bootable image for a USB stick (BIOS/CSM and UEFI): GRUB menu with normal, safe mode,
+# hardware diagnostics and Mac entries. It is only built here; writing it to a stick is up to the
+# user (docs/p520.md). With MAC_ROM and MAC_DISK existing, copies of them go on the image (local
+# use only; the image must never be committed or shared).
+USB_IMAGE := $(BUILD)/68k_HAL_usb.img
+usb-image: $(BUILD)/kernel.elf $(BUILD)/kernel-gfx.elf $(INITRD) grub-usb.cfg
+	rm -rf $(BUILD)/usb_root
+	mkdir -p $(BUILD)/usb_root/boot/grub
+	cp $(BUILD)/kernel.elf $(BUILD)/kernel-gfx.elf $(INITRD) $(BUILD)/usb_root/boot/
+	cp grub-usb.cfg $(BUILD)/usb_root/boot/grub/grub.cfg
+	@if [ -f "$(MAC_ROM)" ] && [ -f "$(MAC_DISK)" ]; then \
+		echo "usb-image: adding the Mac ROM and disk (local copy)"; \
+		cp "$(MAC_ROM)" $(BUILD)/usb_root/mac_rom; cp "$(MAC_DISK)" $(BUILD)/usb_root/mac_disk; \
+	else echo "usb-image: no Mac ROM/disk (MAC_ROM, MAC_DISK): the Mac entry will say so"; fi
+	grub-mkrescue -o $(USB_IMAGE) $(BUILD)/usb_root
+	@ls -l $(USB_IMAGE)
+
+test-usb-image: usb-image
+	python3 -I tools/usb_image_test.py $(USB_IMAGE)
+
 run: iso
 	qemu-system-i386 -cdrom $(BUILD)/68k_HAL.iso -serial stdio -netdev user,id=n0 -device e1000,netdev=n0
 
@@ -150,6 +170,7 @@ HOST_LIB_SOURCES := \
 	drivers/ps2_keyboard/scancode.c \
 	drivers/ps2_mouse/mouse_packet.c \
 	kernel/input/event.c \
+	kernel/console/history.c \
 	kernel/usb/descriptor.c \
 	kernel/usb/hid.c \
 	kernel/input/linux_keys.c \
@@ -615,6 +636,7 @@ test-shell: iso
 		"uptime=up 0:" \
 		"box cat /proc/cpuinfo=vendor_id" \
 		"seq 20 | grep 1 | wc -l=11" \
+		"dmesg=Kernel Booting" \
 		"seq 1000 | grep 7 | wc -l=271" \
 		"run /bin/forkexec=grandchild chain: 4" \
 		"run /bin/pipes=default SIGPIPE: killed 1 by signal 13" \

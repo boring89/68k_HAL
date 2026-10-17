@@ -6,6 +6,7 @@
 #include "smp.h"
 
 #include "hal/acpi.h"
+#include "hal/boot.h"
 #include "hal/cpu.h"
 #include "hal/mmu.h"
 
@@ -15,6 +16,7 @@
 #include "arch/x86/cpu/cpu.h"
 
 #include "kernel/lib/k_memory.h"
+#include "kernel/lib/k_string.h"
 #include "kernel/log/log.h"
 
 #include <stddef.h>
@@ -126,6 +128,12 @@ unsigned int smp_start(void)
     const hal_acpi_info_t *acpi = hal_acpi_info();
 
     if (acpi == NULL || acpi->cpu_count <= 1 || tsc_khz() == 0)
+        return cpus_online;
+
+    /* Safe mode: "nosmp" on the kernel command line leaves the other processors asleep. */
+    const char *command_line = hal_boot_cmdline();
+
+    if (command_line != NULL && k_strstr(command_line, "nosmp") != NULL)
         return cpus_online;
 
     /* Already done when the interrupts run through the APIC; maps and enables it otherwise. */

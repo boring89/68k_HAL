@@ -6,12 +6,14 @@
 #include "main.h"
 
 #include "kernel/console/console.h"
+#include "kernel/console/history.h"
 #include "kernel/terminal/terminal.h"
 #include "kernel/terminal/input.h"
 #include "kernel/shell/command.h"
 #include "kernel/shell/complete.h"
 #include "kernel/shell/shell.h"
 
+#include "kernel/lib/k_string.h"
 #include "kernel/log/log.h"
 #include "kernel/printf/printf.h"
 
@@ -36,6 +38,7 @@
 #include "kernel/display/text_display.h"
 #include "kernel/panic/panic.h"
 
+#include "hal/boot.h"
 #include "hal/cpu.h"
 #include "hal/framebuffer.h"
 #include "hal/init.h"
@@ -54,6 +57,7 @@ void kernel_main(void)
 {
     hal_init_console();
     console_init();
+    console_history_start();
 
     hal_init_early();
 
@@ -135,6 +139,12 @@ void kernel_main(void)
 
     /* The prompt comes last, after every boot message, so typing starts on
      * the prompt's line. */
+    /* "diag" on the kernel command line (the diagnostics entry of the USB image's menu). */
+    const char *command_line = hal_boot_cmdline();
+
+    if (command_line != 0 && k_strstr(command_line, "diag") != 0)
+        shell_run_diagnostics();
+
     shell_init();
 
     uint32_t last_tick = 0;
