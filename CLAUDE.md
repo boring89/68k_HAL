@@ -57,7 +57,7 @@ make clean
 hal/           HAL 介面（只有 .h）：cpu、irq、timer、mmu（含位址空間）、task（context 切換）、usermode、boot（含 module）、framebuffer、clock、init、acpi、pci、dma、usermode
 arch/x86/      CPU：cpu（hal_cpu、CPUID、控制暫存器）、gdt（含 TSS）、interrupt（IDT、例外、IRQ stub）、mmu（分頁、hal_mmu、space = 每個行程一份分頁目錄）、task（context 切換、FPU）、io（port I/O）、user（ring 3、int 0x80）、test
 platform/pc/   PC 平台：boot（Multiboot 進入點、hal_boot）、video（framebuffer、BGA 模式設定）、rtc（CMOS 時鐘）、interrupt（8259 PIC、local APIC、I/O APIC、hal_irq；見 docs/apic.md）、timer（PIT、TSC、hal_timer）、acpi、smp（INIT-SIPI-SIPI）、pci（列舉、驅動清單）、dma、vmap（0xE0000000 視窗）、hal_init.c、test
-drivers/       裝置驅動：vga、serial、ps2_keyboard、ps2_mouse、ata（讀寫，見 docs/storage.md）、ahci（SATA）、e1000 與 virtio_net（網卡）、hda（Intel HD Audio）、bga（Bochs VBE 顯示）、usb_host（列舉 USB 控制器）、xhci（xHCI 控制器、HID 鍵盤滑鼠）
+drivers/       裝置驅動：vga、serial、ps2_keyboard、ps2_mouse、ata（讀寫，見 docs/storage.md）、ahci（SATA）、e1000 與 virtio_net（網卡）、hda（Intel HD Audio）、bga（Bochs VBE 顯示）、usb_host（列舉 USB 控制器）、xhci（xHCI 控制器、HID 鍵盤滑鼠）、nvme（NVMe，輪詢）
 kernel/        與硬體無關的核心：main.c、panic、memory（pmm、heap）、block（區塊裝置、ramdisk）、fs（apm、hfs 唯讀、volume；見 docs/hfs.md）、display（含 fb_scale、fbcon 圖形模式文字終端）、console、terminal（含 mirror、ANSI 解析器 ansi）、keyboard（keycode、state、keychar、keyseq 按鍵序列）、input、shell、log、printf、lib、m68k（guest RAM 與示範）、mac（在 kernel 裡執行 Mac；見 docs/mac.md）、user（ELF 載入器、系統呼叫、console；見 docs/userland.md）、vfs（ramfs、tarfs、hfsfs、devfs 的 console；見 docs/userland.md）、net（packet 純函式、tcp、net 堆疊；見 docs/net.md）、usb（控制器註冊表；見 docs/usb.md）、sound（見 docs/sound.md）、pci（名稱表；見 docs/pci.md）、test
 emu/m68k/      68k 虛擬機：Musashi 的封裝層（vm：含可選的 bus 與逐指令 hook）、A-line trap 分派（trap）、Musashi 設定（m68kconf.h）；freestanding/ 是 kernel 建置用的 libc 替身
 emu/mac/       Mac IIci 機器模型（M-P3，見 docs/mac.md）：記憶體配置與模擬 opcode（mac.c）、ROM 修補（rom_patch.c）、VIA（via.c）、RBV/DAC/視訊（video.c）、IWM、SCSI、.Disk 驅動（disk.c、stub.s）；與硬體無關，檔案由使用者提供，不在 repo
@@ -149,7 +149,7 @@ Claude 依照上方工作規則直接實作。
 
 - `emu/mac`：Mac IIci 機器模型與 `kernel/mac`（P3，見 `docs/mac.md`）。同樣是由自動排程一次做完的，沒有走協作模式的逐步確認，使用者尚未審核；之後修改時請先帶使用者過一遍 `docs/mac.md`
 
-- P7（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：Multiboot2 與 UEFI 開機（`docs/hal.md`）、行程與排程與訊號與管線（`docs/process.md`）、APIC 與 MSI（`docs/apic.md`）、xHCI 與 USB 鍵盤滑鼠（`docs/usb.md`）。P7 的規劃與紀錄在 `P7_PLAN.md`（不進 git）。
+- P7（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：Multiboot2 與 UEFI 開機（`docs/hal.md`）、行程與排程與訊號與管線（`docs/process.md`）、APIC 與 MSI（`docs/apic.md`）、xHCI 與 USB 鍵盤滑鼠（`docs/usb.md`）、NVMe（`docs/storage.md`）。P7 的規劃與紀錄在 `P7_PLAN.md`（不進 git）。
 - P6（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：CPU（`docs/cpu.md`）、使用者模式與 C SDK 與 VFS（`docs/userland.md`）、PCI 與驅動框架（`docs/pci.md`）、網路（`docs/net.md`）、聲音（`docs/sound.md`）、顯示（`docs/gpu.md`）、Mac 的聲音／時鐘／磁碟寫入（`docs/mac.md` 第 11、12 節）。P6 的規劃與紀錄在 `P6_PLAN.md`（不進 git）。
 
 （之後新增的元件加入此清單）

@@ -66,6 +66,23 @@ QEMU 的 `-cdrom` 掛在 secondary channel，所以不會被誤認。
 
 讀寫：`READ DMA EXT`（0x25）、`WRITE DMA EXT`（0x35）、寫完 `FLUSH CACHE EXT`（0xEA）。每個命令最多 128 個扇區（暫存緩衝區大小；驅動自己分批），用輪詢等 `CI` 清除。限制：沒有 ATAPI、沒有 port multiplier、沒有熱插拔、沒有中斷、只用 command slot 0。
 
+## 4.6 NVMe（`drivers/nvme`，P7 R5，使用者尚未審核）
+
+比喻：NVMe 像一間**有很多櫃台的銀行**，而 AHCI／ATA 是只有一個窗口。每個櫃台是一對**佇列**：提交佇列（SQ，我們放「工單」，每張 64 位元組）與完成佇列（CQ，硬碟放「回條」，每張 16 位元組）。放好工單後敲一下**門鈴**（暫存器，寫入新的尾端位置）；硬碟做完把回條放進 CQ，並翻轉回條上的 **phase 位元**（每繞佇列一圈翻一次，所以我們能分辨新舊回條）；我們讀完回條也敲 CQ 的門鈴。佇列 0 是管理佇列（建立佇列、identify），佇列 1 是我們建立的 I/O 佇列。
+
+```
+ 啟動：CC.EN=0 → 等 RDY=0 → 設 AQA/ASQ/ACQ（管理佇列的大小與位址）→ CC.EN=1（設好 64/16 位元組項目大小）→ 等 RDY=1
+       Identify Controller（型號、MDTS 單次傳輸上限）→ Identify Namespace 1（區塊數 NSZE、區塊大小 2^LBADS）
+       Create I/O Completion Queue（QID 1）→ Create I/O Submission Queue（QID 1，掛在 CQ 1）
+ 讀寫：Read(0x02)／Write(0x01)，起始 LBA、區塊數-1、資料位址 PRP1/PRP2；寫完送 Flush(0x00)
+```
+
+**PRP**（physical region page）：描述資料在哪些實體頁：1 頁只用 PRP1；2 頁用 PRP1 和 PRP2；更多則 PRP2 指向一頁「頁位址清單」（每項 64 位元，本驅動最多 128 KiB 一次，31 項）。資料經過 128 KiB 的 bounce buffer（`hal_dma_alloc`），比較大的 `block_read/write` 自動拆成多個命令。
+
+限制：只用 namespace 1、一個 I/O 佇列、一次一個命令、輪詢（建立 CQ 時 IEN=0，沒有中斷）、不支援 MSI-X／命名空間管理／電源狀態／scatter-gather 以外的 SGL；controller 最小頁面大小必須是 4 KiB。**QEMU 驗證，未在實體 NVMe（P520 的 Kingston KC3000）上驗證**。
+
+測試：`kernel/test/selftest.c` 的 `test_nvme_disk`（QEMU `-device nvme`，256 KiB 映像：逐位元組比對全部內容、讀超出範圍失敗、不同大小的寫入—讀回—還原：1 頁、2 頁（PRP2 = 第二頁）、17 個區塊（PRP list）、全部 512 個區塊（拆成兩個命令））。`disks` 會列出 `nvme0`。
+
 ## 5. 測試
 
 - `tests/host/test_block.c`：註冊表、範圍檢查（含 `lba + count` 溢位）、ramdisk。

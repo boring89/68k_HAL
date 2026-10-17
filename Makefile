@@ -504,6 +504,7 @@ QEMU_TEST_FLAGS := -display none -serial stdio -no-reboot -smp 4 \
 	-device qemu-xhci -device usb-ehci -device piix3-usb-uhci \
 	-device ich9-ahci,id=ahci -drive id=sata0,file=$(BUILD)/test/ahci_test.img,format=raw,if=none \
 	-device ide-hd,drive=sata0,bus=ahci.0 \
+	-drive id=nvm0,file=$(BUILD)/test/nvme_test.img,format=raw,if=none -device nvme,serial=nvme0,drive=nvm0 \
 	-netdev user,id=n0 -device e1000,netdev=n0 \
 	-audiodev wav,id=snd0,path=$(BUILD)/test/sound.wav \
 	-device intel-hda -device hda-output,audiodev=snd0 \
@@ -525,11 +526,15 @@ $(BUILD)/test/ahci_test.img: FORCE
 	@mkdir -p $(dir $@)
 	@python3 -I -c "import sys; open(sys.argv[1], 'wb').write(bytes((s * 7 + i) & 255 for s in range(128) for i in range(512)))" $@
 
+$(BUILD)/test/nvme_test.img: FORCE
+	@mkdir -p $(dir $@)
+	@python3 -I -c "import sys; open(sys.argv[1], 'wb').write(bytes((s * 11 + i) & 255 for s in range(512) for i in range(512)))" $@
+
 $(BUILD)/test/ata_test.img: Makefile
 	@mkdir -p $(dir $@)
 	@python3 -I -c "import sys; open(sys.argv[1], 'wb').write(bytes((s * 13 + i) & 255 for s in range(300) for i in range(512)))" $@
 
-test-qemu: $(BUILD)/test/module_test.txt $(BUILD)/images/disk.img $(BUILD)/test/ata_test.img $(BUILD)/test/ahci_test.img $(INITRD)
+test-qemu: $(BUILD)/test/module_test.txt $(BUILD)/images/disk.img $(BUILD)/test/ata_test.img $(BUILD)/test/ahci_test.img $(BUILD)/test/nvme_test.img $(INITRD)
 	$(MAKE) --no-print-directory BUILD=$(BUILD)/test \
 		EXTRA_CFLAGS=-DKERNEL_SELFTEST $(BUILD)/test/kernel.elf
 	@timeout 60 qemu-system-i386 -kernel $(BUILD)/test/kernel.elf \

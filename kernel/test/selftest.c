@@ -380,6 +380,50 @@ static void test_ahci_disk(void)
     check_write_roundtrip(disk, 0, 128); /* more than one command */
 }
 
+/* The NVMe drive of test-qemu: 512 sectors of 512 bytes filled with (sector * 11 + byte) & 255. */
+static void test_nvme_disk(void)
+{
+    block_device_t *disk = block_device_find("nvme0");
+
+    SELFTEST_ASSERT(disk != 0);
+
+    if (disk == 0)
+        return;
+
+    SELFTEST_ASSERT(disk->block_size == 512);
+    SELFTEST_ASSERT(disk->block_count == 512);
+
+    /* All of it: 256 KiB is more than the driver moves with one command (128 KiB), so it is split. */
+    uint8_t *sectors = kmalloc(512 * 512);
+
+    SELFTEST_ASSERT(sectors != 0);
+
+    if (sectors == 0)
+        return;
+
+    SELFTEST_ASSERT(block_read(disk, 0, 512, sectors) == 0);
+
+    int bad = 0;
+
+    for (unsigned int s = 0; s < 512; s++)
+    {
+        for (unsigned int i = 0; i < 512; i++)
+        {
+            if (sectors[s * 512 + i] != (uint8_t)(s * 11 + i))
+                bad++;
+        }
+    }
+
+    SELFTEST_ASSERT(bad == 0);
+    SELFTEST_ASSERT(block_read(disk, 512, 1, sectors) == -1); /* past the end */
+    kfree(sectors);
+
+    check_write_roundtrip(disk, 511, 1);
+    check_write_roundtrip(disk, 100, 5);   /* two pages: PRP2 is the second page */
+    check_write_roundtrip(disk, 200, 17);  /* more: PRP2 is a list */
+    check_write_roundtrip(disk, 0, 512);   /* more than one command */
+}
+
 /*
  * test-qemu adds one controller of each of three kinds: qemu-xhci, usb-ehci and
  * piix3-usb-uhci. They must be found with the right type, version and ports.
@@ -912,6 +956,7 @@ void selftest_run(void)
     SELFTEST_RUN(test_ata_disk);
     SELFTEST_RUN(test_ata_write);
     SELFTEST_RUN(test_ahci_disk);
+    SELFTEST_RUN(test_nvme_disk);
     SELFTEST_RUN(test_usb_hosts);
     SELFTEST_RUN(test_m68k_guest_ram_size);
     SELFTEST_RUN(test_m68k_guest_program);

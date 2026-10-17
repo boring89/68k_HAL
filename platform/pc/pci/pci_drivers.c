@@ -9,6 +9,7 @@
 #include "drivers/bga/bga.h"
 #include "drivers/e1000/e1000.h"
 #include "drivers/hda/hda.h"
+#include "drivers/nvme/nvme.h"
 #include "drivers/usb_host/usb_host.h"
 #include "drivers/virtio_net/virtio_net.h"
 #include "drivers/xhci/xhci.h"
@@ -26,6 +27,7 @@ static const hal_pci_driver_t *const drivers[] = {
     &bga_pci_driver,
     &e1000_pci_driver,
     &hda_pci_driver,
+    &nvme_pci_driver,
     &xhci_pci_driver, /* before usb-host: it lists the controller and runs it */
     &usb_host_pci_driver,
     &virtio_net_pci_driver,
