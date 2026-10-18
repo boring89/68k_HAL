@@ -19,6 +19,9 @@
 #   mouse:DX,DY      relative mouse move
 #   button:down|up   left button
 #   monitor:TEXT     a QEMU monitor command, e.g. monitor:system_powerdown (the ACPI power button)
+#   mark             remember how far the serial output goes (for expect-new and reject-new)
+#   expect-new:TEXT  TEXT must be in the serial output after the mark
+#   reject-new:TEXT  TEXT must not be in the serial output after the mark
 #   expect:TEXT      the serial output must contain TEXT (fails the run otherwise)
 #   quit             wait for QEMU to exit by itself (the Mac's Shut Down), at most 120 s; fails if it does not
 
@@ -104,6 +107,7 @@ def main():
                     else:
                         cmd("sendkey " + KEYS.get(ch, ch))
 
+            mark = 0
             for step in args.run:
                 kind, _, value = step.partition(":")
                 if kind == "shell":
@@ -125,6 +129,14 @@ def main():
                 elif kind == "expect":
                     if value not in log():
                         failures.append(f"missing in serial output: {value}")
+                elif kind == "mark":
+                    mark = len(log())
+                elif kind == "expect-new":
+                    if value not in log()[mark:]:
+                        failures.append(f"missing in serial output since the mark: {value}")
+                elif kind == "reject-new":
+                    if value in log()[mark:]:
+                        failures.append(f"in serial output since the mark, but should not be: {value}")
                 elif kind == "quit":
                     try:
                         process.wait(timeout=120)
