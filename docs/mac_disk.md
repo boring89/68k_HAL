@@ -203,3 +203,14 @@ make test-macdisk    # make test 裡：合成的小 GPT 映像（沒有 Mac 系�
   - `cache bench sys_a 8`，i440fx（IDE，ATA PIO 輪詢）：第一次 21796 ms、第二次 11 ms。
   - Mac 開機到 Finder：兩次都是 300 幀、約 4980 ms，因為 QEMU 的映像檔在主機的 page cache 裡（磁碟本來就快），而且 Mac 以每秒 60 幀的步調執行；磁碟讀取的時間只有在超過一幀的空檔時才看得出來。第二次執行的命中率 93%（只多讀了 2 行）。實機（SATA SSD）的差異要在 P520 上量。
 
+
+## 12. 已知的限制
+
+- 只支援 UEFI；Secure Boot 要關。
+- 系統卷宗的大小是原始映像的大小（25 MB），不是分割區的 1 GiB；Applications 是 2 GiB 的 HFS（HFS 的配置區塊 32 KiB，小檔案浪費空間——第二階段的 eHFS 解決）。
+- Mac 只接受 512 位元組區塊的磁碟（4 KiB 區塊的 NVMe 不行）。
+- 疊加層的資料區不回收：同一個區塊改多次只佔一塊，但「改過的區塊」越來越多時只能 `macsys reset` 或 `macsys promote`。4 GiB 的疊加層對 1 GiB 的系統槽綽綽有餘。
+- Applications 在桌面上的圖示是一般的文件圖示（.Disk 驅動沒有提供磁碟圖示；只影響外觀）。
+- 多顆磁碟都有 68k_HAL 配置時（例如另外插著寫了同一個映像的隨身碟），用的是第一顆找到的。
+- Mac 的 PRAM（控制台的部分設定）每次執行都是新的（`docs/mac.md` 第 14.4 節）。
+- 主機電源鍵：第一次檢查時 kernel 把機器切到 ACPI 模式並使用 SCI 中斷（沒有 AML 直譯器；不明來源的 SCI 連續 64 次就停用中斷、改成輪詢）。只在 QEMU 驗證過。
