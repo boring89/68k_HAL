@@ -108,7 +108,7 @@ Mac IIci 的畫面是 640×480。在現代螢幕上很小，所以 `mac 2` 先�
 
 ## 4.5 實機（P7 R6）：用韌體給的 framebuffer，不寫 NVIDIA 驅動
 
-P520 的顯示卡是 GeForce GTX 1070（NVIDIA GP104，PCI 10de:1b81）。**不寫它的驅動**（沒有公開的暫存器文件，GPU 初始化與模式設定要幾十萬行程式；Nouveau 是 GPL-2.0-only，也不能複製）。我們只用**開機時韌體已經設定好的 framebuffer**：
+P520 的顯示卡是 GeForce GTX 1070（NVIDIA GP104，PCI 10de:1b81）。**不寫它的驅動**（GPU 初始化與模式設定的份量很大，而且只能在實機驗證）。P9 更正：nouveau 的顯示引擎程式（例如 `nvkm/engine/disp/gp102.c`）其實是 **MIT** 授權，NVIDIA 的 open-gpu-doc 也有 MIT 的顯示類別標頭；可行性與分階段計畫見 `docs/nvidia_research.md`。我們只用**開機時韌體已經設定好的 framebuffer**：
 
 ```
 UEFI：韌體的 GOP（Graphics Output Protocol）已經設好模式（通常是螢幕的原生解析度，例如 1920x1080）
@@ -170,5 +170,5 @@ CSM（傳統 BIOS）：顯示卡的 VBIOS 提供 VBE 模式，GRUB 用 Multiboot
 
 ## 5. 不做的事
 
-- **NVIDIA**：需要專有韌體與未公開的文件，不做。
+- **NVIDIA**：目前不做；可行性研究（資料來源、授權、分階段）見 `docs/nvidia_research.md`。
 - 3D 加速、GPU 命令佇列（`engine.cpp`）：不做；畫面全由 CPU 寫像素。
