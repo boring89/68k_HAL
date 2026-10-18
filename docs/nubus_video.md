@@ -32,7 +32,7 @@ NuBus 每個 slot `$s`（`$9`–`$E`）有兩段位址：
  0xFCFFFFFF └──────────────────────────┘  所以 ROM 的位元組在位址上是連續的
 ```
 
-- 只有 slot `$C` 回應。P8 修好的「空 slot 不能看起來像有卡」（`docs/mac.md` 第 4 節）仍成立：`SLOT_PROBE` 只對 slot `$C` 的位址回報「有卡」（真的讀一個位元組），其他 slot 照舊跳到 bus error 的復原位址。
+- 只有 slot `$C`（`mac cards=2` 時再加 `$D`，第 7.5 節）回應。P8 修好的「空 slot 不能看起來像有卡」（`docs/mac.md` 第 4 節）仍成立：`SLOT_PROBE` 只對 slot `$C` 的位址回報「有卡」（真的讀一個位元組），其他 slot 照舊跳到 bus error 的復原位址。
 - VRAM 用 sResource 的 **MajorBaseOS**（`0x0C`）＋ `sRsrcFlags` 的 `f32BitMode`；結果：ROM 的開機視訊碼把 `ScrnBase` 設成 `0xC0000000`（未知 1 解決）。驅動的 Open 也把 `dCtlDevBase` 寫成同一個值（保險）。
 
 ## 3. declaration ROM 的結構
@@ -65,8 +65,8 @@ NuBus 每個 slot `$s`（`$9`–`$E`）有兩段位址：
 ```
 
 - 色深的 mode 編號：`0x80`=1、`0x81`=2、`0x82`=4、`0x83`=8、`0x84`=16、`0x85`=32 位元（Apple 的慣例：同一張卡的色深依序編號；計畫原本把 16 位元列為「可選」，因為只差一種像素格式的轉換，所以一起做）。
-- **VPBlock 只能描述一種解析度**。多解析度的作法跟 Basilisk 一樣：驅動切換解析度時，原生端直接改 ROM 緩衝區裡的 VPBlock（rowBytes、bounds），重算 CRC，再由驅動呼叫 `_SUpdateSRT` 讓 Slot Manager 更新。ROM 在記憶體裡是我們自己的緩衝區，所以可以改。
-- 產生器：`emu/mac/nubus_rom.c` 在執行時（`mac_init` 之後）產生，內容完全自己定義。比起 build 時用 Python 產生，執行時產生的好處是解析度清單與預設模式可以由 kernel 參數決定。CRC 演算法（*Designing Cards* 的 "CRC"）：每個位元組先把 32 位元的和左旋 1 位再加上該位元組，CRC 欄位本身算成 0。
+- **VPBlock 只能描述一種解析度**。多解析度的作法跟 Basilisk 一樣：驅動切換解析度時，原生端直接改 ROM 緩衝區裡的 VPBlock（rowBytes、bounds）並重算 CRC。ROM 在記憶體裡是我們自己的緩衝區，所以可以改。（設計時打算再呼叫 `_SUpdateSRT`；實作沒有呼叫：SRT 指向的 sResource 位置沒變，Slot Manager 每次都從 ROM 讀，改過的 VPBlock 直接生效，Monitors 的切換正常。）
+- 產生器：`emu/mac/nubus_video.c` 的 `build_rom`，在 `mac_card_attach` 時產生，內容完全自己定義。比起 build 時用 Python 產生，執行時產生的好處是解析度清單與預設模式可以由 kernel 參數決定。CRC 演算法（*Designing Cards* 的 "CRC"）：每個位元組先把 32 位元的和左旋 1 位再加上該位元組，CRC 欄位本身算成 0。
 
 ## 4. 驅動程式（DRVR）
 
@@ -93,17 +93,17 @@ NuBus 每個 slot `$s`（`$9`–`$E`）有兩段位址：
 | Status `cscGetMode`、`cscGetEntries`、`cscGetPages`、`cscGetBaseAddr`、`cscGetGray`、`cscGetInterrupt`、`cscGetGamma`、`cscGetDefaultMode` | 2–9 | 回報 |
 | Status `cscGetCurMode`、`cscGetConnection`、`cscGetModeTiming`、`cscGetPreferredConfiguration`、`cscGetNextResolution`、`cscGetVideoParameters` | 10、12、13、16、17、18 | Display Manager 用來列出解析度 |
 
-**VBL 中斷**：游標與 VBL task 由「主螢幕的垂直消隱中斷」驅動。真的卡拉 NuBus 的 /NMRQ，IIci 的 RBV 在 slot 中斷旗標（`0x02`，低電位有效）的 bit 0（= slot `$9`）反映，ROM 的 level 2 處理程式呼叫該 slot 的中斷佇列。所以：
+**VBL 中斷**：游標與 VBL task 由「主螢幕的垂直消隱中斷」驅動。真的卡拉 NuBus 的 /NMRQ，IIci 的 RBV 在 slot 中斷旗標（`0x02`，低電位有效）的 bit（slot − 9；slot `$C` = bit 3）反映，ROM 的 level 2 處理程式呼叫該 slot 的中斷佇列。所以：
 
 - 模型每幀（60 Hz）讓卡的中斷成立（`cscSetInterrupt` 打開時），RBV 的 SIFR bit 3（slot `$C`）變 0。
-- 驅動的 Open 用 `_SIntInstall` 掛一個 slot 中斷處理程式（`SQElem`），它用模擬 opcode 清掉卡的中斷，再呼叫 `JVBLTask`（低記憶體 `0xD28`，D0 = slot 9）執行這個 slot 的 VBL task，回傳 D0 = 1。
+- 驅動的 Open 用 `_SIntInstall` 掛一個 slot 中斷處理程式（`SQElem`），它用模擬 opcode 清掉卡的中斷，再呼叫 `JVBLTask`（低記憶體 `0xD28`，D0 = 這張卡的 slot）執行這個 slot 的 VBL task，回傳 D0 = 1。
 - 未知 2（已解決）：SIFR 的 bit 0–5 = slot `$9`–`$E`（Linux `via.c` 的對應），ROM 的 level 2 分派照這個呼叫 slot 的中斷佇列；但 slot 的中斷遮罩（RBV `0x12`）要由 InitHW 打開，而我們跳過了 InitHW，所以 `mac_reset` 在有卡時把 slot 位元打開（`RBV_SIER_SLOTS`）。
 
 ## 5. 多解析度與 Display Manager
 
 - 解析度清單（顯示模式 ID `0x80` 起）：640x480、800x600、1024x768、1152x870、1280x720、1280x960、1280x1024、1440x900、1600x1200、1920x1080、1920x1200、2560x1440、3840x2160。
 - `cscGetNextResolution`：上一個 ID 是 `0xFFFFFFFE` 時回第一個；`0` 回目前的；最後一個之後回 `0xFFFFFFFD`。`cscGetVideoParameters`（ID＋色深 → VPBlock）讓 Display Manager 不必讀 ROM。`cscGetConnection` 回報 "modeless connection"（`kModelessConnect` = 8，所有模式都 valid/safe）。
-- `cscSwitchMode`：原生端換模式、改 ROM 的 VPBlock 並重算 CRC；驅動接著呼叫 `_SUpdateSRT`。
+- `cscSwitchMode`：原生端換模式、改 ROM 的 VPBlock 並重算 CRC（不需要 `_SUpdateSRT`，見第 3 節）。
 - 未知 3（已解決）：System 7.5.3 的 Monitors（v7.5.5）在「Options…」對話框列出解析度（"1024 × 768, 60Hz"…，經 `cscGetNextResolution`），按 OK 就即時切換（`cscSwitchMode`），桌面圖示重新排列。
 
 ## 6. 原生端與 kernel 的介面
@@ -124,7 +124,7 @@ int mac_card_render(mac_t *mac, uint32_t *out, uint32_t out_pitch, uint32_t *row
 ```
 
 - **髒區**：bus 寫入 VRAM 時把「位移 >> 10」那一格標記；render 只轉換碰到髒格的列，並回報哪些列變了（kernel 只把那些列放大輸出）。調色盤改變、模式改變時整張重畫。
-- **kernel**（`kernel/mac/machine.c`）：畫面大小跟著卡的模式；`mac scale=1|1.5|2|auto`、`mac res=WxH`。整數倍用最近鄰；1.5 倍用最近鄰（每 2 個 Mac 像素變 3 個；比雙線性快，Mac 的 1 位元圖樣不會糊掉）。`auto`：在 {2, 1.5, 1} 中選「能放進實體螢幕且覆蓋面積最大」的組合，平手時取較大的比例。
+- **kernel**（`kernel/mac/machine.c`）：畫面大小跟著卡的模式；`mac scale=…`、`mac res=WxH`（實際的選項見第 8 節）。整數倍用最近鄰；1.5 倍用最近鄰（每 2 個 Mac 像素變 3 個；比雙線性快，Mac 的 1 位元圖樣不會糊掉）。`auto`：在 {2, 1.5, 1} 中選「能放進實體螢幕且覆蓋面積最大」的組合，平手時取較大的比例。
 - **預設解析度**：依實體螢幕自動選（同上規則）：2560x1440 → Mac 1280x720 以 2x 填滿；1920x1080 → 1280x720 以 1.5x 填滿；640x480 → 640x480 以 1x。
 - **內建視訊**：預設關閉——RBV 回報的螢幕感測線改成 7（「沒有接螢幕」，*Guide to the Macintosh Family Hardware*：感測線 111 = 沒有顯示器）。結果（未知 4）：開機後只有一個 GDevice，是卡（`make test-rom` 檢查）。`mac_run -I`、kernel `mac builtin` 切回內建視訊（640x480），用來比較與除錯。
 
@@ -137,7 +137,7 @@ int mac_card_render(mac_t *mac, uint32_t *out, uint32_t out_pitch, uint32_t *row
 | 色深 | Monitors 可切 B&W、4、16、256、Thousands、Millions（截圖 `build/p9/`，`make clean` 會刪） |
 | 解析度 | Monitors「Options…」列出 13 種，切換成功：800x600、1280x720、1920x1080、2560x1440、3840x2160（`make test-rom` 檢查其中三種） |
 | 4K × 32 位元 | **不提供**：3840x2160 只到 16 位元（下面的「坑 4」） |
-| 效能（QEMU/KVM，`make test-mac-perf`） | 實體 2560x1440、Mac 1280x720×32 位元 2x：不節流 178.8 frames/s；每幀模擬 5.3 ms；每次畫面更新 render 0.4 ms＋螢幕 2.2 ms（平均 72 列） |
+| 效能（QEMU/KVM，`make test-mac-perf`） | 實體 2560x1440、Mac 1280x720×32 位元 2x：不節流約 175–183 frames/s；每幀模擬約 5.5 ms（各模式的表見下面「效能」） |
 | 開機時的色深 | `mac depth=…`（PRAMInitData＋修好的 CLKNOMEM，N8） |
 
 **踩過的坑**：
@@ -189,6 +189,6 @@ int mac_card_render(mac_t *mac, uint32_t *out, uint32_t out_pitch, uint32_t *row
 | `tools/mac_run.c` | `-C WxH[xD]`（卡的起始解析度與色深）、`-I`（內建視訊） |
 | `tools/mac_monitors.sh` | 用 Monitors 切解析度的滑鼠腳本 |
 
-**kernel 的 `mac` 指令**：`mac [scale=0.5|1|1.5|2|2.5|3|4|auto] [res=WxH|auto] [depth=1|2|4|8|16|32] [cards=1|2] [builtin]`（`cards` 預設 1）。沒有 `res=`／`depth=` 時，從**上一次互動執行結束時**的解析度與色深開始（N16：在 Monitors 選的就會留著，直到 kernel 重開；Mac 自己記在磁碟覆蓋層的設定，執行結束就沒了），第一次則依螢幕自動選、1 位元；`res=auto` 忘掉上一次。預設 `res` 依實體螢幕選（2560x1440 → 1280x720 以 2x 填滿；1920x1080 → 1280x720 以 1.5x 填滿；640x480 → 640x480），預設倍率是能放進螢幕的最大值。執行中：Ctrl+Alt+PgUp／PgDn 放大／縮小半倍、Ctrl+Alt+Home 回到最大（這三個組合 kernel 自己吃掉，不送給 Mac；Control-Command-PgUp 在 Mac 沒有意義）。Mac 在 Monitors 換解析度時，kernel 自動重新計算置中與倍率（倍率維持使用者要的，放不下就降）。
+**kernel 的 `mac` 指令**：`mac [scale=0.5|1|1.5|2|2.5|3|4|auto] [res=WxH|auto] [depth=1|2|4|8|16|32] [cards=1|2] [builtin]`（`cards` 預設 1）。沒有 `res=`／`depth=` 時，從**上一次互動執行結束時**的解析度與色深開始（N16：在 Monitors 選的就會留著，直到 kernel 重開；Mac 自己記在磁碟覆蓋層的設定，執行結束就沒了），第一次則依螢幕自動選、1 位元；`res=auto` 忘掉上一次。預設 `res` 依實體螢幕選（2560x1440 → 1280x720 以 2x 填滿；1920x1080 → 1280x720 以 1.5x 填滿；640x480 → 640x480），預設倍率是能放進螢幕的最大值。執行中：Ctrl+Alt+PgUp／PgDn 放大／縮小半倍、Ctrl+Alt+Home 回到最大（這三個組合 kernel 自己吃掉，不送給 Mac；Control-Command-PgUp 在 Mac 沒有意義）。Mac 在 Monitors 換解析度時，kernel 自動重新計算置中與倍率（倍率維持使用者要的，放不下就降）。所以**在 Mac 裡控制 HiDPI 的方法就是在 Monitors 選解析度**：倍率是「自動」時（預設），2560x1440 的螢幕上選 1280x720 就是 2x、選 1920x1080 是 1x（1.5x 放不下）、選 2560x1440 是 1x；要 1.5x 就選 1280x720 再按一次 Ctrl+Alt+PgDn，或 `mac scale=1.5`。（Mac 裡沒有另外的 HiDPI 控制台：要寫一個 68k 的 cdev 並放進磁碟映像，而我們不修改使用者的磁碟。）
 
 **測試**：`tests/host/test_mac_card.c`（ROM 格式與 CRC、目錄、驅動位元組、bus、髒區與各色深的轉換、解析度清單、切換、4K 沒有 32 位元、VBL 中斷）、`tests/host/test_fb_scale.c`（1.5x、自動選擇）；本機：`make test-rom`（GDevice 數、Monitors 切三種解析度、兩張卡）、`make test-mac-remember`（`mac res=800x600`、停止、`mac` 仍是 800x600、`mac res=auto` 回到自動）、`make test-mac-hotkeys`（QEMU 送 Ctrl+Alt+PgDn／PgUp／Home，序列埠的倍率依序是 1.5x、2x、1.5x、1x、2x）、`make test-rom-qemu`（host 與 kernel 的畫面 CRC 相同，卡 640x480：`fa963b30`）、`make test-mac-perf`、`make mac-uefi-shot`。
