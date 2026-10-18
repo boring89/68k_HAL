@@ -37,6 +37,7 @@ make test-mac-sound / test-mac-clock / test-mac-persist  # Mac 的聲音、時�
 make mac-disk     # 68k_HAL 磁碟映像 build/68k_HAL_mac.img（GPT、UEFI：Boot、System A/B、疊加層、Applications；docs/mac_disk.md；本機專用）
 make test-mac-disk # 上面的配置（小一號）在 QEMU+OVMF 開機兩次：自動進 Mac、資料夾保存、電源鍵、macsys reset（本機專用）
 make test-macdisk # 合成的 GPT 映像接 AHCI：分割區與疊加層（在 make test 中）
+make test-update-script # 更新腳本對合成的小映像：dry run、kernel 與 System 更新、拒絕，其他區域逐位元組不變（在 make test 中；需要 gdisk）
 make test-mac-update # 更新腳本 tools/update_68khal.sh（只對 build/ 的映像檔）、kernel 槽試開與退回、macsys promote/switch（本機專用）
 make clean
 ```

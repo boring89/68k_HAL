@@ -80,10 +80,11 @@ The goal is to preserve the simplicity, usability, and software philosophy of th
 | OVMF (UEFI firmware for QEMU) | `ovmf` | Only for `make test-uefi` and `make test-usb-image` (not part of `make test`) |
 | GRUB UEFI modules | `grub-efi-amd64-bin` | The UEFI half of the ISO and the USB image (`grub-mkrescue` adds it when present) |
 | `python3` | `python3` | Generate the test disk images (`tools/make_*_image.py`); also the optional `tools/boot_log.py` and `tools/fb_check.py` |
+| `sgdisk` | `gdisk` | Partition the 68k_HAL disk image (`tools/make_mac_disk.py`, `make test-update-script`); `grub-editenv` (`grub2-common`) and `mtools` are used there too |
 | `hformat`, `hcopy`, ... | `hfsutils` | Build the HFS test volume (`tools/make_hfs_image.sh`). It keeps its "current volume" in `~/.hcwd`; the script uses a temporary `HOME` so yours is untouched |
 
 ```bash
-sudo apt install build-essential nasm binutils binutils-m68k-linux-gnu grub2-common grub-pc-bin xorriso mtools qemu-system-x86 python3 hfsutils curl
+sudo apt install build-essential nasm binutils binutils-m68k-linux-gnu grub2-common grub-pc-bin xorriso mtools qemu-system-x86 python3 hfsutils curl gdisk
 ```
 
 ### Commands
