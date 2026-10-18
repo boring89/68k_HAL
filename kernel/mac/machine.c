@@ -191,7 +191,7 @@ int mac_machine_set_depth(uint32_t bits)
 }
 void mac_machine_set_scale_halves(uint32_t halves)
 {
-    want_halves = halves <= FB_SCALE_HALVES_MAX && halves != 1 ? halves : 0;
+    want_halves = halves <= FB_SCALE_HALVES_MAX ? halves : 0;
 }
 
 int mac_machine_set_resolution(uint32_t width, uint32_t height)
@@ -253,10 +253,11 @@ static struct
     uint64_t instructions;
 } perf;
 
-/* The largest enlargement (in halves, 8 = 4x at most) at which a picture fits the screen; 0 if none. */
+/* The largest enlargement (in halves, 8 = 4x at most, 1 = 0.5x at least) at which a picture fits the
+ * screen; 0 if none. */
 static uint32_t largest_halves(const hal_framebuffer_t *fb, uint32_t width, uint32_t height)
 {
-    for (uint32_t h = FB_SCALE_HALVES_MAX; h >= 2; h--)
+    for (uint32_t h = FB_SCALE_HALVES_MAX; h >= 1; h--)
     {
         if (fb_scaled_size(width, h) <= fb->width && fb_scaled_size(height, h) <= fb->height)
             return h;
@@ -489,7 +490,7 @@ static int scale_hot_key(keycode_t key, uint32_t halves)
     case KEY_PAGE_UP:
         return (int)fb_halves_step(halves, 1);
     case KEY_PAGE_DOWN:
-        return (int)fb_halves_step(halves, -1);
+        return (int)fb_halves_step(halves, -1);     /* down to 0.5x */
     case KEY_HOME:
         return 0;
     default:

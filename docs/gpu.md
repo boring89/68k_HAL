@@ -55,7 +55,7 @@ QEMU 的標準 VGA（`-vga std`，PCI 1234:1111）是 Bochs 的 VBE 擴充卡。
 
 ## 3. Mac 畫面放大（HiDPI）
 
-> P9 起：Mac 的畫面是虛擬 NuBus 顯示卡，640x480 到 3840x2160（`docs/nubus_video.md`）。放大以 0.5 倍為單位（`fb_blit_halves`：1x、1.5x、2x… 最近鄰，1.5x 時每兩個 Mac 像素有一個畫成兩倍寬／高），**不再切換螢幕模式**；`mac scale=1|1.5|2|…|auto`，執行中 Ctrl+Alt+PgUp/PgDn/Home。以下是 P6 的原始說明（640x480、整數倍、`mac 2` 會切模式），保留作為歷史。
+> P9 起：Mac 的畫面是虛擬 NuBus 顯示卡，640x480 到 3840x2160（`docs/nubus_video.md`）。放大以 0.5 倍為單位（`fb_blit_halves`：0.5x、1x、1.5x、2x… 最近鄰，1.5x 時每兩個 Mac 像素有一個畫成兩倍寬／高），**不再切換螢幕模式**；`mac scale=1|1.5|2|…|auto`，執行中 Ctrl+Alt+PgUp/PgDn/Home。以下是 P6 的原始說明（640x480、整數倍、`mac 2` 會切模式），保留作為歷史。
 
 Mac IIci 的畫面是 640×480。在現代螢幕上很小，所以 `mac 2` 先把顯示模式切成 1280×960，再把每個 Mac 像素畫成 2×2 的方塊（`kernel/display/fb_scale.c`；整數倍放大、不模糊，點陣字型與圖示保持銳利）：
 

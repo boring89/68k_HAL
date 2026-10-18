@@ -39,7 +39,8 @@ uint32_t fb_best_scale(uint32_t width, uint32_t height, uint32_t screen_width,
                        uint32_t screen_height);
 
 /*
- * Enlargement in steps of a half: 'halves' = 2 is 1x, 3 is 1.5x, 4 is 2x. Each destination pixel takes the
+ * Enlargement in steps of a half: 'halves' = 2 is 1x, 3 is 1.5x, 4 is 2x; 1 is 0.5x (every second pixel and
+ * row, for a picture larger than the screen). Each destination pixel takes the
  * nearest source pixel (no blending: one-pixel lines and the Mac's dither patterns stay sharp; at 1.5x every
  * second source pixel is drawn twice as wide and twice as tall). Destination pixel (x, y) shows source pixel
  * (x * 2 / halves, y * 2 / halves).
@@ -59,7 +60,7 @@ uint32_t fb_scaled_size(uint32_t size, uint32_t halves);
 uint32_t fb_blit_halves(uint8_t *destination, uint32_t pitch, const uint32_t *source, const uint8_t *changed,
                         uint32_t width, uint32_t height, uint32_t halves, uint32_t *row);
 
-/* Half a step larger (step = 1) or smaller (-1) than 'halves', kept within 1x .. FB_SCALE_HALVES_MAX. */
+/* Half a step larger (step = 1) or smaller (-1) than 'halves', kept within 0.5x .. FB_SCALE_HALVES_MAX. */
 uint32_t fb_halves_step(uint32_t halves, int step);
 
 /*

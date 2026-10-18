@@ -123,7 +123,12 @@ static void test_halves(void)
     TEST_ASSERT_EQ_INT(2, (int)fb_blit_halves((uint8_t *)big, 4 * 4, source, NULL, 2, 2, 4, row4));
     TEST_ASSERT_EQ_INT(2, (int)big[3]);
     TEST_ASSERT_EQ_INT(3, (int)big[3 * 4]);
-    TEST_ASSERT_EQ_INT(0, (int)fb_blit_halves((uint8_t *)big, 16, source, NULL, 2, 2, 1, row4));
+    TEST_ASSERT_EQ_INT(0, (int)fb_blit_halves((uint8_t *)big, 16, source, NULL, 2, 2, 0, row4));
+
+    /* 0.5x: every second pixel of every second row (2x2 -> 1x1: pixel (0,0)). */
+    uint32_t small[1] = {0};
+    TEST_ASSERT_EQ_INT(1, (int)fb_blit_halves((uint8_t *)small, 4, source, NULL, 2, 2, 1, row4));
+    TEST_ASSERT_EQ_INT(1, (int)small[0]);
     TEST_ASSERT_EQ_INT(960, (int)fb_scaled_size(640, 3));
 }
 
@@ -131,7 +136,8 @@ static void test_halves_step(void)
 {
     TEST_ASSERT_EQ_INT(5, (int)fb_halves_step(4, 1));
     TEST_ASSERT_EQ_INT(3, (int)fb_halves_step(4, -1));
-    TEST_ASSERT_EQ_INT(2, (int)fb_halves_step(2, -1));
+    TEST_ASSERT_EQ_INT(1, (int)fb_halves_step(2, -1));
+    TEST_ASSERT_EQ_INT(1, (int)fb_halves_step(1, -1));
     TEST_ASSERT_EQ_INT(FB_SCALE_HALVES_MAX, (int)fb_halves_step(FB_SCALE_HALVES_MAX, 1));
 }
 

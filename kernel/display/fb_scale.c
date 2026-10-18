@@ -71,7 +71,7 @@ uint32_t fb_blit_halves(uint8_t *destination, uint32_t pitch, const uint32_t *so
     uint32_t out_width = fb_scaled_size(width, halves);
     uint32_t drawn = 0;
 
-    if (halves < 2 || halves > FB_SCALE_HALVES_MAX)
+    if (halves < 1 || halves > FB_SCALE_HALVES_MAX)
         return 0;
 
     for (uint32_t y = 0; y < height; y++)
@@ -117,7 +117,7 @@ uint32_t fb_halves_step(uint32_t halves, int step)
 {
     if (step > 0)
         return halves < FB_SCALE_HALVES_MAX ? halves + 1 : FB_SCALE_HALVES_MAX;
-    return halves > 2 ? halves - 1 : 2;
+    return halves > 1 ? halves - 1 : 1;
 }
 
 int fb_choose_size(const uint16_t *widths, const uint16_t *heights, uint32_t count, uint32_t screen_width,

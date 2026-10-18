@@ -163,10 +163,10 @@ int mac_card_render(mac_t *mac, uint32_t *out, uint32_t out_pitch, uint32_t *row
 | 1280x720 × 32 位元 | 2x | 175 | 5.6 ms | 0.2＋0.6 ms | 25 ms（整個畫面重畫） |
 | 1920x1080 × 32 位元 | 1x | 172 | 5.7 ms | 0.2＋0.1 ms | — |
 | 2560x1440 × 32 位元 | 1x | 171 | 5.7 ms | 0.2＋0.1 ms | 28 ms |
-| 3840x2160 × 16 位元 | 放不下：只顯示左上角 | 170 | 5.7 ms | 0.3＋0.1 ms | — |
+| 3840x2160 × 16 位元 | 0.5x（N13；之前只顯示左上角） | 152–170 | 5.7–6.2 ms | 0.3＋0.1 ms | 55 ms |
 | 640x480 × 8 位元 | 3x | 186 | 5.3 ms | 0.3＋1.6 ms | — |
 
-互動執行時 Mac 節流在 60 幀／秒（16.7 ms 一幀），所以平常的負擔約 6 ms／16.7 ms；整個畫面重畫（換模式、桌面全部重畫）時會掉一幀。比實體螢幕大的 Mac 畫面（3840x2160 在 2560x1440 上）只顯示左上角（沒有縮小），用 Monitors 換小一點的解析度。報告的最後一行 `mac: slowest screen update` 是這個最壞情況，實機請一起回報。
+互動執行時 Mac 節流在 60 幀／秒（16.7 ms 一幀），所以平常的負擔約 6 ms／16.7 ms；整個畫面重畫（換模式、桌面全部重畫）時會掉一幀（4K 時兩三幀）。比實體螢幕大的 Mac 畫面（3840x2160 在 2560x1440 上）縮小成 0.5x（每兩個像素取一個；`mac scale=0.5`、Ctrl+Alt+PgDn 也可以到 0.5x），字很小但整個桌面看得到；連 0.5x 都放不下時才只顯示左上角。報告的最後一行 `mac: slowest screen update` 是這個最壞情況，實機請一起回報。
 
 ## 7.5 兩張卡（多螢幕，P9 N10）
 
@@ -189,6 +189,6 @@ int mac_card_render(mac_t *mac, uint32_t *out, uint32_t out_pitch, uint32_t *row
 | `tools/mac_run.c` | `-C WxH[xD]`（卡的起始解析度與色深）、`-I`（內建視訊） |
 | `tools/mac_monitors.sh` | 用 Monitors 切解析度的滑鼠腳本 |
 
-**kernel 的 `mac` 指令**：`mac [scale=1|1.5|2|2.5|3|4|auto] [res=WxH] [depth=1|2|4|8|16|32] [cards=1|2] [builtin]`（`depth` 預設 1、`cards` 預設 1）。預設 `res` 依實體螢幕選（2560x1440 → 1280x720 以 2x 填滿；1920x1080 → 1280x720 以 1.5x 填滿；640x480 → 640x480），預設倍率是能放進螢幕的最大值。執行中：Ctrl+Alt+PgUp／PgDn 放大／縮小半倍、Ctrl+Alt+Home 回到最大（這三個組合 kernel 自己吃掉，不送給 Mac；Control-Command-PgUp 在 Mac 沒有意義）。Mac 在 Monitors 換解析度時，kernel 自動重新計算置中與倍率（倍率維持使用者要的，放不下就降）。
+**kernel 的 `mac` 指令**：`mac [scale=0.5|1|1.5|2|2.5|3|4|auto] [res=WxH] [depth=1|2|4|8|16|32] [cards=1|2] [builtin]`（`depth` 預設 1、`cards` 預設 1）。預設 `res` 依實體螢幕選（2560x1440 → 1280x720 以 2x 填滿；1920x1080 → 1280x720 以 1.5x 填滿；640x480 → 640x480），預設倍率是能放進螢幕的最大值。執行中：Ctrl+Alt+PgUp／PgDn 放大／縮小半倍、Ctrl+Alt+Home 回到最大（這三個組合 kernel 自己吃掉，不送給 Mac；Control-Command-PgUp 在 Mac 沒有意義）。Mac 在 Monitors 換解析度時，kernel 自動重新計算置中與倍率（倍率維持使用者要的，放不下就降）。
 
 **測試**：`tests/host/test_mac_card.c`（ROM 格式與 CRC、目錄、驅動位元組、bus、髒區與各色深的轉換、解析度清單、切換、4K 沒有 32 位元、VBL 中斷）、`tests/host/test_fb_scale.c`（1.5x、自動選擇）；本機：`make test-rom`（GDevice 數、Monitors 切三種解析度）、`make test-rom-qemu`（host 與 kernel 的畫面 CRC 相同，卡 640x480：`fa963b30`）、`make test-mac-perf`、`make mac-uefi-shot`。
