@@ -47,7 +47,8 @@
 #define MAC_STUB_INJECT 0xA0u       /* offset of the input injection routine */
 #define MAC_STUB_PACKET 0x700u      /* the packet handed to the ROM's handler */        /* offset of the ADBOp replacement */
 #define MAC_STUB_DRIVER 0x100u      /* offset of the driver header */
-#define MAC_STUB_DRIVE_RECORD 0x900u
+#define MAC_STUB_DRIVE_RECORD 0x900u    /* one 0x20-byte record per drive */
+#define MAC_STUB_DRIVE_RECORD_SIZE 0x20u
 
 /* A disk the Mac sees, backed by the host or the kernel. Offsets and lengths
  * are in bytes; both callbacks return 0 on success and -1 on failure. */
@@ -59,6 +60,10 @@ typedef struct
     uint32_t blocks;            /* size in 512-byte blocks; 0 = no disk */
     bool read_only;
 } mac_disk_t;
+
+/* Drives the Mac sees: drive 8 is mac->disk, drives 9.. are mac->more_disks. */
+#define MAC_MAX_DISKS 4
+#define MAC_FIRST_DRIVE 8
 
 #define MAC_UNIMPL_LOG_SIZE 2048
 #define MAC_TRACE_SIZE 4096
@@ -236,7 +241,11 @@ typedef struct
     uint32_t call_regs[20];
 
     uint8_t stub[MAC_STUB_SIZE];
-    mac_disk_t disk;            /* set by the host after mac_init() */
+    mac_disk_t disk;            /* drive 8; set by the host after mac_init() */
+    mac_disk_t more_disks[MAC_MAX_DISKS - 1];   /* drives 9.. (blocks == 0: absent) */
+    uint8_t disk_cursor;        /* next drive the Open routine adds */
+    uint8_t mount_pending;      /* bit n: drive 8 + n still has to be mounted (see poll_mount) */
+    uint32_t mount_poll;
 
     /* Queued keyboard and mouse packets (see mac_mouse_move, mac_key). */
     uint8_t input[64][4];       /* device (2 = keyboard, 3 = mouse), 2 data bytes */
@@ -295,6 +304,7 @@ int mac_rom_patch(uint8_t *rom, uint32_t size);
 #define MAC_EMUL_OP_DISK_PRIME 0x7111
 #define MAC_EMUL_OP_DISK_CONTROL 0x7112
 #define MAC_EMUL_OP_DISK_STATUS 0x7113
+#define MAC_EMUL_OP_DISK_NEXT 0x7115
 #define MAC_EMUL_OP_SCSI_DISPATCH 0x7128
 #define MAC_EMUL_OP_SLOT_PROBE 0x7129
 #define MAC_EMUL_OP_CARD_OPEN 0x712A
@@ -307,6 +317,7 @@ int mac_rom_patch(uint8_t *rom, uint32_t size);
  * guest state of the emulated opcode that called them. */
 void mac_disk_install(mac_t *mac);
 void mac_disk_open(mac_t *mac);
+void mac_disk_next(mac_t *mac);
 void mac_disk_prime(mac_t *mac);
 void mac_disk_control(mac_t *mac);
 void mac_disk_status(mac_t *mac);

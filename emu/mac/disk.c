@@ -23,7 +23,7 @@
  * a driver follows the one in Basilisk II's disk.cpp (GPL).
  */
 
-#define DRIVE_NUMBER 8
+#define DRIVE_NUMBER MAC_FIRST_DRIVE
 #define DRIVER_REFNUM (-50)
 #define DRIVER_FLAGS 0x6F00         /* read, write, control, status, lock, time */
 #define DRIVER_DELAY 60
@@ -90,9 +90,31 @@
 #define REG_A0 M68K_VM_REG_A0
 
 
-static uint32_t drive_record(void)
+static uint32_t drive_record(int index)
 {
-    return MAC_STUB_BASE + MAC_STUB_DRIVE_RECORD;
+    return MAC_STUB_BASE + MAC_STUB_DRIVE_RECORD +
+           (uint32_t)index * MAC_STUB_DRIVE_RECORD_SIZE;
+}
+
+
+/* Drive 8 + index, or NULL if there is no such drive. */
+static mac_disk_t *disk_at(mac_t *mac, int index)
+{
+    if (index < 0 || index >= MAC_MAX_DISKS)
+        return NULL;
+
+    return index == 0 ? &mac->disk : &mac->more_disks[index - 1];
+}
+
+
+/* The disk a request is for: the drive number is in the parameter block. */
+static mac_disk_t *disk_for_request(mac_t *mac, uint32_t pb, int *index)
+{
+    int drive = (int)mac_bus_read(mac, pb + PB_VREFNUM, 2);
+
+    *index = drive - DRIVE_NUMBER;
+
+    return disk_at(mac, *index);
 }
 
 
@@ -121,69 +143,106 @@ void mac_disk_install(mac_t *mac)
 }
 
 
-/*
- * Open: describe the disk in the drive record. The stub code then calls
- * _AddDrive with A0 = the queue element inside the record and D0 = drive
- * number in the high word, driver reference number in the low word.
- */
-void mac_disk_open(mac_t *mac)
+/* Describe drive index in its record (the drive queue entry is part of it). */
+static void fill_record(mac_t *mac, int index)
 {
-    uint32_t dce = reg(REG_A0 + 1);
-    uint32_t rec = drive_record();
+    const mac_disk_t *disk = disk_at(mac, index);
+    uint32_t rec = drive_record(index);
+    uint32_t number = (uint32_t)(DRIVE_NUMBER + index);
 
-    mac_bus_write(mac, dce + DCE_POSITION, 4, 0);
     for (uint32_t i = 0; i < DRVSTS_BYTES; i += 2)
     {
         mac_bus_write(mac, rec + i, 2, 0);
     }
-    mac_bus_write(mac, rec + DRVSTS_WRITEPROT, 1, mac->disk.read_only ? 0xFF : 0);
+    mac_bus_write(mac, rec + DRVSTS_WRITEPROT, 1, disk->read_only ? 0xFF : 0);
     mac_bus_write(mac, rec + DRVSTS_DISKINPLACE, 1,
-                  mac->disk.blocks != 0 ? DISK_IN_PLACE_FIXED : 0);
+                  disk->blocks != 0 ? DISK_IN_PLACE_FIXED : 0);
     mac_bus_write(mac, rec + DRVSTS_INSTALLED, 1, 1);
     mac_bus_write(mac, rec + DRVSTS_QTYPE, 2, QTYPE_HAS_SIZE2);
-    mac_bus_write(mac, rec + DRVSTS_DRIVE, 2, DRIVE_NUMBER);
+    mac_bus_write(mac, rec + DRVSTS_DRIVE, 2, number);
     mac_bus_write(mac, rec + DRVSTS_REFNUM, 2, DRIVER_REFNUM & 0xFFFF);
-    mac_bus_write(mac, rec + DRVSTS_SIZE_LOW, 2, mac->disk.blocks & 0xFFFF);
-    mac_bus_write(mac, rec + DRVSTS_SIZE_HIGH, 2, mac->disk.blocks >> 16);
-
-    m68k_vm_set_reg((m68k_vm_reg_t)REG_A0, rec + DRVSTS_QLINK);
-    m68k_vm_set_reg(REG_D0, ((uint32_t)DRIVE_NUMBER << 16) |
-                                ((uint32_t)DRIVER_REFNUM & 0xFFFF));
+    mac_bus_write(mac, rec + DRVSTS_SIZE_LOW, 2, disk->blocks & 0xFFFF);
+    mac_bus_write(mac, rec + DRVSTS_SIZE_HIGH, 2, disk->blocks >> 16);
 }
 
 
-/* Copy between guest memory and a host buffer, 512 bytes at a time. */
-static int transfer(mac_t *mac, bool write, uint32_t guest, uint32_t offset,
-                    uint32_t len)
+/*
+ * Open: start the walk over the drives. The stub code then asks for each
+ * drive in turn (mac_disk_next) and calls _AddDrive for it.
+ */
+void mac_disk_open(mac_t *mac)
 {
-    uint8_t block[BLOCK_SIZE];
+    uint32_t dce = reg(REG_A0 + 1);
 
-    for (uint32_t done = 0; done < len; done += BLOCK_SIZE)
+    mac_bus_write(mac, dce + DCE_POSITION, 4, 0);
+    mac->disk_cursor = 0;
+}
+
+
+/*
+ * The next drive to add: D1 = 1, A0 = the queue element inside its record and
+ * D0 = drive number in the high word, driver reference number in the low
+ * word; D1 = 0 when all are done. Drive 8 is always added (an empty one has
+ * diskInPlace 0), the others only when they have a disk.
+ */
+void mac_disk_next(mac_t *mac)
+{
+    int index = mac->disk_cursor;
+
+    while (index < MAC_MAX_DISKS && index != 0 && disk_at(mac, index)->blocks == 0)
+        index++;
+
+    if (index >= MAC_MAX_DISKS)
     {
+        m68k_vm_set_reg(M68K_VM_REG_D0 + 1, 0);
+        return;
+    }
+
+    mac->disk_cursor = (uint8_t)(index + 1);
+    fill_record(mac, index);
+
+    m68k_vm_set_reg((m68k_vm_reg_t)REG_A0, drive_record(index) + DRVSTS_QLINK);
+    m68k_vm_set_reg(REG_D0, ((uint32_t)(DRIVE_NUMBER + index) << 16) |
+                                ((uint32_t)DRIVER_REFNUM & 0xFFFF));
+    m68k_vm_set_reg(M68K_VM_REG_D0 + 1, 1);
+}
+
+
+/* Copy between guest memory and the disk, in pieces of this many bytes. */
+#define TRANSFER_CHUNK 16384
+
+static int transfer(mac_t *mac, mac_disk_t *disk, bool write, uint32_t guest,
+                    uint32_t offset, uint32_t len)
+{
+    static uint8_t chunk[TRANSFER_CHUNK];
+
+    for (uint32_t done = 0; done < len;)
+    {
+        uint32_t n = len - done < TRANSFER_CHUNK ? len - done : TRANSFER_CHUNK;
+
         if (write)
         {
-            for (uint32_t i = 0; i < BLOCK_SIZE; i++)
+            for (uint32_t i = 0; i < n; i++)
             {
-                block[i] = (uint8_t)mac_bus_read(mac, guest + done + i, 1);
+                chunk[i] = (uint8_t)mac_bus_read(mac, guest + done + i, 1);
             }
-            if (mac->disk.write(mac->disk.ctx, offset + done, block,
-                                BLOCK_SIZE) != 0)
+            if (disk->write(disk->ctx, offset + done, chunk, n) != 0)
             {
                 return -1;
             }
         }
         else
         {
-            if (mac->disk.read(mac->disk.ctx, offset + done, block,
-                               BLOCK_SIZE) != 0)
+            if (disk->read(disk->ctx, offset + done, chunk, n) != 0)
             {
                 return -1;
             }
-            for (uint32_t i = 0; i < BLOCK_SIZE; i++)
+            for (uint32_t i = 0; i < n; i++)
             {
-                mac_bus_write(mac, guest + done + i, 1, block[i]);
+                mac_bus_write(mac, guest + done + i, 1, chunk[i]);
             }
         }
+        done += n;
     }
     return 0;
 }
@@ -199,14 +258,12 @@ void mac_disk_prime(mac_t *mac)
     uint32_t pos = mac_bus_read(mac, dce + DCE_POSITION, 4);
     bool write = (mac_bus_read(mac, pb + PB_TRAP, 2) & IOTRAP_CMD_MASK) ==
                  IOTRAP_WRITE;
+    int index;
+    mac_disk_t *disk = disk_for_request(mac, pb, &index);
     int err = NO_ERR;
 
     mac_bus_write(mac, pb + PB_ACTCOUNT, 4, 0);
-    if (mac_bus_read(mac, pb + PB_VREFNUM, 2) != DRIVE_NUMBER)
-    {
-        err = NS_DRV_ERR;
-    }
-    else if (mac->disk.blocks == 0)
+    if (disk == NULL || disk->blocks == 0)
     {
         err = NS_DRV_ERR;
     }
@@ -214,12 +271,12 @@ void mac_disk_prime(mac_t *mac)
     {
         err = PARAM_ERR;
     }
-    else if (write && mac->disk.read_only)
+    else if (write && disk->read_only)
     {
         err = W_PRERR;
     }
-    else if ((uint64_t)pos + count > (uint64_t)mac->disk.blocks * BLOCK_SIZE ||
-             transfer(mac, write, buffer, pos, count) != 0)
+    else if ((uint64_t)pos + count > (uint64_t)disk->blocks * BLOCK_SIZE ||
+             transfer(mac, disk, write, buffer, pos, count) != 0)
     {
         err = write ? WRITE_ERR : READ_ERR;
     }
@@ -237,7 +294,15 @@ void mac_disk_control(mac_t *mac)
 {
     uint32_t pb = reg(REG_A0);
     uint32_t code = mac_bus_read(mac, pb + PB_CSCODE, 2);
+    int index;
+    mac_disk_t *disk = disk_for_request(mac, pb, &index);
     int err = NO_ERR;
+
+    if (disk == NULL)
+    {
+        disk = &mac->disk;
+        index = 0;
+    }
 
     switch (code)
     {
@@ -247,10 +312,10 @@ void mac_disk_control(mac_t *mac)
     case CS_EJECT:
         break;
     case CS_FORMAT:
-        err = mac->disk.read_only ? W_PRERR : NO_ERR;
+        err = disk->read_only ? W_PRERR : NO_ERR;
         break;
     case CS_PARTITION_SIZE:
-        mac_bus_write(mac, pb + PB_CSPARAM, 4, mac->disk.blocks);
+        mac_bus_write(mac, pb + PB_CSPARAM, 4, disk->blocks);
         break;
     default:
         err = CONTROL_ERR;
@@ -265,14 +330,18 @@ void mac_disk_status(mac_t *mac)
 {
     uint32_t pb = reg(REG_A0);
     uint32_t code = mac_bus_read(mac, pb + PB_CSCODE, 2);
+    int index = (int)mac_bus_read(mac, pb + PB_VREFNUM, 2) - DRIVE_NUMBER;
     int err = NO_ERR;
+
+    if (disk_at(mac, index) == NULL)
+        index = 0;
 
     if (code == CS_DRIVE_STATUS)
     {
         for (uint32_t i = 0; i < DRVSTS_BYTES; i++)
         {
             mac_bus_write(mac, pb + PB_CSPARAM + i, 1,
-                          mac_bus_read(mac, drive_record() + i, 1));
+                          mac_bus_read(mac, drive_record(index) + i, 1));
         }
     }
     else

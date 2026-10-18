@@ -20,6 +20,13 @@
  */
 int volume_mount_any(void);
 
+/*
+ * Mount the HFS volume of one device (its Apple_HFS partition, or a bare
+ * volume at block 0), replacing the current volume. Returns 0, or -1 if the
+ * device holds none (the current volume is then forgotten).
+ */
+int volume_mount_device(block_device_t *device);
+
 /* The mounted volume, or NULL. */
 hfs_volume_t *volume_get(void);
 

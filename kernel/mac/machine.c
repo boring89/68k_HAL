@@ -16,6 +16,7 @@
 #include "hal/timer.h"
 #include "kernel/lib/k_time.h"
 #include "kernel/block/block.h"
+#include "kernel/fs/macdisk.h"
 #include "kernel/boot/module.h"
 #include "kernel/display/fb_scale.h"
 #include "kernel/display/fbcon.h"
@@ -61,14 +62,14 @@ typedef struct
     uint16_t *slot;             /* per block: 0 = from the image, else 1 + index */
     uint8_t *chunk[MAX_CHUNKS];
     uint32_t used;              /* blocks in the overlay */
-} overlay_t;
+} mem_overlay_t;
 
 static uint32_t last_crc;
 
 
 static int overlay_read(void *ctx, uint32_t offset, void *buf, uint32_t len)
 {
-    overlay_t *ov = ctx;
+    mem_overlay_t *ov = ctx;
 
     if (offset % BLOCK_SIZE != 0 || len % BLOCK_SIZE != 0 ||
         (uint64_t)offset + len > (uint64_t)ov->blocks * BLOCK_SIZE)
@@ -101,7 +102,7 @@ static int overlay_read(void *ctx, uint32_t offset, void *buf, uint32_t len)
 static int overlay_write(void *ctx, uint32_t offset, const void *buf,
                          uint32_t len)
 {
-    overlay_t *ov = ctx;
+    mem_overlay_t *ov = ctx;
 
     if (offset % BLOCK_SIZE != 0 || len % BLOCK_SIZE != 0 ||
         (uint64_t)offset + len > (uint64_t)ov->blocks * BLOCK_SIZE)
@@ -753,7 +754,7 @@ int mac_machine_run(uint32_t frames)
     uint8_t *vram = kmalloc(VRAM_SIZE);
     uint8_t *card_vram = want_builtin ? NULL : kmalloc(MAC_CARD_VRAM_SIZE);
     uint8_t *second_vram = want_builtin || want_cards < 2 ? NULL : kmalloc(MAC_CARD_VRAM_SIZE);
-    overlay_t *ov = kmalloc(sizeof *ov);
+    mem_overlay_t *ov = kmalloc(sizeof *ov);
     have_screen = hal_framebuffer_get(&fb) == 0;
     original = fb;
     k_memset(&perf, 0, sizeof perf);
@@ -771,13 +772,29 @@ int mac_machine_run(uint32_t frames)
         kernel_printf("%s\n", "mac: out of memory");
         goto out;
     }
-    /* The disk: the boot module mac_disk (changes stay in memory), or else the ATA drive (changes are written). */
-    bool disk_in_memory = boot_module_find(MAC_MODULE_DISK, &disk_module) != NULL;
-    block_device_t *drive = disk_in_memory ? NULL : block_device_find("ata0");
+    /*
+     * The disks: a 68k_HAL GPT disk (the system with its overlay as drive 8, Applications as drive 9; changes
+     * are written), or else the boot module mac_disk (changes stay in memory), or else the ATA drive (changes
+     * are written).
+     */
+    block_device_t *system_disk = macdisk_system();
+    block_device_t *apps_disk = macdisk_apps();
+    bool disk_in_memory = system_disk == NULL && boot_module_find(MAC_MODULE_DISK, &disk_module) != NULL;
+    block_device_t *drive = system_disk != NULL ? system_disk : disk_in_memory ? NULL : block_device_find("ata0");
 
+    if (macdisk_present() && system_disk == NULL)
+    {
+        kernel_printf("%s\n", "mac: the system overlay is not usable (see macsys status; macsys reset starts a new one)");
+        goto out;
+    }
     if (boot_module_find(MAC_MODULE_ROM, &rom_module) == NULL || (!disk_in_memory && drive == NULL))
     {
-        kernel_printf("%s\n", "mac: needs the boot module mac_rom and a disk (module mac_disk or an ATA drive)");
+        kernel_printf("%s\n", "mac: needs the boot module mac_rom and a disk (a 68k_HAL disk, module mac_disk or an ATA drive)");
+        goto out;
+    }
+    if (drive != NULL && drive->block_size != BLOCK_SIZE)
+    {
+        kernel_printf("%s\n", "mac: the disk's blocks are not 512 bytes");
         goto out;
     }
     if (rom_module.length != ROM_SIZE)
@@ -889,6 +906,14 @@ int mac_machine_run(uint32_t frames)
         mac->disk.ctx = drive;
         mac->disk.blocks = drive->block_count > 0xFFFFFFFFu ? 0xFFFFFFFFu : (uint32_t)drive->block_count;
         mac->disk.read_only = drive->ops->write == NULL;
+    }
+    if (apps_disk != NULL && apps_disk->block_size == BLOCK_SIZE && system_disk != NULL)
+    {
+        mac->more_disks[0].read = drive_read;
+        mac->more_disks[0].write = drive_write;
+        mac->more_disks[0].ctx = apps_disk;
+        mac->more_disks[0].blocks = apps_disk->block_count > 0xFFFFFFFFu ? 0xFFFFFFFFu : (uint32_t)apps_disk->block_count;
+        mac->more_disks[0].read_only = apps_disk->ops->write == NULL;
     }
     if (audio_out != NULL)
     {

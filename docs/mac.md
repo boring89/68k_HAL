@@ -132,7 +132,9 @@ Mac 的 ROM 是一本很長的開機劇本，劇本裡不斷地「去敲某個�
 
 - **install**（`stub.s`）：在 InitDrivers 載入序列驅動前被呼叫。`_DrvrInstallRsrvMem`（refnum -50）建 DCE，從 unit table 取出，`$710A` 填 dCtlDriver/flags，再 `_Open` 它。
 - **驅動標頭**：drvrFlags `0x6F00`（讀寫控制狀態、需要鎖定與定時）、五個入口。每個入口一個模擬 opcode；立即呼叫（ioTrap bit 9）用 `rts` 返回，否則 `jmp` 到 IODone（低記憶體 `0x8FC`）。
-- **Open**：填 22 位元組的 DrvSts（`diskInPlace = 8` 固定磁碟、`dQDrive = 8`、`dQRefNum = -50`、大小拆成低/高 16 位元），然後 `_AddDrive`（D0 = 磁碟機號<<16 | refnum，A0 = DrvSts 裡的 qLink）。
+- **Open**：`$7110` 開始走訪磁碟機，接著每次 `$7115` 填好一台的 22 位元組 DrvSts（`diskInPlace = 8` 固定磁碟、`dQDrive = 8 + n`、`dQRefNum = -50`、大小拆成低/高 16 位元；每台一份紀錄，`0x900 + n * 0x20`），回傳 D1 = 1 時 stub 呼叫 `_AddDrive`（D0 = 磁碟機號<<16 | refnum，A0 = DrvSts 裡的 qLink），D1 = 0 時結束。兩個模擬 opcode 之間要隔一個 `nop`：模型每個指令只呼叫一次 hook，處理完一個模擬 opcode 後 PC 前進，緊接著的第二個模擬 opcode 不會被攔截（P10 D3 踩到的坑）。
+- **多磁碟（P10 D3）**：磁碟機 8 是 `mac->disk`（系統碟），9–11 是 `mac->more_disks[]`（`blocks == 0` 表示沒有）。Prime／Control／Status 依參數區塊的 ioVRefNum（磁碟機號）選磁碟。ROM 開機時只掛上開機碟，其餘的由 `poll_mount`（`mac.c`）在 Finder 執行後（低記憶體 `CurApName` = "Finder"，而且 CPU 在 supervisor 模式、沒有在處理中斷、PC 不在 ROM 裡）注入一段程式：`_MountVol`（ioVRefNum = 磁碟機號）再 `_PostEvent(diskEvt, 磁碟機號)`，就像插入磁片時驅動程式做的事，Finder 收到事件後顯示這顆磁碟。
+- **傳輸**：一次最多 16 KiB 交給 host／kernel 的回呼（以前每次 512 位元組），kernel 端的區塊裝置因此能一次讀多個區塊。
 - **Prime**：位置在 DCE 的 `dCtlPosition`（+16），PB 的 ioBuffer(+32)、ioReqCount(+36)；ioTrap 低位元組 2 = 讀、3 = 寫。必須是 512 的倍數。成功後 ioActCount、dCtlPosition 都前進。
 - **Control**：1、65、5、7 成功；6 看是否唯讀；24 回區塊數；其他 controlErr。**Status**：8 回 DrvSts 的 22 位元組。
 - **stub 視窗**：`0x4F000000` 的 8 KiB 可寫記憶體。程式碼由 `emu/mac/stub.s` 組譯，位元組放在 `stub_code.h`（`tools/gen_mac_stub.py` 產生；`make test` 的 `test-mac-stub` 驗證兩者一致）。同一個視窗還放 `adbop`（ADBOp 替身）與 DrvSts 記錄。

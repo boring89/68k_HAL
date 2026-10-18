@@ -158,6 +158,9 @@ static void cmd_irqs(
 static void cmd_macsys(
     int argc,
     char **argv);
+static void cmd_mount(
+    int argc,
+    char **argv);
 
 static shell_command_entry_t commands[] =
     {
@@ -308,7 +311,11 @@ static shell_command_entry_t commands[] =
         {COMMAND_MACSYS,
          "macsys",
          "The Mac system disk: macsys status | reset (drop the Mac's changes to the system disk)",
-         cmd_macsys}};
+         cmd_macsys},
+        {COMMAND_MOUNT,
+         "mount",
+         "Use the HFS volume of a block device for ls and cat (mount <device>, see disks)",
+         cmd_mount}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -2238,6 +2245,26 @@ static void cmd_macsys(
         terminal_write_line("  The overlay belongs to another System image and is not applied.");
         terminal_write_line("  'macsys reset' empties it and binds it to this image.");
     }
+}
+
+static void cmd_mount(
+    int argc,
+    char **argv)
+{
+    if (argc != 2)
+    {
+        terminal_write_line("usage: mount <device> (see disks)");
+        return;
+    }
+
+    block_device_t *device = block_device_find(argv[1]);
+
+    if (device == NULL)
+        terminal_write_line("mount: no such device");
+    else if (volume_mount_device(device) != 0)
+        terminal_write_line("mount: no HFS volume on it");
+    else
+        terminal_write_line("mount: ok");
 }
 
 int shell_command_count(void)

@@ -112,12 +112,19 @@ driver_name:
     .ascii  ".Disk"
     .align  2
 
-| Open: the native part fills in the drive record and the drive queue entry
-| (A0 = qLink of the record, D0 = drive number << 16 | refnum); _AddDrive
-| links it into the drive queue.
+| Open: the native part fills in a drive record and the drive queue entry for
+| each drive (A0 = qLink of the record, D0 = drive number << 16 | refnum;
+| D1 = 0 when there are no more drives); _AddDrive links it into the drive queue.
 drv_open:
-    .word   0x7110
+    .word   0x7110                  | native: start with the first drive
+    nop                             | (the model runs one emulated opcode per instruction)
+drv_open_next:
+    .word   0x7115                  | native: the next drive's record
+    tst.l   %d1
+    beq.s   drv_open_done
     .word   0xA04E                  | _AddDrive
+    bra.s   drv_open_next
+drv_open_done:
     moveq   #0,%d0
     rts
 

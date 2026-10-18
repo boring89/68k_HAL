@@ -152,6 +152,42 @@ static int disk_write(void *ctx, uint32_t offset, const void *buf, uint32_t len)
 }
 
 
+/* -E path: more disks (drives 9..11), kept in memory like the first one. */
+typedef struct
+{
+    uint8_t *data;
+    uint32_t size;
+} extra_disk_t;
+
+static extra_disk_t extra_disks[MAC_MAX_DISKS - 1];
+
+
+static int extra_read(void *ctx, uint32_t offset, void *buf, uint32_t len)
+{
+    const extra_disk_t *d = ctx;
+
+    if ((uint64_t)offset + len > d->size)
+    {
+        return -1;
+    }
+    memcpy(buf, d->data + offset, len);
+    return 0;
+}
+
+
+static int extra_write(void *ctx, uint32_t offset, const void *buf, uint32_t len)
+{
+    extra_disk_t *d = ctx;
+
+    if ((uint64_t)offset + len > d->size)
+    {
+        return -1;
+    }
+    memcpy(d->data + offset, buf, len);
+    return 0;
+}
+
+
 static void print_regs(void)
 {
     for (int i = 0; i < 8; i++)
@@ -391,6 +427,8 @@ int main(int argc, char **argv)
     uint32_t save_addr = 0;
     uint32_t save_len = 0;
     const char *disk_path = NULL;
+    const char *extra_paths[MAC_MAX_DISKS - 1];
+    int nextra = 0;
     bool disk_read_only = false;
     uint32_t dump[8];
     int ndump = 0;
@@ -417,6 +455,10 @@ int main(int argc, char **argv)
         else if (argv[i][0] == '-' && argv[i][1] == 'm' && i + 1 < argc && ndump < 8)
         {
             dump[ndump++] = strtoul(argv[++i], NULL, 16);
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'E' && i + 1 < argc && nextra < MAC_MAX_DISKS - 1)
+        {
+            extra_paths[nextra++] = argv[++i];
         }
         else if (argv[i][0] == '-' && argv[i][1] == 'd' && i + 1 < argc)
         {
@@ -669,6 +711,32 @@ int main(int argc, char **argv)
         mac.disk.write = disk_write;
         mac.disk.blocks = disk_size / 512;
         mac.disk.read_only = disk_read_only;
+    }
+    for (int e = 0; e < nextra; e++)
+    {
+        long en;
+        FILE *ef = fopen(extra_paths[e], "rb");
+
+        if (ef == NULL)
+        {
+            fprintf(stderr, "cannot read %s\n", extra_paths[e]);
+            return 1;
+        }
+        fseek(ef, 0, SEEK_END);
+        en = ftell(ef);
+        fseek(ef, 0, SEEK_SET);
+        extra_disks[e].data = malloc(en);
+        extra_disks[e].size = (uint32_t)en;
+        if (extra_disks[e].data == NULL || fread(extra_disks[e].data, 1, en, ef) != (size_t)en)
+        {
+            fprintf(stderr, "cannot read %s\n", extra_paths[e]);
+            return 1;
+        }
+        fclose(ef);
+        mac.more_disks[e].read = extra_read;
+        mac.more_disks[e].write = extra_write;
+        mac.more_disks[e].ctx = &extra_disks[e];
+        mac.more_disks[e].blocks = extra_disks[e].size / 512;
     }
     mac.audio = audio_sink;
     mac.trace_enabled = true;

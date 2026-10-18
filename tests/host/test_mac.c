@@ -303,6 +303,8 @@ static void test_disk_driver(void)
     TEST_ASSERT_EQ_INT(MAC_STUB_BASE + MAC_STUB_DRIVER,
                        mac_bus_read(&mac, dce, 4));
     mac_disk_open(&mac);
+    mac_disk_next(&mac);
+    TEST_ASSERT_EQ_INT(1, m68k_vm_get_reg(M68K_VM_REG_D0 + 1));
     TEST_ASSERT_EQ_INT(8 << 16 | 0xFFCE, m68k_vm_get_reg(M68K_VM_REG_D0));
     TEST_ASSERT_EQ_INT(MAC_STUB_BASE + MAC_STUB_DRIVE_RECORD + 6,
                        m68k_vm_get_reg(M68K_VM_REG_A0));
@@ -358,6 +360,103 @@ static void test_disk_driver(void)
     TEST_ASSERT_EQ_INT(0, m68k_vm_get_reg(M68K_VM_REG_D0));
     TEST_ASSERT_EQ_INT(8, mac_bus_read(&mac, pb + 28 + 3, 1));  /* in place */
     TEST_ASSERT_EQ_INT(8, mac_bus_read(&mac, pb + 28 + 12, 2)); /* drive # */
+}
+
+static uint8_t second_image[2 * 512];
+
+static int second_read(void *ctx, uint32_t offset, void *buf, uint32_t len)
+{
+    (void)ctx;
+    if (offset + len > sizeof second_image)
+        return -1;
+    memcpy(buf, second_image + offset, len);
+    return 0;
+}
+
+static int second_write(void *ctx, uint32_t offset, const void *buf, uint32_t len)
+{
+    (void)ctx;
+    if (offset + len > sizeof second_image)
+        return -1;
+    memcpy(second_image + offset, buf, len);
+    return 0;
+}
+
+/* Several drives: each gets its own drive number, record, size and data. */
+static void test_disk_driver_two_drives(void)
+{
+    const uint32_t pb = 0x1000;
+    const uint32_t dce = 0x2000;
+    const uint32_t buf = 0x3000;
+
+    for (unsigned i = 0; i < sizeof second_image; i++)
+        second_image[i] = (uint8_t)(i * 3 + 1);
+    memset(ram, 0, sizeof ram);
+    TEST_ASSERT_EQ_INT(0, mac_init(&mac, ram, RAM_SIZE, rom, ROM_SIZE));
+    mac.disk.read = test_disk_read;
+    mac.disk.write = test_disk_write;
+    mac.disk.blocks = 4;
+    mac.more_disks[0].read = second_read;
+    mac.more_disks[0].write = second_write;
+    mac.more_disks[0].blocks = 2;
+    mac.more_disks[1].blocks = 0;               /* a gap: drive 10 is absent */
+    mac.more_disks[2].read = second_read;
+    mac.more_disks[2].write = second_write;
+    mac.more_disks[2].blocks = 2;
+    mac.more_disks[2].read_only = true;
+    mac_reset(&mac);
+    mac.overlay = false;
+
+    m68k_vm_set_reg(M68K_VM_REG_A0 + 1, dce);
+    mac_disk_open(&mac);
+
+    static const uint32_t want_drive[3] = {8, 9, 11};
+    static const uint32_t want_blocks[3] = {4, 2, 2};
+
+    for (int i = 0; i < 3; i++)
+    {
+        mac_disk_next(&mac);
+        TEST_ASSERT_EQ_INT(1, m68k_vm_get_reg(M68K_VM_REG_D0 + 1));
+        TEST_ASSERT_EQ_INT(want_drive[i] << 16 | 0xFFCE,
+                           m68k_vm_get_reg(M68K_VM_REG_D0));
+
+        uint32_t rec = m68k_vm_get_reg(M68K_VM_REG_A0) - 6;
+
+        TEST_ASSERT_EQ_INT(want_drive[i], mac_bus_read(&mac, rec + 12, 2));
+        TEST_ASSERT_EQ_INT(want_blocks[i], mac_bus_read(&mac, rec + 18, 2));
+    }
+    mac_disk_next(&mac);
+    TEST_ASSERT_EQ_INT(0, m68k_vm_get_reg(M68K_VM_REG_D0 + 1));
+
+    /* Reads and writes go to the drive named in ioVRefNum. */
+    m68k_vm_set_reg(M68K_VM_REG_A0, pb);
+    m68k_vm_set_reg(M68K_VM_REG_A0 + 1, dce);
+    mac_bus_write(&mac, pb + 6, 2, 0xA002);
+    mac_bus_write(&mac, pb + 22, 2, 9);
+    mac_bus_write(&mac, pb + 32, 4, buf);
+    mac_bus_write(&mac, pb + 36, 4, 512);
+    mac_bus_write(&mac, dce + 16, 4, 512);
+    mac_disk_prime(&mac);
+    TEST_ASSERT_EQ_INT(0, m68k_vm_get_reg(M68K_VM_REG_D0));
+    TEST_ASSERT_EQ_INT(second_image[512], ram[buf]);
+
+    mac_bus_write(&mac, pb + 22, 2, 10);        /* the gap */
+    mac_disk_prime(&mac);
+    TEST_ASSERT_EQ_INT(-56, (int16_t)m68k_vm_get_reg(M68K_VM_REG_D0));
+
+    mac_bus_write(&mac, pb + 6, 2, 0xA003);     /* write to the read-only drive 11 */
+    mac_bus_write(&mac, pb + 22, 2, 11);
+    mac_bus_write(&mac, dce + 16, 4, 0);
+    mac_disk_prime(&mac);
+    TEST_ASSERT_EQ_INT(-44, (int16_t)m68k_vm_get_reg(M68K_VM_REG_D0));
+
+    mac_bus_write(&mac, pb + 22, 2, 9);         /* status and size of drive 9 */
+    mac_bus_write(&mac, pb + 26, 2, 24);
+    mac_disk_control(&mac);
+    TEST_ASSERT_EQ_INT(2, mac_bus_read(&mac, pb + 28, 4));
+    mac_bus_write(&mac, pb + 26, 2, 8);
+    mac_disk_status(&mac);
+    TEST_ASSERT_EQ_INT(9, mac_bus_read(&mac, pb + 28 + 12, 2));
 }
 
 static void test_stub_window(void)
@@ -438,6 +537,7 @@ int main(void)
     TEST_RUN(test_dac_and_render);
     TEST_RUN(test_scsi_bus_is_empty);
     TEST_RUN(test_disk_driver);
+    TEST_RUN(test_disk_driver_two_drives);
     TEST_RUN(test_stub_window);
     TEST_RUN(test_input_packets);
 

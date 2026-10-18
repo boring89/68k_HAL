@@ -648,6 +648,9 @@ static void emul_op(mac_t *mac, uint32_t pc, uint16_t op)
     case MAC_EMUL_OP_DISK_OPEN:
         mac_disk_open(mac);
         break;
+    case MAC_EMUL_OP_DISK_NEXT:
+        mac_disk_next(mac);
+        break;
     case MAC_EMUL_OP_DISK_PRIME:
         mac_disk_prime(mac);
         break;
@@ -823,6 +826,13 @@ int mac_reset(mac_t *mac)
     k_memset(&mac->dac, 0, sizeof mac->dac);
     k_memset(&mac->asc, 0, sizeof mac->asc);
     mac->overlay = true;
+    mac->mount_pending = 0;
+    mac->mount_poll = 0;
+    for (int i = 1; i < MAC_MAX_DISKS; i++)
+    {
+        if (mac->more_disks[i - 1].blocks != 0)
+            mac->mount_pending |= (uint8_t)(1u << i);
+    }
     mac->insn_count = 0;
     mac->flow_count = 0;
     mac->pmmu_total = 0;
@@ -876,9 +886,32 @@ static void advance_devices(mac_t *mac, int used)
 }
 
 
-/* Offsets in the stub window of the injected SysBeep call: its code, and the NOP it returns to. */
+/* Offsets in the stub window of the injected calls: their code, and the NOP each returns to. */
 #define SYSBEEP_CODE 0x1F00u
 #define SYSBEEP_RETURN (SYSBEEP_CODE + 6)
+#define MOUNT_CODE 0x1F40u
+#define MOUNT_DRIVE_WORD (MOUNT_CODE + 18)  /* the drive number in the code below, twice */
+#define MOUNT_DRIVE_LONG (MOUNT_CODE + 34)
+#define MOUNT_RETURN (MOUNT_CODE + 40)
+
+/* Run code (ending in a NOP at return_offset) inside the Mac OS, then put the CPU back as it was. */
+static int start_call(mac_t *mac, uint32_t code_offset, uint32_t return_offset)
+{
+    if (mac->call_active)
+    {
+        return -1;
+    }
+    for (int i = 0; i < 20; i++)
+    {
+        mac->call_regs[i] = m68k_vm_get_reg((m68k_vm_reg_t)i);
+    }
+    mac->call_return_pc = MAC_STUB_BASE + return_offset;
+    mac->call_active = true;
+    mac->call_returned = false;
+    m68k_vm_set_reg(M68K_VM_REG_PC, MAC_STUB_BASE + code_offset);
+    return 0;
+}
+
 
 int mac_sysbeep(mac_t *mac)
 {
@@ -892,16 +925,73 @@ int mac_sysbeep(mac_t *mac)
     {
         return -1;
     }
-    for (int i = 0; i < 20; i++)
-    {
-        mac->call_regs[i] = m68k_vm_get_reg((m68k_vm_reg_t)i);
-    }
     k_memcpy(mac->stub + SYSBEEP_CODE, code, sizeof code);
-    mac->call_return_pc = MAC_STUB_BASE + SYSBEEP_RETURN;
-    mac->call_active = true;
-    mac->call_returned = false;
-    m68k_vm_set_reg(M68K_VM_REG_PC, MAC_STUB_BASE + SYSBEEP_CODE);
-    return 0;
+    return start_call(mac, SYSBEEP_CODE, SYSBEEP_RETURN);
+}
+
+
+/*
+ * The extra drives are added to the drive queue at startup (the .Disk driver's
+ * Open), but nobody mounts them: the ROM mounts only the boot disk. Once the
+ * Finder is running, do what a disk driver does for an inserted disk: _MountVol
+ * the drive and post a disk-inserted event (diskEvt, message = drive number)
+ * so the Finder shows the volume. The call is made from inside the Mac OS
+ * (injected at a point where it is safe: supervisor mode, no interrupt being
+ * handled, not inside the ROM).
+ */
+#define LM_CURAPNAME 0x910      /* Str31: the running application */
+
+static void poll_mount(mac_t *mac)
+{
+    static const uint8_t code[] = {
+        0x7C, 0x0C,                 /* moveq #12,d6 */
+        0x4F, 0xEF, 0xFF, 0xCC,     /* lea -52(sp),sp: a zeroed parameter block */
+        0x20, 0x4F,                 /* movea.l sp,a0 */
+        0x22, 0x48,                 /* movea.l a0,a1 */
+        0x42, 0x99,                 /* clr.l (a1)+ */
+        0x51, 0xCE, 0xFF, 0xFC,     /* dbra d6,-4 */
+        0x31, 0x7C, 0x00, 0x00, 0x00, 0x16, /* move.w #drive,22(a0): ioVRefNum */
+        0xA0, 0x0F,                 /* _MountVol */
+        0x4F, 0xEF, 0x00, 0x34,     /* lea 52(sp),sp */
+        0x30, 0x3C, 0x00, 0x07,     /* move.w #7,d0: diskEvt */
+        0x20, 0x7C, 0x00, 0x00, 0x00, 0x00, /* movea.l #drive,a0: the message */
+        0xA0, 0x2F,                 /* _PostEvent */
+        0x4E, 0x71,                 /* nop: the call has returned */
+    };
+
+    if (mac->mount_pending == 0 || mac->call_active || ++mac->mount_poll % 16 != 0)
+    {
+        return;
+    }
+
+    uint32_t pc = m68k_vm_get_reg(M68K_VM_REG_PC);
+    uint32_t sr = m68k_vm_get_reg(M68K_VM_REG_SR);
+
+    if (mac_bus_read(mac, LM_CURAPNAME, 1) != 6 || mac_bus_read(mac, LM_CURAPNAME + 1, 4) != 0x46696E64 ||
+        mac_bus_read(mac, LM_CURAPNAME + 5, 2) != 0x6572 ||
+        pc >= MAC_ROM_BASE || (sr & SR_INT_MASK) != 0 || !(sr & SR_SUPERVISOR))
+    {
+        return;
+    }
+
+    int n = 0;
+
+    while (!(mac->mount_pending & (1u << n)))
+    {
+        n++;
+    }
+    mac->mount_pending &= (uint8_t)~(1u << n);
+
+    uint32_t drive = (uint32_t)(MAC_FIRST_DRIVE + n);
+
+    k_memcpy(mac->stub + MOUNT_CODE, code, sizeof code);
+    mac->stub[MOUNT_DRIVE_WORD] = (uint8_t)(drive >> 8);
+    mac->stub[MOUNT_DRIVE_WORD + 1] = (uint8_t)drive;
+    for (int b = 0; b < 4; b++)
+    {
+        mac->stub[MOUNT_DRIVE_LONG + b] = (uint8_t)(drive >> (24 - 8 * b));
+    }
+    start_call(mac, MOUNT_CODE, MOUNT_RETURN);
 }
 
 
@@ -928,6 +1018,7 @@ int mac_run(mac_t *mac, int cycles)
     {
         finish_call(mac);
     }
+    poll_mount(mac);
     while (used < cycles && !m68k_vm_halted() && !mac->break_hit &&
            !mac->call_returned)
     {

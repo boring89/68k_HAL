@@ -39,6 +39,13 @@ int volume_mount_any(void)
     return -1;
 }
 
+int volume_mount_device(block_device_t *device)
+{
+    mounted = device != NULL && mount_device(device) == 0;
+
+    return mounted ? 0 : -1;
+}
+
 hfs_volume_t *volume_get(void)
 {
     return mounted ? &volume : NULL;
