@@ -127,6 +127,14 @@ static void test_halves(void)
     TEST_ASSERT_EQ_INT(960, (int)fb_scaled_size(640, 3));
 }
 
+static void test_halves_step(void)
+{
+    TEST_ASSERT_EQ_INT(5, (int)fb_halves_step(4, 1));
+    TEST_ASSERT_EQ_INT(3, (int)fb_halves_step(4, -1));
+    TEST_ASSERT_EQ_INT(2, (int)fb_halves_step(2, -1));
+    TEST_ASSERT_EQ_INT(FB_SCALE_HALVES_MAX, (int)fb_halves_step(FB_SCALE_HALVES_MAX, 1));
+}
+
 static void test_choose_size(void)
 {
     const uint16_t w[] = {640, 800, 1024, 1280, 1920, 2560};
@@ -161,6 +169,7 @@ int main(void)
     TEST_RUN(test_best_scale);
     TEST_RUN(test_halves);
     TEST_RUN(test_choose_size);
+    TEST_RUN(test_halves_step);
 
     return TEST_REPORT("fb_scale");
 }

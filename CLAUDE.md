@@ -18,7 +18,7 @@ make test-host  # host 單元測試（tests/host/，含 ASan/UBSan）
 make test-qemu  # 以 -DKERNEL_SELFTEST 編譯 kernel，在 QEMU 中執行 kernel/test/selftest.c
 make test-sst   # SingleStepTests 68000 測資（tests/data/sst/，需自行下載，不在 make test 中；見 docs/m68k.md）
 make test-rom   # 在 host 上開機使用者的 Mac IIci ROM（變數 MAC_ROM、MAC_DISK；沒有檔案時跳過；不在 make test 中；見 docs/mac.md）
-make test-rom-qemu  # 同一台 Mac 在 kernel（QEMU）裡跑，畫面 CRC 必須與 host 相同（本機專用）
+make test-rom-qemu  # 同一台 Mac 在 kernel（QEMU）裡跑，畫面 CRC 必須與 host 相同：NuBus 卡（MAC_TEST_RES、MAC_TEST_DEPTH）與內建視訊各一次（本機專用）
 make mac-screenshot # 圖形模式 QEMU 的畫面存成 build/mac/qemu_screen.ppm（本機專用）
 make run-mac     # 在 QEMU 視窗中互動執行 Mac（輸入 mac + Enter；本機專用）
 make sdk        # C SDK（musl 靜態 i386）→ build/sdk；`tools/68khal-cc` 是 gcc 的包裝；見 docs/userland.md

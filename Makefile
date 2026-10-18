@@ -377,37 +377,56 @@ test-rom: $(BUILD)/host/mac_run_fast
 				if [ "$$got" != "$${want#*:}" ]; then echo "test-rom: FAIL: Monitors gave $$got, want $${want#*:}"; exit 1; fi; \
 			done; \
 			echo "test-rom: ok: Monitors switched the NuBus card to 800x600, 1920x1080, 3840x2160"; \
+			two=$$($(BUILD)/host/mac_run_fast -F 1500 -C 640x480 -2 640x480 -q $(BUILD)/mac_second.ppm -G \
+				-d "$(MAC_DISK)" "$(MAC_ROM)"); \
+			n=$$(echo "$$two" | grep -c '^gdevice'); \
+			if [ "$$n" != 2 ] || ! echo "$$two" | grep -q "on the desktop at 640,0"; then \
+				echo "test-rom: FAIL: two cards: $$n GDevices"; exit 1; fi; \
+			echo "test-rom: ok: two cards, the second screen right of the first"; \
 		fi; \
 	fi
 
 # The same Mac in the kernel (kernel/mac), booted by QEMU with the ROM and the
-# disk image as boot modules (kernel/mac/machine.h). The kernel runs
+# disk image as boot modules (kernel/mac/machine.h), twice: with the NuBus card
+# (MAC_TEST_RES, MAC_TEST_DEPTH) and with the built-in video. The kernel runs
 # MAC_TEST_FRAMES frames without a screen and prints the CRC-32 of the final
 # picture, which must equal what the host runner computes for the same number
 # of frames. KVM is used when available. Local only: needs MAC_ROM and
 # MAC_DISK.
 MAC_TEST_FRAMES ?= 600
+MAC_TEST_RES ?= 640x480
+MAC_TEST_DEPTH ?= 1
 test-rom-qemu: $(BUILD)/host/mac_run_fast
 	@if [ ! -f "$(MAC_ROM)" ] || [ ! -f "$(MAC_DISK)" ]; then \
 		echo "test-rom-qemu: SKIP (no ROM or disk; set MAC_ROM and MAC_DISK)"; exit 0; fi; \
 	mkdir -p $(BUILD)/mac; \
-	$(MAKE) --no-print-directory BUILD=$(BUILD)/mac/kernel-$(MAC_TEST_FRAMES) \
-		EXTRA_CFLAGS="-DKERNEL_MAC_TEST -DKERNEL_MAC_TEST_FRAMES=$(MAC_TEST_FRAMES)" \
-		$(BUILD)/mac/kernel-$(MAC_TEST_FRAMES)/kernel.elf || exit 1; \
 	cp "$(MAC_ROM)" $(BUILD)/mac/rom.bin; \
 	cp "$(MAC_DISK)" $(BUILD)/mac/disk.img; \
-	want=$$($(BUILD)/host/mac_run_fast -F $(MAC_TEST_FRAMES) -d "$(MAC_DISK)" "$(MAC_ROM)" | sed -n 's/^mac: screen crc \([0-9a-f]*\) .*/\1/p'); \
-	accel=""; [ -w /dev/kvm ] && accel="-enable-kvm"; \
-	out=$(BUILD)/mac/qemu.out; \
-	$(QEMU) $$accel -m 128 -display none -serial stdio \
-		-kernel $(BUILD)/mac/kernel-$(MAC_TEST_FRAMES)/kernel.elf \
-		-initrd "$(BUILD)/mac/rom.bin mac_rom,$(BUILD)/mac/disk.img mac_disk" > $$out 2>&1 & \
-	pid=$$!; n=0; \
-	until grep -q "mac: screen crc\|mac: could not run" $$out || [ $$n -ge 900 ]; do sleep 1; n=$$((n + 1)); done; \
-	kill $$pid 2>/dev/null; wait $$pid 2>/dev/null; \
-	got=$$(sed -n 's/.*mac: screen crc \([0-9A-Fa-f]*\) .*/\1/p' $$out | head -1 | tr 'A-F' 'a-f'); \
-	echo "test-rom-qemu: host crc $$want, kernel crc $$got"; \
-	[ -n "$$want" ] && [ "$$want" = "$$got" ]
+	w=$(word 1,$(subst x, ,$(MAC_TEST_RES))); h=$(word 2,$(subst x, ,$(MAC_TEST_RES))); \
+	for config in card builtin; do \
+		if [ $$config = card ]; then \
+			flags="-DKERNEL_MAC_TEST_WIDTH=$$w -DKERNEL_MAC_TEST_HEIGHT=$$h -DKERNEL_MAC_TEST_DEPTH=$(MAC_TEST_DEPTH)"; \
+			host="-C $(MAC_TEST_RES)x$(MAC_TEST_DEPTH)"; \
+		else \
+			flags="-DKERNEL_MAC_TEST_BUILTIN"; host="-I"; \
+		fi; \
+		kbuild=$(BUILD)/mac/kernel-$(MAC_TEST_FRAMES)-$$config; \
+		$(MAKE) --no-print-directory BUILD=$$kbuild \
+			EXTRA_CFLAGS="-DKERNEL_MAC_TEST -DKERNEL_MAC_TEST_FRAMES=$(MAC_TEST_FRAMES) $$flags" \
+			$$kbuild/kernel.elf > /dev/null || exit 1; \
+		want=$$($(BUILD)/host/mac_run_fast -F $(MAC_TEST_FRAMES) $$host -d "$(MAC_DISK)" "$(MAC_ROM)" | sed -n 's/^mac: screen crc \([0-9a-f]*\) .*/\1/p'); \
+		accel=""; [ -w /dev/kvm ] && accel="-enable-kvm"; \
+		out=$(BUILD)/mac/qemu-$$config.out; \
+		$(QEMU) $$accel -m 256 -display none -serial stdio \
+			-kernel $$kbuild/kernel.elf \
+			-initrd "$(BUILD)/mac/rom.bin mac_rom,$(BUILD)/mac/disk.img mac_disk" > $$out 2>&1 & \
+		pid=$$!; n=0; \
+		until grep -q "mac: screen crc\|mac: could not run" $$out || [ $$n -ge 900 ]; do sleep 1; n=$$((n + 1)); done; \
+		kill $$pid 2>/dev/null; wait $$pid 2>/dev/null; \
+		got=$$(sed -n 's/.*mac: screen crc \([0-9A-Fa-f]*\) .*/\1/p' $$out | head -1 | tr 'A-F' 'a-f'); \
+		echo "test-rom-qemu: $$config: host crc $$want, kernel crc $$got"; \
+		[ -n "$$want" ] && [ "$$want" = "$$got" ] || exit 1; \
+	done
 
 # Performance of the Mac on a large screen (local only): QEMU's VGA set to 2560x1440, the NuBus card at
 # 1280x720 enlarged 2x in Millions of colors from the start, 4000 frames run flat out. Prints the kernel's figures (frames/s, ms per frame, rows drawn) and leaves a

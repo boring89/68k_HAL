@@ -485,9 +485,9 @@ static int scale_hot_key(keycode_t key, uint32_t halves)
     switch (key)
     {
     case KEY_PAGE_UP:
-        return halves < FB_SCALE_HALVES_MAX ? (int)halves + 1 : (int)halves;
+        return (int)fb_halves_step(halves, 1);
     case KEY_PAGE_DOWN:
-        return halves > 2 ? (int)halves - 1 : 2;
+        return (int)fb_halves_step(halves, -1);
     case KEY_HOME:
         return 0;
     default:

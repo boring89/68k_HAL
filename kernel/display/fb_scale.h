@@ -59,6 +59,9 @@ uint32_t fb_scaled_size(uint32_t size, uint32_t halves);
 uint32_t fb_blit_halves(uint8_t *destination, uint32_t pitch, const uint32_t *source, const uint8_t *changed,
                         uint32_t width, uint32_t height, uint32_t halves, uint32_t *row);
 
+/* Half a step larger (step = 1) or smaller (-1) than 'halves', kept within 1x .. FB_SCALE_HALVES_MAX. */
+uint32_t fb_halves_step(uint32_t halves, int step);
+
 /*
  * Choose a picture size and enlargement for a screen: among 'count' sizes (widths[i] x heights[i]) and the
  * enlargements 2x, 1.5x and 1x, the one that covers the largest part of the screen; on a tie the larger

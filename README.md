@@ -119,7 +119,8 @@ make test-rom-qemu MAC_ROM=... MAC_DISK=...   # kernel and host must draw the sa
 
 The Mac's screen is a virtual NuBus video card: `mac` picks a resolution that
 fills your screen (2560x1440: 1280x720 enlarged 2x); `mac res=1024x768
-scale=1.5` chooses yourself, Ctrl+Alt+PgUp/PgDn/Home change the enlargement
+scale=1.5` chooses yourself (`depth=32` starts in millions of colors,
+`cards=2` adds a second screen), Ctrl+Alt+PgUp/PgDn/Home change the enlargement
 while it runs, and the Monitors control panel switches depth and resolution
 ([docs/nubus_video.md](docs/nubus_video.md)). Details, the list of ROM
 patches and the known limits (no serial or network yet) are in
