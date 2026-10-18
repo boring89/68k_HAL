@@ -345,6 +345,12 @@ test-rom: $(BUILD)/host/mac_run_fast
 			n=$$($(BUILD)/host/mac_run_fast -F 1200 -G -d "$(MAC_DISK)" "$(MAC_ROM)" | grep -c '^gdevice'); \
 			if [ "$$n" != 1 ]; then echo "test-rom: FAIL: $$n GDevices after boot (want 1: empty slots must not look like cards)"; exit 1; fi; \
 			echo "test-rom: ok: one GDevice"; \
+			for want in 1:800x600 9:1920x1080 12:3840x2160; do \
+				got=$$($(BUILD)/host/mac_run_fast -F 3700 -C 1024x768 $$(tools/mac_monitors.sh $${want%%:*}) \
+					-d "$(MAC_DISK)" "$(MAC_ROM)" | sed -n 's/^mac: screen crc .*(\(.*\))$$/\1/p'); \
+				if [ "$$got" != "$${want#*:}" ]; then echo "test-rom: FAIL: Monitors gave $$got, want $${want#*:}"; exit 1; fi; \
+			done; \
+			echo "test-rom: ok: Monitors switched the NuBus card to 800x600, 1920x1080, 3840x2160"; \
 		fi; \
 	fi
 

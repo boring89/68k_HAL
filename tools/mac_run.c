@@ -53,6 +53,7 @@
 #define RAM_SIZE (8u * 1024 * 1024)
 #define VRAM_BASE 0xFBB08000u      /* from the ROM's UniversalInfo video table */
 #define VRAM_SIZE (512u * 1024)
+#define INPUT_SCRIPT_MAX 256        /* -M, -J and -K entries kept */
 
 void m68k_vm_fatal(const char *message)
 {
@@ -372,9 +373,9 @@ int main(int argc, char **argv)
     uint32_t head = 0;
     uint32_t break_pc = 0;
     uint32_t frames = 0;
-    struct { int x, y, b; uint32_t frame; bool jump; } mouse[32];
+    struct { int x, y, b; uint32_t frame; bool jump; } mouse[INPUT_SCRIPT_MAX];
     int nmouse = 0;
-    struct { int code, down; uint32_t frame; } keys[32];
+    struct { int code, down; uint32_t frame; } keys[INPUT_SCRIPT_MAX];
     int nkeys = 0;
     const char *ppm_path = NULL;
     const char *wav_path = NULL;
@@ -428,7 +429,7 @@ int main(int argc, char **argv)
         else if (argv[i][0] == '-' && argv[i][1] == 'M' && i + 1 < argc)
         {
             /* -M x,y,button,frame: move the mouse at that frame (with -F) */
-            if (nmouse < 32)
+            if (nmouse < INPUT_SCRIPT_MAX)
             {
                 sscanf(argv[++i], "%d,%d,%d,%u", &mouse[nmouse].x,
                        &mouse[nmouse].y, &mouse[nmouse].b,
@@ -440,7 +441,7 @@ int main(int argc, char **argv)
         else if (argv[i][0] == '-' && argv[i][1] == 'J' && i + 1 < argc)
         {
             /* -J x,y,button,frame: put the pointer at screen position (x, y) at that frame */
-            if (nmouse < 32)
+            if (nmouse < INPUT_SCRIPT_MAX)
             {
                 sscanf(argv[++i], "%d,%d,%d,%u", &mouse[nmouse].x,
                        &mouse[nmouse].y, &mouse[nmouse].b,
@@ -452,7 +453,7 @@ int main(int argc, char **argv)
         else if (argv[i][0] == '-' && argv[i][1] == 'K' && i + 1 < argc)
         {
             /* -K adbcode,down,frame: a key goes down (1) or up (0) at that frame */
-            if (nkeys < 32)
+            if (nkeys < INPUT_SCRIPT_MAX)
             {
                 sscanf(argv[++i], "%i,%d,%u", &keys[nkeys].code,
                        &keys[nkeys].down, &keys[nkeys].frame);

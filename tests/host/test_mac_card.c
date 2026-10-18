@@ -254,6 +254,23 @@ static void test_resolutions(void)
     TEST_ASSERT_EQ_INT((int)(MAC_CARD_RES_ID_BASE + 11), (int)rd(PARAM + 2, 4));
     wr(PARAM + 2, 4, 0x200);
     TEST_ASSERT_EQ_INT(-50, call(true, 10));
+
+    /* 3840x2160 (id 0x8C) stops at 16 bits: no 32-bit parameters, no switch to it, no "Millions" in the ROM. */
+    wr(PARAM, 4, MAC_CARD_RES_ID_BASE + 12);
+    wr(PARAM + 4, 2, MAC_CARD_MODE_1BIT + 5);
+    wr(PARAM + 6, 4, VPBLOCK);
+    TEST_ASSERT_EQ_INT(-50, call(false, 18));
+    wr(PARAM, 2, MAC_CARD_MODE_1BIT + 5);
+    wr(PARAM + 2, 4, MAC_CARD_RES_ID_BASE + 12);
+    wr(PARAM + 6, 2, 0);
+    TEST_ASSERT_EQ_INT(-50, call(true, 10));
+    TEST_ASSERT_EQ_INT(MAC_CARD_MODE_1BIT + 5, mac.card.rom[mac.card.last_mode_entry]);
+    wr(PARAM, 2, MAC_CARD_MODE_1BIT + 4);
+    TEST_ASSERT_EQ_INT(0, call(true, 10));
+    TEST_ASSERT_EQ_INT(0xFF, mac.card.rom[mac.card.last_mode_entry]);
+    wr(PARAM, 4, MAC_CARD_RES_ID_BASE + 11);
+    TEST_ASSERT_EQ_INT(0, call(false, 17));
+    TEST_ASSERT_EQ_INT(MAC_CARD_MODE_1BIT + 4, (int)rd(PARAM + 20, 2));
     TEST_ASSERT_EQ_INT(-18, call(false, 99));
 }
 

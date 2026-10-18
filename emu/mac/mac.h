@@ -174,6 +174,7 @@ typedef struct
     uint32_t rom_size;
     uint32_t vpblock[MAC_CARD_DEPTHS];  /* offsets in rom[] of the VPBlock of each depth */
     uint32_t gamma;             /* offset in rom[] of the gamma table (GammaTbl) */
+    uint32_t last_mode_entry;   /* offset in rom[] of the deepest mode list's entry */
     uint32_t res;               /* index in mac_card_resolutions */
     uint32_t depth;             /* 0..5 = 1..32 bits per pixel */
     uint32_t preferred_res, preferred_depth;

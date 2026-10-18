@@ -154,6 +154,19 @@ static void cstring(writer_t *w, const char *s)
 }
 
 
+/*
+ * The deepest depth (index) a resolution offers. 32 bits per pixel at 3840x2160 (15360 bytes per row) crashes
+ * System 7.5.3 when it switches to it (the heap is overwritten with pixel values; 2560x1440 at 32 bits, 10240
+ * bytes per row, works), so rows longer than that stop at 16 bits.
+ */
+#define MAX_ROW_BYTES_32 10240u
+
+static uint32_t max_depth(uint32_t res)
+{
+    return mac_card_resolutions[res].width * 4u <= MAX_ROW_BYTES_32 ? MAC_CARD_DEPTHS - 1 : MAC_CARD_DEPTHS - 2;
+}
+
+
 static uint32_t row_bytes(uint32_t res, uint32_t depth)
 {
     /* Rounded up to whole longs: QuickDraw wants even row lengths, 4 is faster. */
@@ -214,11 +227,18 @@ static void update_crc(mac_card_t *card)
 }
 
 
-/* The VPBlocks of the ROM describe the current resolution (the ROM has room for one per depth). */
+/*
+ * The VPBlocks of the ROM describe the current resolution (the ROM has room for one per depth). The deepest
+ * mode list is the last entry of the video sResource: where the resolution does not offer it, the entry
+ * becomes the end of the list, and the Monitors control panel does not show that depth.
+ */
 static void update_vpblocks(mac_card_t *card)
 {
     for (uint32_t d = 0; d < MAC_CARD_DEPTHS; d++)
         fill_vpblock(card->rom + card->vpblock[d] + 4, card->res, d);
+
+    card->rom[card->last_mode_entry] = max_depth(card->res) == MAC_CARD_DEPTHS - 1
+                                           ? MAC_CARD_MODE_1BIT + MAC_CARD_DEPTHS - 1 : END_OF_LIST;
 
     update_crc(card);
 }
@@ -337,7 +357,10 @@ static uint32_t build_rom(mac_card_t *card)
     entry_offset(&w, E_MAJOR_LENGTH, major_length);
     entry_offset(&w, E_GAMMA_DIR, gamma_dir);
     for (uint32_t d = 0; d < MAC_CARD_DEPTHS; d++)
+    {
+        card->last_mode_entry = w.p;
         entry_offset(&w, MAC_CARD_MODE_1BIT + d, modes[d]);
+    }
     end_of_list(&w);
 
     directory = w.p;
@@ -542,9 +565,9 @@ static void wr16(mac_t *mac, uint32_t a, uint32_t v) { mac_bus_write(mac, a, 2, 
 static void wr32(mac_t *mac, uint32_t a, uint32_t v) { mac_bus_write(mac, a, 4, v); }
 
 
-static bool valid_mode(uint32_t mode)
+static bool valid_mode(uint32_t mode, uint32_t res)
 {
-    return mode >= MAC_CARD_MODE_1BIT && mode < MAC_CARD_MODE_1BIT + MAC_CARD_DEPTHS;
+    return mode >= MAC_CARD_MODE_1BIT && mode <= MAC_CARD_MODE_1BIT + max_depth(res);
 }
 
 
@@ -651,7 +674,7 @@ static int control(mac_t *mac, uint32_t code, uint32_t param, uint32_t dce)
         uint32_t mode = rd16(mac, param + CS_MODE);
 
         wr32(mac, param + CS_BASE_ADDR, MAC_CARD_VRAM_BASE);
-        if (!valid_mode(mode) || rd16(mac, param + CS_PAGE) != 0)
+        if (!valid_mode(mode, card->res) || rd16(mac, param + CS_PAGE) != 0)
             return PARAM_ERR;
         switch_mode(mac, card->res, mode - MAC_CARD_MODE_1BIT);
         return NO_ERR;
@@ -683,7 +706,7 @@ static int control(mac_t *mac, uint32_t code, uint32_t param, uint32_t dce)
         }
         return NO_ERR;
     case CSC_SET_DEFAULT_MODE:
-        if (valid_mode(rd8(mac, param + CS_MODE)))
+        if (valid_mode(rd8(mac, param + CS_MODE), card->res))
             card->preferred_depth = rd8(mac, param + CS_MODE) - MAC_CARD_MODE_1BIT;
         return NO_ERR;
     case CSC_SWITCH_MODE:
@@ -692,7 +715,7 @@ static int control(mac_t *mac, uint32_t code, uint32_t param, uint32_t dce)
         int res = res_from_id(rd32(mac, param + CS_DATA));
 
         wr32(mac, param + CS_BASE_ADDR, MAC_CARD_VRAM_BASE);
-        if (!valid_mode(mode) || res < 0 || rd16(mac, param + CS_PAGE) != 0)
+        if (res < 0 || !valid_mode(mode, (uint32_t)res) || rd16(mac, param + CS_PAGE) != 0)
             return PARAM_ERR;
         switch_mode(mac, (uint32_t)res, mode - MAC_CARD_MODE_1BIT);
         wr32(mac, dce + DCE_DEV_BASE, MAC_CARD_VRAM_BASE);
@@ -703,7 +726,7 @@ static int control(mac_t *mac, uint32_t code, uint32_t param, uint32_t dce)
         int res = res_from_id(rd32(mac, param + CS_DATA));
         uint32_t mode = rd16(mac, param + CS_MODE);
 
-        if (res < 0 || !valid_mode(mode))
+        if (res < 0 || !valid_mode(mode, (uint32_t)res))
             return PARAM_ERR;
         card->preferred_res = (uint32_t)res;
         card->preferred_depth = mode - MAC_CARD_MODE_1BIT;
@@ -722,7 +745,7 @@ static void write_resolution(mac_t *mac, uint32_t param, uint32_t res)
     wr32(mac, param + 8, mac_card_resolutions[res].width);
     wr32(mac, param + 12, mac_card_resolutions[res].height);
     wr32(mac, param + 16, 60u << 16);
-    wr16(mac, param + 20, MAC_CARD_MODE_1BIT + MAC_CARD_DEPTHS - 1);
+    wr16(mac, param + 20, MAC_CARD_MODE_1BIT + max_depth(res));
     wr32(mac, param + 22, 0);
 }
 
@@ -841,7 +864,7 @@ static int status(mac_t *mac, uint32_t code, uint32_t param)
         uint32_t vp = rd32(mac, param + 6);
         uint8_t block[VP_SIZE];
 
-        if (res < 0 || !valid_mode(mode))
+        if (res < 0 || !valid_mode(mode, (uint32_t)res))
             return PARAM_ERR;
         fill_vpblock(block, (uint32_t)res, mode - MAC_CARD_MODE_1BIT);
         for (uint32_t i = 0; i < 42; i++)       /* the VPBlock without its reserved long */
