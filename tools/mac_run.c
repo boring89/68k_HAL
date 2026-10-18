@@ -10,6 +10,10 @@
  *
  *   -n   run at most this many instructions (default 1000000)
  *   -d   attach this disk image (read into memory; never written back)
+ *   -E   attach another disk image as drive 9, 10, 11 (repeatable; mounted once the Finder runs)
+ *   -Z   MB: the Mac's RAM (default 8)
+ *   -P   frame: with -F, press the keyboard's power key at that frame (System 7 asks whether to shut down)
+ *   -Y   with -F, a restart of the Mac OS does not end the run (Shut Down and Restart end it otherwise)
  *   -x   save guest memory to a file: -x <addr hex> <length hex> <file>
  *   -F   run this many whole frames (416000 cycles each) and print the screen's CRC-32
  *   -M   dx,dy,button,frame: with -F, move the mouse by (dx,dy) at that frame (repeatable)
@@ -431,6 +435,7 @@ int main(int argc, char **argv)
     int nextra = 0;
     uint32_t ram_size = RAM_SIZE;
     uint32_t power_frame = 0;
+    bool keep_restarting = false;
     bool disk_read_only = false;
     uint32_t dump[8];
     int ndump = 0;
@@ -461,6 +466,10 @@ int main(int argc, char **argv)
         else if (argv[i][0] == '-' && argv[i][1] == 'P' && i + 1 < argc)
         {
             power_frame = strtoul(argv[++i], NULL, 0); /* -P frame: press the power key then */
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'Y')
+        {
+            keep_restarting = true; /* -Y: a restart of the Mac OS does not end the run */
         }
         else if (argv[i][0] == '-' && argv[i][1] == 'Z' && i + 1 < argc)
         {
@@ -817,6 +826,11 @@ int main(int argc, char **argv)
                 mac_sysbeep(&mac);
             }
             mac_run(&mac, 416000);
+            if (mac.power_request == MAC_POWER_RESTART && keep_restarting)
+            {
+                printf("mac: restart at frame %u (continuing)\n", f);
+                mac.power_request = MAC_POWER_NONE;
+            }
             if (mac.power_request != MAC_POWER_NONE)
             {
                 printf("mac: %s at frame %u\n", mac.power_request == MAC_POWER_OFF ? "power off" : "restart", f);

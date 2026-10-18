@@ -273,3 +273,31 @@ PC 鍵盤的 `Ctrl`、`Alt`、`Win`／`AltGr`、`Caps Lock`、方向鍵、F1–F
 | Delete／Insert | 向前刪除 0x75／Help 0x72 | |
 
 所以 `Alt-N` 是 Finder 的「新增檔案夾」。ADB 把右側修飾鍵回報成左側的碼。`make test-mac-keys`（本機）用 QEMU 的 `sendkey alt-n` 驗證桌面出現新資料夾。
+
+## 14. 虛擬記憶體（P10 D10 調查）
+
+結論：**目前無法使用**；打開以後 Mac 卡在開機畫面。而且因為 Mac 的記憶體已經可以直接設到 1 GiB（`mac_ram`，`docs/mac_disk.md` 第 5 節），虛擬記憶體（用磁碟假裝記憶體）的價值很小，**不建議為它修改 MMU 相關的 ROM 修補**。
+
+### 14.1 試了什麼（host，`mac_run`）
+
+1. Apple 選單 > Control Panels，打 `me` 選到 Memory，Command-O 打開。Memory 控制台**有**顯示「Virtual Memory On/Off」（System 從 Gestalt 看到 68030 的 PMMU），「Available on disk: 10M」。
+2. 點 On，「After restart」出現 10M。Special > Restart（`mac_run -Y` 讓重新啟動後繼續跑）。
+3. 重新開機後停在「Welcome to Macintosh」，再跑 6000 幀也一樣：PC 在 RAM 的 `0x17152`–`0x1716E` 繞圈（中斷遮罩 7），沿著一串記錄找「類型 6」的項目，永遠找不到。之前執行過的 PMMU 指令只有 ROM `0x40805614` 的 `pmove tc,(A4)` 與 `pmove crp,(4,A4)`：這段 ROM 程式（呼叫 `_SwapMMUMode`，讀 TC 與 CRP）是在走 MMU 的轉換表，把邏輯位址換成實體位址（虛擬記憶體的初始化要用它鎖住與找出記憶體的實體位置）。
+4. 對照：沒有打開虛擬記憶體時，同樣的 Restart 會回到桌面。
+
+### 14.2 為什麼不行
+
+- 我們的 ROM 修補（第 4 節）跳過 `InitMMU`（不建轉換表、不 `pmove` 開啟轉換）並讓 `_SwapMMUMode` 永遠回報 32 位元模式：機器始終「沒有轉換、邏輯 = 實體」。TC 讀回 0、CRP 沒有指向任何表，System 的虛擬記憶體程式卻假設 ROM 已經建好 32 位元的轉換表，要把它改成以頁為單位、有些頁「不在記憶體」的表。
+- 虛擬記憶體真正運作還需要：PMMU 依表轉換每一次存取（4 KiB 頁、early termination、TT0/TT1 透明轉換、ATC），存取到不在記憶體的頁時產生 **bus error**，並在處理完（從磁碟讀回那一頁）後**從中斷的那一個指令繼續**（68030 的 format $A/$B 例外堆疊框架）。Musashi 的 68030 PMMU 只有部分的表格走訪，bus error 的框架與指令續行也不完整（它沒有 prefetch queue，`docs/m68k.md` 第 8 節）。
+
+### 14.3 要支援的話得改什麼（只是記錄，不做）
+
+1. 拿掉 `0x430A`、`0x4384`、`0x438C` 的修補，讓 ROM 自己建 32 位元表並開啟轉換；`_SwapMMUMode` 回到 ROM 原本的實作。
+2. 模型的匯流排要經過 PMMU：Musashi 的 `m68k_pmmu` 要能完整走 68030 的表（含 TT 暫存器與 ATC），不支援的部分要補在 `third_party/musashi`——但這個專案不修改 Musashi，所以要在模型這層另寫一個 MMU。
+3. bus error 例外（format $B）與 `rte` 之後從中斷點續行：Musashi 目前沒有，也不打算補（同上）。
+4. 有了以上，虛擬記憶體的「備份檔」放在 RAM 磁碟上才有意義——但 RAM 本來就能直接給 Mac 用到 1 GiB，所以只剩「讓需要虛擬記憶體的程式（極少）也能跑」的價值。
+
+### 14.4 如果不小心打開了
+
+疊加層救得回來：Memory 控制台的設定與 VM Storage 檔都寫在系統碟的疊加層裡。選單「maintenance shell」→ `macsys reset`，下次 Mac 就從原始映像（虛擬記憶體關閉）開機。（沒有 68k_HAL 磁碟、用 ATA 直接寫的磁碟時，要用 hfsutils 在 Ubuntu 上刪掉 System Folder 裡的 VM Storage 並改回 PRAM——較麻煩。）是否乾脆讓 Memory 控制台不顯示這個選項（讓 Gestalt 回報沒有 PMMU）列在 `P10_PLAN.md` 的待決定。
+
