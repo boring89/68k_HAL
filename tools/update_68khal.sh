@@ -51,8 +51,10 @@ for tool in sgdisk mcopy mdir grub-editenv sha256sum dd; do
 done
 
 if [ -b "$target" ]; then
-    # A real disk: nothing on it may be mounted while it is written.
-    if grep -q "^$target" /proc/mounts; then
+    # A real disk: nothing on it may be mounted while it is written. /proc/mounts names the device
+    # itself (/dev/sda1), so a link such as /dev/disk/by-id/... is resolved first.
+    device=$(readlink -f "$target")
+    if grep -q "^$device" /proc/mounts; then
         die "$target (or one of its partitions) is mounted; unmount it first"
     fi
     [ "$(id -u)" = 0 ] || [ "$dry_run" = 1 ] || die "writing $target needs root (sudo)"
