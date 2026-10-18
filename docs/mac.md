@@ -168,7 +168,9 @@ Mac 的 ROM 是一本很長的開機劇本，劇本裡不斷地「去敲某個�
                       ├─ ROM 複本（模組唯讀）→ mac_rom_patch
                       ├─ Mac RAM 8 MiB：重用 kernel/m68k/guest（PMM frame 映射在 0x10000000）
                       ├─ NuBus 卡的 VRAM 32 MiB、畫面緩衝：kmalloc
-                      ├─ 磁碟：模組唯讀 + 64 KiB 為單位的寫入覆蓋層（最多 4 MiB 的變更）
+                      ├─ Mac RAM：P10 起可設定（mac ram=MB、mac_ram，預設 128 MB，最多 1 GiB）
+                      ├─ 磁碟（P10 起依序）：68k_HAL 磁碟（系統碟 = 疊加層、Applications，寫入保存；docs/mac_disk.md）
+                      │                   → 模組唯讀 + 64 KiB 為單位的寫入覆蓋層（最多 4 MiB 的變更）→ ata0
                       └─ 每幀 416000 個 CPU 週期（約 1/60 s Mac 時間）；每幀只轉換並畫出 VRAM 有被寫過的列
 ```
 

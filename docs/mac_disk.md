@@ -183,6 +183,7 @@ sudo tools/update_68khal.sh --no-kernel --system new_system.img /dev/sda   # 新
 make mac-disk     # build/68k_HAL_mac.img（約 9 GiB 稀疏檔，實際約 63 MB）；MAC_ROM、MAC_DISK 指向你的檔案
 make test-mac-disk   # 本機：小一號的同樣配置，在 QEMU（q35 + OVMF）跑兩次開機（第 7 節的流程），約 4 分鐘
 make test-mac-update # 本機：更新、試開、退回、promote、switch（第 8 節），約 8 分鐘
+make test-update-script # make test 裡：update_68khal.sh 對合成的小映像（不需要 Mac 的檔案）
 make test-macdisk    # make test 裡：合成的小 GPT 映像（沒有 Mac 系統）接 AHCI，檢查分割區與疊加層
 ```
 

@@ -83,6 +83,13 @@ QEMU 的 `-cdrom` 掛在 secondary channel，所以不會被誤認。
 
 測試：`kernel/test/selftest.c` 的 `test_nvme_disk`（QEMU `-device nvme`，256 KiB 映像：逐位元組比對全部內容、讀超出範圍失敗、不同大小的寫入—讀回—還原：1 頁、2 頁（PRP2 = 第二頁）、17 個區塊（PRP list）、全部 512 個區塊（拆成兩個命令））。`disks` 會列出 `nvme0`。
 
+## 4.7 P10 加在區塊層上的東西（`docs/mac_disk.md`）
+
+- `kernel/fs/gpt.c`：GPT 解析；`gpt_view_register` 把一個分割區變成一個區塊裝置（讀寫轉給整顆磁碟，加上起點）。
+- `kernel/block/overlay.c`：寫入時複製的疊加層（系統碟的原始映像不改，寫入存在另一個分割區；斷電安全）。
+- `kernel/block/cache.c`：write-through 的讀取快取，只用在 68k_HAL 磁碟；`block_read`／`block_write` 遇到有快取的裝置就走它。
+- 寫入的約定（`block.h`：回傳時已在媒體上）三個驅動都做到了：ATA 送 FLUSH CACHE、AHCI 送 FLUSH CACHE EXT、NVMe 送 Flush。
+
 ## 5. 測試
 
 - `tests/host/test_block.c`：註冊表、範圍檢查（含 `lba + count` 溢位）、ramdisk。
