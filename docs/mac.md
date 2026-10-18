@@ -299,5 +299,5 @@ PC 鍵盤的 `Ctrl`、`Alt`、`Win`／`AltGr`、`Caps Lock`、方向鍵、F1–F
 
 ### 14.4 如果不小心打開了
 
-疊加層救得回來：Memory 控制台的設定與 VM Storage 檔都寫在系統碟的疊加層裡。選單「maintenance shell」→ `macsys reset`，下次 Mac 就從原始映像（虛擬記憶體關閉）開機。（沒有 68k_HAL 磁碟、用 ATA 直接寫的磁碟時，要用 hfsutils 在 Ubuntu 上刪掉 System Folder 裡的 VM Storage 並改回 PRAM——較麻煩。）是否乾脆讓 Memory 控制台不顯示這個選項（讓 Gestalt 回報沒有 PMMU）列在 `P10_PLAN.md` 的待決定。
+實際上不會卡住：虛擬記憶體的開關存在 **PRAM**（參數 RAM）裡，而模型的 PRAM 每次執行 `mac` 都是新的（沒有保存）。kernel 裡的 Mac 選 Restart 會讓整台電腦重新開機（P10 D5），重新開始的 Mac 的 PRAM 是空的，虛擬記憶體就是關的。驗證：host 上打開虛擬記憶體後把磁碟存起來（`mac_run -O`），用存下的磁碟重新執行，開機正常（只出現「上次沒有正常關機」的對話框，因為第一次沒有關機）。只有在同一次執行裡重新開始（`mac_run -Y`）才會卡住。Memory 控制台裡的選項因此只是「設了不會生效」。留下的 VM Storage 檔在疊加層裡，`macsys reset` 會清掉。是否乾脆讓這個選項不出現（讓 Gestalt 回報沒有 PMMU）列在 `P10_PLAN.md` 的待決定。
 
