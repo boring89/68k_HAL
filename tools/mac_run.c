@@ -26,7 +26,8 @@
  *   -T   opcode: log each A-line trap (opcode 0 = all) with D0/A0/A1 (the Mac OS trap dispatcher entry)
  *   -D   addr,count: disassemble count instructions from addr (hex) and exit
  *   -G   with -F, list the QuickDraw GDevices (DeviceList) at the end
- *   -C   WxH: the NuBus video card (slot $C) starts in this resolution (default 640x480)
+ *   -C   WxH[xD]: the NuBus video card (slot $C) starts in this resolution (default 640x480) and depth
+ *        (D = 1, 2, 4, 8, 16 or 32 bits per pixel; default 1)
  *   -I   no NuBus video card: the built-in video (640x480, 8 bits at most) is the screen
  *   -V   addr: print every change of the 32-bit guest value at that address (hex), with the instruction that did it
  *   -L   @addr: print the registers each time the PC is addr (hex)
@@ -206,6 +207,7 @@ static bool want_log;
 static bool show_gd;
 static int card_res;            /* -C: index in mac_card_resolutions (0 = 640x480) */
 static bool builtin_only;       /* -I */
+static uint32_t card_depth;     /* -C: 0-5 = 1-32 bits */
 static uint32_t dis_addr, dis_n;
 static bool trap_log;
 static uint32_t trap_filter;
@@ -499,9 +501,12 @@ int main(int argc, char **argv)
         }
         else if (argv[i][0] == '-' && argv[i][1] == 'C' && i + 1 < argc)
         {
-            unsigned int w = 0, h = 0;
+            unsigned int w = 0, h = 0, bits = 1;
 
-            sscanf(argv[++i], "%ux%u", &w, &h);
+            sscanf(argv[++i], "%ux%ux%u", &w, &h, &bits);
+            card_depth = 0;
+            while (card_depth < 5 && (1u << card_depth) < bits)
+                card_depth++;
             card_res = mac_card_find_resolution(w, h);
             if (card_res < 0)
             {
@@ -607,7 +612,7 @@ int main(int argc, char **argv)
     mac.vram = calloc(1, VRAM_SIZE);
     mac.vram_size = VRAM_SIZE;
     mac.vram_base = VRAM_BASE;
-    if (!builtin_only && mac_card_attach(&mac, calloc(1, MAC_CARD_VRAM_SIZE), (uint32_t)card_res, 0) != 0)
+    if (!builtin_only && mac_card_attach(&mac, calloc(1, MAC_CARD_VRAM_SIZE), (uint32_t)card_res, card_depth) != 0)
     {
         fprintf(stderr, "cannot attach the video card\n");
         return 1;

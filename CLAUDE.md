@@ -162,7 +162,7 @@ Claude 依照上方工作規則直接實作。
 ## 已知問題（尚未修正）
 
 - 鍵盤：US 配置；已有 Ctrl（Ctrl-字母 = 控制字元，Ctrl-D = EOF）、Alt、Caps Lock、方向鍵、F1–F12、導覽鍵（`0xE0` 擴充碼），但沒有數字鍵台（keypad）、其他配置、鍵盤 LED、按住重複。
-- `emu/mac`：鍵盤與滑鼠以封包注入（Ctrl = Control、Alt = Command、Win/AltGr = Option）、聲音只有 ASC 的 FIFO 模式、沒有序列埠與網路；只支援 ROM `368CADFE`（Mac IIci）；NuBus 顯示卡開機時一律 1 位元（PRAMInitData 沒有生效）、3840x2160 只到 16 位元；其餘見 `docs/mac.md` 第 10 節與 `docs/nubus_video.md` 第 7 節。
+- `emu/mac`：鍵盤與滑鼠以封包注入（Ctrl = Control、Alt = Command、Win/AltGr = Option）、聲音只有 ASC 的 FIFO 模式、沒有序列埠與網路；只支援 ROM `368CADFE`（Mac IIci）；NuBus 顯示卡的 3840x2160 只到 16 位元；AppleTalk 關閉（XPRAM SPConfig = 0）；其餘見 `docs/mac.md` 第 10 節與 `docs/nubus_video.md` 第 7 節。
 - 更新率只有韌體設定的模式（通常 60 Hz）；UEFI 開機後不能換實體解析度（沒有 video BIOS）；兩者都需要原生 NVIDIA 驅動（`docs/gpu.md` 第 8 節）。
 - 滑鼠事件（`INPUT_EVENT_MOUSE`）進入 input buffer 但主迴圈忽略。
 - HFS 名稱比較只對 ASCII 不分大小寫，查詢是線性掃描（見 `docs/hfs.md`）。

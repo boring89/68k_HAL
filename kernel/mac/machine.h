@@ -50,6 +50,14 @@ void mac_machine_set_scale_halves(uint32_t halves);
  */
 int mac_machine_set_resolution(uint32_t width, uint32_t height);
 
+/*
+ * The depth the Mac starts in: 1, 2, 4, 8, 16 or 32 bits per pixel (default 1). It goes into the card's
+ * slot parameter RAM, where the ROM's startup code takes the video mode from; the Monitors control panel
+ * changes it while the Mac runs. A resolution without that depth starts in 1 bit. Returns -1 for other
+ * numbers.
+ */
+int mac_machine_set_depth(uint32_t bits);
+
 /* true: no NuBus card; the IIci's built-in video (640x480, 8 bits at most) is the screen. */
 void mac_machine_set_builtin(bool builtin);
 

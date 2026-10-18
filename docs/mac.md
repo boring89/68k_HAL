@@ -112,7 +112,7 @@ Mac 的 ROM 是一本很長的開機劇本，劇本裡不斷地「去敲某個�
 
 **SCC**：只回報閒置狀態（Tx 緩衝區空、hunt、Tx underrun）。LocalTalk 驅動啟動時只檢查這些位元；這是「讓 System 7 不要卡住」的最小做法，不能真的收發。
 
-**時鐘晶片與參數 RAM**（`CLKNOMEM`）：命令在 D1（bit 7 = 讀，bit 6–2 = 暫存器；`0x38` 開頭是 extended 命令，位址 = `((cmd&7)<<5)|((cmd>>10)&0x1F)`），資料在 D2。暫存器 0–7 回傳秒數計數器；其他存取 256 位元組的 XPRAM。XPRAM `0x8A` 永遠回報 32 位元定址（同 Basilisk II）。全新的 XPRAM 會被 ROM 填預設值。
+**時鐘晶片與參數 RAM**（`CLKNOMEM`）：命令在 D1（bit 7 = 讀，bit 6–2 = 暫存器；`0x38` 開頭是 extended 命令，位址 = `((cmd&7)<<5)|((cmd>>10)&0x1F)`），資料在 D2，**只回傳 D2**（P9 修正：以前也改了 D0、D1，而 ROM 讀寫多個位元組的迴圈把下一個命令放在 D0，結果每次只處理第一個位元組，見 `docs/nubus_video.md` 第 7 節）。暫存器 0–7 回傳秒數計數器；其他存取 256 位元組的 XPRAM。XPRAM `0x8A` 永遠回報 32 位元定址（同 Basilisk II）；`0x13`（SPConfig）永遠回報 0，AppleTalk 關閉（沒有 SCC 中斷，LocalTalk 不能用）。全新的 XPRAM 會被 ROM 填預設值。
 
 **輸入（鍵盤與滑鼠）**：沒有 ADB 硬體，所以不走硬體。`mac_mouse_move()`、`mac_key()` 把 ADB 裝置「會送出的封包」放進佇列（滑鼠：byte 1 = 放開位元(bit 7)＋dy，byte 2 = dx；每包最多 ±63；鍵盤：碼與按下/放開），在 CPU 可以接受 level 1 中斷（supervisor 模式、遮罩 0）的下一條指令，模型推一個 format 0 例外框，跳到 stub 裡的 `inject`；它用 ROM 的 ADB 裝置表（`ADBBase` = `$CF8`，每筆 12 位元組，+2 位址、+4 處理常式、+8 資料區）找到系統註冊的處理常式，用 A0 = 封包、A1 = 處理常式、A2 = 資料區、D0 = Talk R0 命令呼叫它，最後 `rte`。這就是 ADB 中斷會做的事，所以游標加速、按鍵轉譯（KeyTrans）、mouseDown/keyDown 事件都由 ROM 與 System 自己處理。驗證：host 的 `-M dx,dy,按鈕,幀` 與 `-K 碼,按下,幀`（選單 Label 在按下滑鼠時拉出；按 T 選取垃圾桶）。kernel 端：PS/2 事件經 `kernel/mac/adbkeys.c` 轉成 ADB 鍵碼；按 ` 鍵停止。
 
@@ -200,7 +200,7 @@ menuentry "mac" {
 - **輸入**：ADB 命令（Talk/Listen/Flush）全部回「沒有資料」，所以不能改鍵盤 LED、不能 Listen 設定；按鍵與滑鼠只靠上面的封包注入。沒有 Command/Option/Control 鍵（PS/2 只有 Shift 有對應）、沒有滑鼠右鍵。
 - **聲音只有 ASC 的 FIFO 模式**（System beep 與一般取樣聲音夠用）；沒有 wave table 模式、沒有立體聲分離、音量暫存器被忽略；取樣率暫存器 1–3 的數值是推測。見第 11 節。
 - **沒有序列埠與網路**：序列驅動（SERD）不載入；LocalTalk 靠一個閒置的 SCC 蒙混過去。AppleTalk 不能用。
-- 內建視訊只有 13" RGB 感測（640x480，`mac builtin`）。NuBus 卡：開機時一律 1 位元（用 Monitors 換）、3840x2160 只到 16 位元，見 `docs/nubus_video.md` 第 7 節。
+- 內建視訊只有 13" RGB 感測（640x480，`mac builtin`）。NuBus 卡：3840x2160 只到 16 位元，見 `docs/nubus_video.md` 第 7 節。
 - **只支援 ROM `368CADFE`**（Mac IIci）；其他機型的偏移量不同。
 - **Time Manager** 用的是 ROM 原本的程式，靠 VIA 計時器；目前能開機到桌面，長時間執行與計時器密集的程式沒測。
 - **速度**：host 約 20M 指令/秒，Finder 桌面約需 5 億條指令（25 秒）；kernel 在 QEMU/KVM 內差不多，TCG 會慢 5–10 倍；沒有實時節流，Mac 的時鐘跑得比牆上時間快。

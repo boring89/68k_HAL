@@ -418,9 +418,14 @@ static void emul_reset(mac_t *mac)
 #define XPRAM_ADDRESSING 0x8A
 #define XPRAM_32BIT 0x05
 
-/* Parameter RAM bytes 0xE0-0xE3: the network driver AppleTalk uses (the
- * sResource id and the slot of an Ethernet card; zero = LocalTalk). */
-#define XPRAM_NETWORK 0xE0
+/* Parameter RAM byte 0x13, SPConfig: how the two serial ports are used, bits 0-3 port B, 4-7 port A
+ * (0 = free, 1 = AppleTalk); Inside Macintosh: Devices, "Serial Driver" / "Parameter RAM". */
+#define XPRAM_SPCONFIG 0x13
+
+/* Parameter RAM byte 0x01: flags of the start-up code's wait for SCSI disks (_InternalWait, selector 2;
+ * meaning found by disassembly: bit 7 set = do not wait). */
+#define XPRAM_WAIT_FLAGS 0x01
+#define XPRAM_NO_SCSI_WAIT 0xC0
 
 #define CLK_READ 0x80
 #define CLK_EXT_MASK 0x78
@@ -465,17 +470,26 @@ static void emul_clknomem(mac_t *mac)
         }
     }
 
-    if (read && cell >= &mac->xpram[XPRAM_NETWORK] &&
-        cell < &mac->xpram[XPRAM_NETWORK + 4] && mac->xpram[XPRAM_NETWORK] == 0 &&
-        mac->xpram[XPRAM_NETWORK + 1] == 0)
+    if (read && cell == &mac->xpram[XPRAM_WAIT_FLAGS])
     {
-        /* Fresh parameter RAM selects LocalTalk, whose driver wants the SCC
-         * interrupts of a serial port. Select an Ethernet driver (sResource
-         * 0xF1 in slot 0xA) instead: it does not exist here, so AppleTalk
-         * stays off. Basilisk II returns the same values. */
-        static const uint8_t network[4] = { 0x00, 0xF1, 0x00, 0x0A };
-
-        *cell = network[cell - &mac->xpram[XPRAM_NETWORK]];
+        /*
+         * The start-up code asks _InternalWait for these flags (ROM 0x40801464); without bit 7 it polls
+         * for SCSI disks until the SCSI timeout, about 10 seconds of Mac time here, although this machine's
+         * SCSI bus is always empty and the system is on .Disk. Bits 7-6 set: no wait (what fresh
+         * parameter RAM read as before multi-byte accesses worked, see the end of this function).
+         */
+        *cell |= XPRAM_NO_SCSI_WAIT;
+    }
+    if (read && cell == &mac->xpram[XPRAM_SPCONFIG])
+    {
+        /*
+         * Both serial ports "free": AppleTalk is inactive, so the system does not load LocalTalk, whose
+         * driver wants the SCC's interrupts (this machine has none). Fresh parameter RAM says "port B:
+         * AppleTalk". (Before P9 the network selection at 0xE0 was set to an Ethernet card that does not
+         * exist instead; that only worked because multi-byte reads were broken, see the end of this
+         * function, and now shows an alert at startup.)
+         */
+        *cell = 0;
     }
     if (cell == &mac->xpram[XPRAM_ADDRESSING])
     {
@@ -498,9 +512,13 @@ static void emul_clknomem(mac_t *mac)
             }
         }
     }
+    /*
+     * Only D2 changes. The ROM's multi-byte parameter RAM routine (ROM 0x4080B1B8, used by _ReadXPRam and
+     * _WriteXPRam for more than one byte) keeps the next command in D0 across the calls: clearing it (as
+     * this did before P9) made every such call stop after the first byte, so slot PRAM records never
+     * reached the parameter RAM. Basilisk II's CLKNOMEM also returns only D2.
+     */
     m68k_vm_set_reg(M68K_VM_REG_D0 + 2, data & 0xFF);
-    m68k_vm_set_reg(M68K_VM_REG_D0 + 1, data & 0xFF);
-    m68k_vm_set_reg(M68K_VM_REG_D0, 0);
 }
 
 

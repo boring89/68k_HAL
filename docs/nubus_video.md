@@ -138,7 +138,7 @@ int mac_card_render(mac_t *mac, uint32_t *out, uint32_t out_pitch, uint32_t *row
 | 解析度 | Monitors「Options…」列出 13 種，切換成功：800x600、1280x720、1920x1080、2560x1440、3840x2160（`make test-rom` 檢查其中三種） |
 | 4K × 32 位元 | **不提供**：3840x2160 只到 16 位元（下面的「坑 4」） |
 | 效能（QEMU/KVM，`make test-mac-perf`） | 實體 2560x1440、Mac 1280x720×32 位元 2x：不節流 178.8 frames/s；每幀模擬 5.3 ms；每次畫面更新 render 0.4 ms＋螢幕 2.2 ms（平均 72 列） |
-| 開機時的色深 | 仍是 1 位元（PRAMInitData 有放，但見「沒做成」） |
+| 開機時的色深 | `mac depth=…`（PRAMInitData＋修好的 CLKNOMEM，N8） |
 
 **踩過的坑**：
 
@@ -148,7 +148,13 @@ int mac_card_render(mac_t *mac, uint32_t *out, uint32_t out_pitch, uint32_t *row
 4. **3840x2160 × 32 位元會讓 System 當掉**：每列 15360 位元組。切到 Millions 後 heap 被像素值覆蓋（未實作存取的位址看起來是 `0x619A61AC` 這種顏色值），PC 跑到 `0x46001022`。2560x1440×32（每列 10240）正常、4K×16 正常。推測是 QuickDraw 或 Monitors 在堆疊上配一列大小的緩衝區。做法：每列超過 10240 位元組的解析度不提供 32 位元——ROM 的最後一個 mode list 項目在那個解析度變成 list 結尾（Monitors 不列 Millions），驅動也拒絕。
 5. **工具的坑**：`mac_run` 的 `-J`／`-M`／`-K` 原本只收 32 筆，長腳本的最後幾下（OK 按鈕）被默默丟掉，看起來像 Mac 卡住。改成 256 筆。
 
-**沒做成（待查）**：讓卡以指定色深開機。ROM 的 `InitPRAMRecs`（`0x408061C0`）用 PRAMInitData（ID 33，注意不是 37）填 slot PRAM，`0x40800DE0` 從 slot PRAM 的 vendorUse1 取開機的 mode；追蹤顯示 vendorUse1 = 0x85 有放進記錄，`sPutPRAMRec` 回 0，但之後 `sReadPRAMRec` 讀回的是別的值，XPRAM 也看不到 slot PRAM 的位元組。可能 IIci 的 slot PRAM 不在我們模擬的 XPRAM 裡（另一個時鐘晶片協定路徑）。目前用 Monitors 切（System 會把選擇存在磁碟的 `scrn` 資源；kernel 的磁碟覆蓋層在記憶體，重開就沒了，ATA 磁碟則會保留）。
+**開機色深（P9 N8）**：ROM 的 `InitPRAMRecs`（`0x408061C0`）用 board sResource 的 PRAMInitData（ID 33，注意不是 37）填 slot PRAM，開機視訊碼（`0x40800DE0`）從 slot PRAM 的 vendorUse1 取開機模式。一開始沒有作用，追到的原因是**模型的時鐘晶片替身（CLKNOMEM）的 bug**：ROM 讀寫多個位元組的參數 RAM（`0x4080B1B8` 的迴圈）把下一個命令放在 D0，而 CLKNOMEM 每次都把 D0 清成 0，所以每次只讀寫到第一個位元組（slot PRAM、網路設定…全部受影響）。修正後（只回傳 D2，和 Basilisk II 一樣）：`mac depth=32`、`mac_run -C 1280x720x32` 直接以 Millions 開到 Finder。slot `$C` 的 PRAM 在 XPRAM `0x5E`–`0x65`（slot `$9` 從 `0x46` 起，每個 slot 8 位元組）。
+
+連帶的變化（以前的行為其實靠這個 bug）：
+
+- 以前「把網路設定（XPRAM `0xE0`）指向不存在的 Ethernet 卡讓 AppleTalk 不啟動」的做法，只因為多位元組讀取壞掉才有效；修好後 System 會跳「找不到 AppleTalk 驅動」的對話框。改成回報 SPConfig（XPRAM `0x13`）= 0（兩個序列埠都是 free，AppleTalk 關閉）。
+- 以前 ROM 寫入參數 RAM 預設值時也只寫到第一個位元組，XPRAM `0x01` 留著 `0xFF`；開機碼向 `_InternalWait` 要的旗標（`0x40801464`）bit 7 因此是 1，就不等 SCSI 磁碟。修好後是 0，開機碼會輪詢 SCSI 直到逾時（Mac 時間約 10 秒，Finder 晚 500 幀出現）。現在讀 `0x01` 時固定設 bit 7–6（我們的 SCSI 匯流排永遠是空的）。
+- 結果：開機時間與畫面和以前相同（1024x768 在第 1200 幀的 CRC 不變）；`make test-rom-qemu` 的黃金 CRC 仍由 host 與 kernel 一起決定。
 
 ## 8. 檔案與介面
 
@@ -159,9 +165,9 @@ int mac_card_render(mac_t *mac, uint32_t *out, uint32_t out_pitch, uint32_t *row
 | `emu/mac/mac.c` | slot 探測、bus 轉送、模擬 opcode `$712A`–`$712E`、RBV 感測線與 slot 中斷遮罩 |
 | `kernel/mac/machine.c` | 畫面配置（`relayout`：大小、倍率、置中）、只畫變動的列、熱鍵 |
 | `kernel/display/fb_scale.c` | `fb_blit_halves`（0.5 倍步進的最近鄰放大）、`fb_choose_size`（自動選解析度與倍率） |
-| `tools/mac_run.c` | `-C WxH`（卡的起始解析度）、`-I`（內建視訊） |
+| `tools/mac_run.c` | `-C WxH[xD]`（卡的起始解析度與色深）、`-I`（內建視訊） |
 | `tools/mac_monitors.sh` | 用 Monitors 切解析度的滑鼠腳本 |
 
-**kernel 的 `mac` 指令**：`mac [scale=1|1.5|2|2.5|3|4|auto] [res=WxH] [builtin]`。預設 `res` 依實體螢幕選（2560x1440 → 1280x720 以 2x 填滿；1920x1080 → 1280x720 以 1.5x 填滿；640x480 → 640x480），預設倍率是能放進螢幕的最大值。執行中：Ctrl+Alt+PgUp／PgDn 放大／縮小半倍、Ctrl+Alt+Home 回到最大（這三個組合 kernel 自己吃掉，不送給 Mac；Control-Command-PgUp 在 Mac 沒有意義）。Mac 在 Monitors 換解析度時，kernel 自動重新計算置中與倍率（倍率維持使用者要的，放不下就降）。
+**kernel 的 `mac` 指令**：`mac [scale=1|1.5|2|2.5|3|4|auto] [res=WxH] [depth=1|2|4|8|16|32] [builtin]`（`depth` 預設 1）。預設 `res` 依實體螢幕選（2560x1440 → 1280x720 以 2x 填滿；1920x1080 → 1280x720 以 1.5x 填滿；640x480 → 640x480），預設倍率是能放進螢幕的最大值。執行中：Ctrl+Alt+PgUp／PgDn 放大／縮小半倍、Ctrl+Alt+Home 回到最大（這三個組合 kernel 自己吃掉，不送給 Mac；Control-Command-PgUp 在 Mac 沒有意義）。Mac 在 Monitors 換解析度時，kernel 自動重新計算置中與倍率（倍率維持使用者要的，放不下就降）。
 
 **測試**：`tests/host/test_mac_card.c`（ROM 格式與 CRC、目錄、驅動位元組、bus、髒區與各色深的轉換、解析度清單、切換、4K 沒有 32 位元、VBL 中斷）、`tests/host/test_fb_scale.c`（1.5x、自動選擇）；本機：`make test-rom`（GDevice 數、Monitors 切三種解析度）、`make test-rom-qemu`（host 與 kernel 的畫面 CRC 相同，卡 640x480：`fa963b30`）、`make test-mac-perf`、`make mac-uefi-shot`。

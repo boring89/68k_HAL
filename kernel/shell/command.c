@@ -222,7 +222,7 @@ static shell_command_entry_t commands[] =
          cmd_cat},
         {COMMAND_MAC,
          "mac",
-         "Run the Macintosh IIci on boot modules mac_rom and mac_disk (` stops): mac [scale=1|1.5|2|auto] [res=WxH] [builtin]",
+         "Run the Macintosh IIci on boot modules mac_rom and mac_disk (` stops): mac [scale=1|1.5|2|auto] [res=WxH] [depth=32] [builtin]",
          cmd_mac},
         {COMMAND_CPUINFO,
          "cpuinfo",
@@ -1251,7 +1251,9 @@ static void cmd_mac(
     uint32_t halves = 0;
     uint32_t width = 0, height = 0;
     bool builtin = false;
+    int bits = 0;
 
+    mac_machine_set_depth(1);
     for (int i = 1; i < argc; i++)
     {
         const char *arg = argv[i];
@@ -1263,6 +1265,9 @@ static void cmd_mac(
             halves = 0;
         else if (k_strcmp(arg, "builtin") == 0)
             builtin = true;
+        else if (k_strncmp(arg, "depth=", 6) == 0 && (k_atoi(arg + 6, &bits), bits > 0) &&
+                 mac_machine_set_depth((uint32_t)bits) == 0)
+            continue;
         else if (k_strncmp(arg, "res=", 4) == 0 && parse_resolution(arg + 4, &width, &height) == 0 &&
                  mac_machine_set_resolution(width, height) == 0)
             continue;
@@ -1270,7 +1275,7 @@ static void cmd_mac(
             halves = (uint32_t)(arg[0] - '0') * 2 + (arg[1] == '.' ? 1 : 0);
         else
         {
-            terminal_write_line("usage: mac [scale=1|1.5|2|2.5|3|4|auto] [res=WxH] [builtin]");
+            terminal_write_line("usage: mac [scale=1|1.5|2|2.5|3|4|auto] [res=WxH] [depth=1|2|4|8|16|32] [builtin]");
             terminal_write_line("  res: 640x480 800x600 1024x768 1152x870 1280x720 1280x960 1280x1024 1440x900");
             terminal_write_line("       1600x1200 1920x1080 1920x1200 2560x1440 3840x2160 (default: fills the screen)");
             terminal_write_line("  Ctrl+Alt+PgUp/PgDn/Home: larger/smaller/largest while it runs; ` stops");

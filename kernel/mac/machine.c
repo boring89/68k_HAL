@@ -166,6 +166,20 @@ static uint32_t crc32(const uint32_t *pixels, uint32_t count)
 static uint32_t want_halves = 0;
 static int want_resolution = -1;
 static bool want_builtin = false;
+static uint32_t want_depth = 0;
+
+int mac_machine_set_depth(uint32_t bits)
+{
+    for (uint32_t depth = 0; depth < 6; depth++)
+    {
+        if ((1u << depth) == bits)
+        {
+            want_depth = depth;
+            return 0;
+        }
+    }
+    return -1;
+}
 void mac_machine_set_scale_halves(uint32_t halves)
 {
     want_halves = halves <= FB_SCALE_HALVES_MAX && halves != 1 ? halves : 0;
@@ -574,30 +588,6 @@ static const struct
     {2020, 250, 139, true}, /* drag to "Shut Down" */
     {2040, 250, 139, false},
 };
-#elif defined(KERNEL_MAC_TEST_MILLIONS)
-/*
- * make test-mac-perf: switch the NuBus card to Millions of colors with the
- * Monitors control panel (Apple menu > Control Panels, View > by Name,
- * Monitors, Colors, scroll, Millions), so that the run is measured in the
- * 32-bit mode. Positions as in tools/mac_monitors.sh (the windows open at the
- * same place on any screen from 1024x768 down to 1280x720).
- */
-static const struct
-{
-    uint32_t frame;
-    int x;
-    int y;
-    bool down;
-} test_script[] = {
-    {1200, 20, 9, true}, {1220, 70, 60, true}, {1240, 70, 60, false},          /* Control Panels */
-    {2000, 130, 9, true}, {2020, 150, 59, true}, {2040, 150, 59, false},       /* View > by Name */
-    {2400, 80, 170, true}, {2403, 80, 170, false}, {2406, 80, 170, true},      /* open Monitors */
-    {2409, 80, 170, false},
-    {3000, 116, 105, true}, {3005, 116, 105, false},                           /* Colors */
-    {3050, 241, 128, true}, {3060, 241, 128, false},                           /* scroll down */
-    {3100, 190, 130, true}, {3105, 190, 130, false},                           /* Millions */
-};
-#define KERNEL_MAC_TEST_SCRIPT
 #endif
 #ifdef KERNEL_MAC_TEST_FOLDER
 #define KERNEL_MAC_TEST_SCRIPT
@@ -731,7 +721,9 @@ int mac_machine_run(uint32_t frames)
                 view.requested = halves;
         }
         k_memset(card_vram, 0, MAC_CARD_VRAM_SIZE);
-        mac_card_attach(mac, card_vram, res, 0);
+        /* A resolution without that depth (3840x2160 has no 32 bits) starts in 1 bit. */
+        if (mac_card_attach(mac, card_vram, res, want_depth) != 0)
+            mac_card_attach(mac, card_vram, res, 0);
     }
     mac->rtc_seconds = RTC_START;
 
