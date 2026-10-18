@@ -61,6 +61,18 @@ typedef struct
     bool read_only;
 } mac_disk_t;
 
+/*
+ * How the Mac OS ended: Shut Down switches the power off through the RBV (VIA2 port B bit 2, v2PowerOff,
+ * active low; Guide to the Macintosh Family Hardware, "VIA2"), Restart starts the ROM again. mac_run stops
+ * when either happens; the host decides what to do (the kernel: ACPI off or reset).
+ */
+typedef enum
+{
+    MAC_POWER_NONE = 0,
+    MAC_POWER_OFF,
+    MAC_POWER_RESTART
+} mac_power_t;
+
 /* Drives the Mac sees: drive 8 is mac->disk, drives 9.. are mac->more_disks. */
 #define MAC_MAX_DISKS 4
 #define MAC_FIRST_DRIVE 8
@@ -244,6 +256,8 @@ typedef struct
     mac_disk_t disk;            /* drive 8; set by the host after mac_init() */
     mac_disk_t more_disks[MAC_MAX_DISKS - 1];   /* drives 9.. (blocks == 0: absent) */
     uint8_t disk_cursor;        /* next drive the Open routine adds */
+    uint8_t power_request;      /* mac_power_t: what the Mac OS asked for at its end */
+    uint32_t reset_count;       /* passes through the ROM's start (2 = a restart) */
     uint8_t mount_pending;      /* bit n: drive 8 + n still has to be mounted (see poll_mount) */
     uint32_t mount_poll;
 
@@ -470,6 +484,9 @@ void mac_mouse_move(mac_t *mac, int dx, int dy, bool button);
  */
 void mac_mouse_warp(mac_t *mac, int x, int y);
 void mac_key(mac_t *mac, uint8_t adb_code, bool down);
+
+/* The keyboard's power key (System 7 asks whether to shut down). */
+void mac_power_key(mac_t *mac, bool down);
 
 /* True once the ROM's ADB Manager has a handler for 'device'; queued input
  * is only injected after that. */

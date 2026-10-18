@@ -51,6 +51,10 @@ typedef struct
     uint8_t acpi_enable_value;
     uint32_t pm1a_control_port;
     uint32_t pm1b_control_port;
+    uint32_t pm1a_event_port;  /* PM1a_EVT_BLK: status register, then the enable register */
+    uint32_t pm1b_event_port;
+    uint8_t pm1_event_length;  /* PM1_EVT_LEN: bytes of both registers together (4 normally) */
+    uint16_t sci_irq;          /* SCI_INT: the ISA line of the ACPI interrupt (9 normally) */
     int s5_valid;            /* the sleep types for "soft off" were found in the DSDT */
     uint8_t s5_type_a;
     uint8_t s5_type_b;

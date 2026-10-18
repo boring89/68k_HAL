@@ -17,6 +17,9 @@ void pic_init(void);
 /* Unmask line (< PIC_LINE_COUNT); lines 8-15 also unmask the cascade. */
 void pic_unmask(unsigned int line);
 
+/* Mask line (< PIC_LINE_COUNT) again; the cascade stays as it is. */
+void pic_mask(unsigned int line);
+
 void pic_send_eoi(unsigned char irq);
 
 /*

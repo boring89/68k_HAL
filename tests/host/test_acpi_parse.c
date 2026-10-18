@@ -166,7 +166,10 @@ static void test_fadt(void)
     put32(table + 40, 0x7FE1000u);   /* DSDT */
     put32(table + 48, 0xB2);         /* SMI_CMD */
     table[52] = 0xF1;                /* ACPI_ENABLE */
+    table[46] = 9;                   /* SCI_INT */
+    put32(table + 56, 0x600);        /* PM1a_EVT_BLK */
     put32(table + 64, 0x604);        /* PM1a_CNT_BLK */
+    table[88] = 4;                   /* PM1_EVT_LEN */
     put32(table + 112, 1u << 10);    /* RESET_REG_SUP */
     table[116] = 1;                  /* I/O port */
     put32(table + 120, 0xCF9);
@@ -178,6 +181,10 @@ static void test_fadt(void)
     TEST_ASSERT_EQ_INT(0xB2, info.smi_command_port);
     TEST_ASSERT_EQ_INT(0xF1, info.acpi_enable_value);
     TEST_ASSERT_EQ_INT(0x604, info.pm1a_control_port);
+    TEST_ASSERT_EQ_INT(0x600, info.pm1a_event_port);
+    TEST_ASSERT_EQ_INT(9, info.sci_irq);
+    TEST_ASSERT_EQ_INT(0, info.pm1b_event_port);
+    TEST_ASSERT_EQ_INT(4, info.pm1_event_length);
     TEST_ASSERT(info.reset_valid);
     TEST_ASSERT_EQ_INT(1, info.reset_space);
     TEST_ASSERT_EQ_INT(0xCF9, info.reset_address);
@@ -201,6 +208,12 @@ static void test_fadt(void)
     TEST_ASSERT_EQ_INT(0, acpi_parse_fadt(table, 116, &info));
     TEST_ASSERT_EQ_INT(0x604, info.pm1a_control_port);
     TEST_ASSERT(!info.reset_valid);
+
+    TEST_ASSERT_EQ_INT(4, info.pm1_event_length);
+
+    /* Shorter than PM1_EVT_LEN: no length. */
+    TEST_ASSERT_EQ_INT(0, acpi_parse_fadt(table, 80, &info));
+    TEST_ASSERT_EQ_INT(0, info.pm1_event_length);
 
     TEST_ASSERT_EQ_INT(-1, acpi_parse_fadt(table, 60, &info));
     table[0] = 'X';

@@ -127,6 +127,12 @@ int acpi_parse_fadt(const uint8_t *fadt, size_t length, hal_acpi_info_t *info)
     info->pm1a_control_port = read32(fadt + 64);
     info->pm1b_control_port = read32(fadt + 68);
 
+    /* PM1a/b_EVT_BLK at 56 and 60, PM1_EVT_LEN at 88 (ACPI Specification 6.x, table 5.9 "FADT Format"). */
+    info->sci_irq = (uint16_t)(fadt[46] | fadt[47] << 8);
+    info->pm1a_event_port = read32(fadt + 56);
+    info->pm1b_event_port = read32(fadt + 60);
+    info->pm1_event_length = length >= 89 ? fadt[88] : 0;
+
     info->reset_valid = 0;
 
     /* Old FADTs (ACPI 1.0, 116 bytes as in QEMU) end before the reset register. */

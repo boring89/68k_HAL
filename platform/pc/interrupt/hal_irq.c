@@ -125,6 +125,26 @@ int hal_irq_unmask(unsigned int line)
     return ioapic_unmask(gsi);
 }
 
+int hal_irq_mask(unsigned int line)
+{
+    if (line >= HAL_IRQ_LINE_COUNT)
+        return -1;
+
+    if (line >= PIC_LINE_COUNT)
+        return 0;
+
+    if (!apic_mode)
+    {
+        pic_mask(line);
+
+        return 0;
+    }
+
+    uint32_t flags;
+
+    return ioapic_mask(line_to_gsi(line, &flags));
+}
+
 int irq_apic_enable(void)
 {
     const hal_acpi_info_t *acpi = hal_acpi_info();

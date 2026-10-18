@@ -18,6 +18,7 @@
 #                    supported: use mouse:DX,DY and button:down|up
 #   mouse:DX,DY      relative mouse move
 #   button:down|up   left button
+#   monitor:TEXT     a QEMU monitor command, e.g. monitor:system_powerdown (the ACPI power button)
 #   expect:TEXT      the serial output must contain TEXT (fails the run otherwise)
 #   quit             wait for QEMU to exit by itself (the Mac's Shut Down), at most 120 s; fails if it does not
 
@@ -112,6 +113,8 @@ def main():
                 elif kind == "shot":
                     cmd("screendump " + value)
                     time.sleep(1.5)
+                elif kind == "monitor":
+                    cmd(value)
                 elif kind == "key":
                     cmd("sendkey " + value)
                 elif kind == "mouse":

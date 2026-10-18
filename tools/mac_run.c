@@ -430,6 +430,7 @@ int main(int argc, char **argv)
     const char *extra_paths[MAC_MAX_DISKS - 1];
     int nextra = 0;
     uint32_t ram_size = RAM_SIZE;
+    uint32_t power_frame = 0;
     bool disk_read_only = false;
     uint32_t dump[8];
     int ndump = 0;
@@ -456,6 +457,10 @@ int main(int argc, char **argv)
         else if (argv[i][0] == '-' && argv[i][1] == 'm' && i + 1 < argc && ndump < 8)
         {
             dump[ndump++] = strtoul(argv[++i], NULL, 16);
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'P' && i + 1 < argc)
+        {
+            power_frame = strtoul(argv[++i], NULL, 0); /* -P frame: press the power key then */
         }
         else if (argv[i][0] == '-' && argv[i][1] == 'Z' && i + 1 < argc)
         {
@@ -788,6 +793,10 @@ int main(int argc, char **argv)
                     mac_key(&mac, (uint8_t)keys[k].code, keys[k].down != 0);
                 }
             }
+            if (power_frame != 0 && (f == power_frame || f == power_frame + 10))
+            {
+                mac_power_key(&mac, f == power_frame);
+            }
             for (int m = 0; m < nmouse; m++)
             {
                 if (mouse[m].frame == f)
@@ -808,6 +817,11 @@ int main(int argc, char **argv)
                 mac_sysbeep(&mac);
             }
             mac_run(&mac, 416000);
+            if (mac.power_request != MAC_POWER_NONE)
+            {
+                printf("mac: %s at frame %u\n", mac.power_request == MAC_POWER_OFF ? "power off" : "restart", f);
+                break;
+            }
         }
         if (disk_out_path != NULL && disk_image != NULL)
         {

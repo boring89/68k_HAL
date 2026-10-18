@@ -22,6 +22,7 @@ static void start_injection(mac_t *mac, uint32_t pc);
 
 #define RBV_BASE 0x50F26000u
 #define RBV_SPAN 0x2000u
+#define RBV_POWER_ON 0x04u        /* register 0 (VIA2 port B) bit 2, v2PowerOff: 0 = off */
 #define DAC_BASE 0x50F24000u
 #define DAC_SPAN 0x2000u
 
@@ -156,6 +157,12 @@ static uint32_t io_access(mac_t *mac, uint32_t addr, bool write, uint32_t value)
     {
         if (write)
         {
+            /*
+             * Register 0 is VIA2's port B: the ROM's power-off routine (0x40809E2C in 368CADFE) makes bit 2
+             * an output (bset in DDRB, offset 0x400) and clears it: the power goes off.
+             */
+            if (addr == RBV_BASE && !(value & RBV_POWER_ON))
+                mac->power_request = MAC_POWER_OFF;
             mac_rbv_write(&mac->rbv, addr - RBV_BASE, value);
             return 0;
         }
@@ -360,6 +367,12 @@ static void bus_write(void *ctx, uint32_t addr, int size, uint32_t value)
 /* RESET: what the ROM's hardware detection would have produced. */
 static void emul_reset(mac_t *mac)
 {
+    /* The second pass through the ROM's start is the Mac OS restarting. */
+    if (mac->reset_count++ > 0)
+    {
+        mac->power_request = MAC_POWER_RESTART;
+    }
+
     uint32_t list = UINFO_LIST;
     uint32_t entry = 0;
     uint32_t globs = mac->ram_size - BOOT_GLOBS_SIZE;
@@ -828,6 +841,8 @@ int mac_reset(mac_t *mac)
     mac->overlay = true;
     mac->mount_pending = 0;
     mac->mount_poll = 0;
+    mac->power_request = MAC_POWER_NONE;
+    mac->reset_count = 0;
     for (int i = 1; i < MAC_MAX_DISKS; i++)
     {
         if (mac->more_disks[i - 1].blocks != 0)
@@ -1020,7 +1035,7 @@ int mac_run(mac_t *mac, int cycles)
     }
     poll_mount(mac);
     while (used < cycles && !m68k_vm_halted() && !mac->break_hit &&
-           !mac->call_returned)
+           !mac->call_returned && mac->power_request == MAC_POWER_NONE)
     {
         int slice = cycles - used < TIME_SLICE ? cycles - used : TIME_SLICE;
         int ran = m68k_vm_run(slice);
@@ -1110,6 +1125,15 @@ void mac_key(mac_t *mac, uint8_t adb_code, bool down)
     /* Second byte 0xFF = no second key. */
     queue_input(mac, ADB_KEYBOARD, (uint8_t)((down ? 0 : 0x80) | (adb_code & 0x7F)),
                 0xFF);
+}
+
+
+void mac_power_key(mac_t *mac, bool down)
+{
+    /* The power key of an ADB keyboard sends $7F $7F when pressed and $FF $FF when released. */
+    uint8_t code = down ? 0x7F : 0xFF;
+
+    queue_input(mac, ADB_KEYBOARD, code, code);
 }
 
 

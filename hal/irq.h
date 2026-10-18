@@ -35,6 +35,9 @@ int hal_irq_register(unsigned int line, hal_irq_handler_t handler);
  */
 int hal_irq_unmask(unsigned int line);
 
+/* Stop interrupts on line again (e.g. from its own handler, when the source cannot be quietened). */
+int hal_irq_mask(unsigned int line);
+
 /*
  * Lines 0-15 are the classic ISA interrupts (timer 0, keyboard 1, mouse 12...); the platform
  * routes them to wherever its interrupt controller has them. Higher lines (up to

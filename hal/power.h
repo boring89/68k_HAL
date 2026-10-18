@@ -17,4 +17,11 @@ void hal_power_off(void) __attribute__((noreturn));
 /* Restart (on the PC: the ACPI reset register, then the keyboard controller, then port 0xCF9, then a triple fault). */
 void hal_power_reboot(void) __attribute__((noreturn));
 
+/*
+ * 1 once for each press of the machine's power button since the last call, else 0 (on the PC: the ACPI
+ * fixed power button event, polled; the first call switches the machine to ACPI mode). Holding the button
+ * for about 4 seconds still turns the machine off at once (the hardware does that).
+ */
+int hal_power_button_pressed(void);
+
 #endif

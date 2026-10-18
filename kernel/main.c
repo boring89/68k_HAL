@@ -46,6 +46,7 @@
 #include "hal/framebuffer.h"
 #include "hal/init.h"
 #include "hal/mmu.h"
+#include "hal/power.h"
 #include "hal/timer.h"
 
 #ifdef KERNEL_SELFTEST
@@ -266,6 +267,13 @@ void kernel_main(void)
 
         net_poll();
         usb_poll();
+
+        /* The machine's power button turns it off, as in any system (in the Mac it asks the Mac first). */
+        if (hal_power_button_pressed())
+        {
+            kernel_printf("%s\n", "Power button: turning the computer off");
+            hal_power_off();
+        }
 
         if (tick - last_tick >= hal_timer_frequency())
         {

@@ -79,6 +79,16 @@ void pic_unmask(unsigned int line)
     pic_clear_mask_bit(PIC1_DATA, PIC_CASCADE_LINE);
 }
 
+void pic_mask(unsigned int line)
+{
+    uint16_t port = line < 8 ? PIC1_DATA : PIC2_DATA;
+    uint32_t flags = cpu_irq_save();
+
+    outb(port, inb(port) | (1u << (line & 7)));
+
+    cpu_irq_restore(flags);
+}
+
 void pic_send_eoi(unsigned char irq)
 {
     if (irq >= 8)

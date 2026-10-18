@@ -171,6 +171,29 @@ static void test_rom_patch_rejects_other_roms(void)
     TEST_ASSERT_EQ_INT(-1, mac_rom_patch(other, 0x1000));
 }
 
+/* Shut Down: the ROM sets DDRB bit 2 (offset 0x400) and clears port B bit 2 of the RBV (P10 D5). */
+static void test_power_off_request(void)
+{
+    TEST_ASSERT_EQ_INT(0, mac_init(&mac, ram, RAM_SIZE, rom, ROM_SIZE));
+    mac_reset(&mac);
+    TEST_ASSERT_EQ_INT(MAC_POWER_NONE, mac.power_request);
+    mac_bus_write(&mac, 0x50F26400, 1, 0x04);       /* the data direction: not a request */
+    TEST_ASSERT_EQ_INT(MAC_POWER_NONE, mac.power_request);
+    mac_bus_write(&mac, 0x50F26000, 1, 0x04);       /* power stays on */
+    TEST_ASSERT_EQ_INT(MAC_POWER_NONE, mac.power_request);
+    mac_bus_write(&mac, 0x50F26000, 1, 0x00);
+    TEST_ASSERT_EQ_INT(MAC_POWER_OFF, mac.power_request);
+
+    /* mac_run does nothing more once the Mac asked. */
+    uint32_t before = (uint32_t)mac.insn_count;
+
+    mac_run(&mac, 1000);
+    TEST_ASSERT_EQ_INT(before, (uint32_t)mac.insn_count);
+
+    mac_reset(&mac);
+    TEST_ASSERT_EQ_INT(MAC_POWER_NONE, mac.power_request);
+}
+
 static void test_rbv_registers(void)
 {
     mac_rbv_t rbv = { 0 };
@@ -534,6 +557,7 @@ int main(void)
     TEST_RUN(test_iwm_mode_readback);
     TEST_RUN(test_rom_patch_rejects_other_roms);
     TEST_RUN(test_rbv_registers);
+    TEST_RUN(test_power_off_request);
     TEST_RUN(test_dac_and_render);
     TEST_RUN(test_scsi_bus_is_empty);
     TEST_RUN(test_disk_driver);

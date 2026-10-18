@@ -13,6 +13,7 @@
 #include "hal/cpu.h"
 #include "hal/framebuffer.h"
 #include "hal/mmu.h"
+#include "hal/power.h"
 #include "hal/timer.h"
 #include "kernel/lib/k_time.h"
 #include "kernel/block/block.h"
@@ -747,6 +748,27 @@ static const struct
 #define KERNEL_MAC_TEST_SCRIPT
 #endif
 
+/* Frames the power key stays down: about 1/6 s, like a short press. */
+#define POWER_KEY_FRAMES 10
+
+/*
+ * The Mac OS has shut down or restarted: the machine does the same (ACPI soft off, or a reset). Every
+ * write of the Mac has already reached its disk (the block devices write through). A test run (a fixed
+ * number of frames) only reports it.
+ */
+static void power_follows_mac(mac_power_t power, bool interactive)
+{
+    kernel_printf("mac: the Mac OS %s\n", power == MAC_POWER_OFF ? "shut down" : "restarted");
+
+    if (!interactive)
+        return;
+
+    if (power == MAC_POWER_OFF)
+        hal_power_off();
+
+    hal_power_reboot();
+}
+
 /*
  * Give the screen back to the console: the mode it had before the Mac (if the Mac asked for another one),
  * then everything the console kept meanwhile, drawn again.
@@ -788,6 +810,7 @@ int mac_machine_run(uint32_t frames)
 
     int16_t *audio_out = sound_get() != NULL ? kmalloc(AUDIO_FRAMES * 4) : NULL;
     int status = -1;
+    mac_power_t power = MAC_POWER_NONE;
 
     if (!want_builtin && card_vram == NULL)
         kernel_printf("%s\n", "mac: no memory for the video card's 32 MiB: using the built-in video");
@@ -989,6 +1012,7 @@ int mac_machine_run(uint32_t frames)
     }
 
     uint64_t paced_start = hal_timer_ns();
+    uint32_t power_key_frames = 0;
 
     for (uint32_t frame = 1; frames == 0 || frame <= frames; frame++)
     {
@@ -1007,10 +1031,27 @@ int mac_machine_run(uint32_t frames)
         if (frame == KERNEL_MAC_TEST_BEEP)
             mac_sysbeep(mac);
 #endif
+        /* The machine's power button is the Mac keyboard's power key: the Mac asks whether to shut down. */
+        if (power_key_frames > 0 && --power_key_frames == 0)
+            mac_power_key(mac, false);
+        else if (power_key_frames == 0 && hal_power_button_pressed())
+        {
+            kernel_printf("%s\n", "mac: power button: asking the Mac to shut down");
+            mac_power_key(mac, true);
+            power_key_frames = POWER_KEY_FRAMES;
+        }
+
         uint64_t emulate_start = hal_timer_ns();
         uint32_t instructions_before = mac->insn_count;
 
         mac_run(mac, (int)MAC_FRAME_CYCLES);
+
+        /* Shut Down or Restart in the Mac OS: the run ends (the machine follows below). */
+        if (mac->power_request != MAC_POWER_NONE)
+        {
+            power = (mac_power_t)mac->power_request;
+            break;
+        }
 
         perf.emulate_ns += hal_timer_ns() - emulate_start;
         perf.instructions += (uint32_t)(mac->insn_count - instructions_before);
@@ -1120,6 +1161,10 @@ out:
     kfree(vram);
     kfree(rom);
     kfree(mac);
+
+    if (power != MAC_POWER_NONE)
+        power_follows_mac(power, frames == 0);
+
     return status;
 }
 
