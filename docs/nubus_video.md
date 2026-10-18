@@ -156,6 +156,18 @@ int mac_card_render(mac_t *mac, uint32_t *out, uint32_t out_pitch, uint32_t *row
 - 以前 ROM 寫入參數 RAM 預設值時也只寫到第一個位元組，XPRAM `0x01` 留著 `0xFF`；開機碼向 `_InternalWait` 要的旗標（`0x40801464`）bit 7 因此是 1，就不等 SCSI 磁碟。修好後是 0，開機碼會輪詢 SCSI 直到逾時（Mac 時間約 10 秒，Finder 晚 500 幀出現）。現在讀 `0x01` 時固定設 bit 7–6（我們的 SCSI 匯流排永遠是空的）。
 - 結果：開機時間與畫面和以前相同（1024x768 在第 1200 幀的 CRC 不變）；`make test-rom-qemu` 的黃金 CRC 仍由 host 與 kernel 一起決定。
 
+### 效能（P9 N12，`make test-mac-perf MAC_PERF_RES=… MAC_PERF_DEPTH=…`，QEMU/KVM，實體 2560x1440，4000 幀不節流）
+
+| Mac 的模式 | 倍率 | frames/s | 每幀模擬 | 平均每次更新（render＋螢幕） | 最慢的一次更新 |
+|---|---|---|---|---|---|
+| 1280x720 × 32 位元 | 2x | 175 | 5.6 ms | 0.2＋0.6 ms | 25 ms（整個畫面重畫） |
+| 1920x1080 × 32 位元 | 1x | 172 | 5.7 ms | 0.2＋0.1 ms | — |
+| 2560x1440 × 32 位元 | 1x | 171 | 5.7 ms | 0.2＋0.1 ms | 28 ms |
+| 3840x2160 × 16 位元 | 放不下：只顯示左上角 | 170 | 5.7 ms | 0.3＋0.1 ms | — |
+| 640x480 × 8 位元 | 3x | 186 | 5.3 ms | 0.3＋1.6 ms | — |
+
+互動執行時 Mac 節流在 60 幀／秒（16.7 ms 一幀），所以平常的負擔約 6 ms／16.7 ms；整個畫面重畫（換模式、桌面全部重畫）時會掉一幀。比實體螢幕大的 Mac 畫面（3840x2160 在 2560x1440 上）只顯示左上角（沒有縮小），用 Monitors 換小一點的解析度。報告的最後一行 `mac: slowest screen update` 是這個最壞情況，實機請一起回報。
+
 ## 7.5 兩張卡（多螢幕，P9 N10）
 
 `mac cards=2`（kernel）、`mac_run -2 WxH -q 第二個螢幕.ppm`（host）：第二張同樣的卡插在 slot `$D`（ROM 在 `0xFDFFxxxx`、VRAM 在 `0xD0000000`、RBV slot 中斷 bit 4）。程式上 `mac_t.card[]` 變成陣列；bus 依位址的 slot 找卡，驅動依 DCE 的 `dCtlSlot` 找卡，中斷處理程式的 sqParm 就是 slot。

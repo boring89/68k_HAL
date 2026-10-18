@@ -247,6 +247,7 @@ static struct
     uint64_t emulate_ns;
     uint64_t render_ns;
     uint64_t show_ns;
+    uint64_t slowest_ns;        /* the slowest screen update (render and screen): a whole new picture */
     uint32_t updates;
     uint64_t rows;
     uint64_t instructions;
@@ -471,6 +472,7 @@ static void report_performance(uint64_t wall_ns)
     print_tenths(" (", rows10, " rows drawn of ");
     kernel_printf("%ux%u)", view.screen[0].width, view.screen[0].height);
     kernel_printf("\n");
+    print_tenths("mac: slowest screen update ", perf.slowest_ns * 10 / 1000000, " ms\n");
 }
 
 
@@ -932,7 +934,11 @@ int mac_machine_run(uint32_t frames)
             perf.render_ns += hal_timer_ns() - render_start;
 
             if (rendered > 0)
+            {
                 show(&fb);
+                if (hal_timer_ns() - render_start > perf.slowest_ns)
+                    perf.slowest_ns = hal_timer_ns() - render_start;
+            }
         }
         if (handle_input(mac, &rescale) && frames == 0)
         {

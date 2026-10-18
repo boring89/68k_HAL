@@ -429,18 +429,21 @@ test-rom-qemu: $(BUILD)/host/mac_run_fast
 	done
 
 # Performance of the Mac on a large screen (local only): QEMU's VGA set to 2560x1440, the NuBus card at
-# 1280x720 enlarged 2x in Millions of colors from the start, 4000 frames run flat out. Prints the kernel's figures (frames/s, ms per frame, rows drawn) and leaves a
+# MAC_PERF_RES (default 1280x720, enlarged 2x) in MAC_PERF_DEPTH bits (default 32, Millions) from the
+# start, 4000 frames run flat out. Prints the kernel's figures (frames/s, ms per frame, rows drawn) and leaves a
 # screenshot in build/mac/perf.ppm (tools/mac_perf.py).
 MAC_PERF_FRAMES ?= 4000
+MAC_PERF_RES ?= 1280x720
+MAC_PERF_DEPTH ?= 32
 test-mac-perf:
 	@if [ ! -f "$(MAC_ROM)" ] || [ ! -f "$(MAC_DISK)" ]; then \
 		echo "test-mac-perf: SKIP (no ROM or disk; set MAC_ROM and MAC_DISK)"; exit 0; fi; \
 	mkdir -p $(BUILD)/mac; \
-	$(MAKE) --no-print-directory BUILD=$(BUILD)/mac/kernel-perf \
-		EXTRA_CFLAGS="-DKERNEL_MAC_TEST -DKERNEL_MAC_TEST_FRAMES=$(MAC_PERF_FRAMES) -DKERNEL_MAC_TEST_DEPTH=32 -DKERNEL_MAC_TEST_VIDEO_W=2560 -DKERNEL_MAC_TEST_VIDEO_H=1440 -DKERNEL_MAC_TEST_WIDTH=1280 -DKERNEL_MAC_TEST_HEIGHT=720" \
-		$(BUILD)/mac/kernel-perf/kernel.elf || exit 1; \
+	$(MAKE) --no-print-directory BUILD=$(BUILD)/mac/kernel-perf-$(MAC_PERF_RES)-$(MAC_PERF_DEPTH) \
+		EXTRA_CFLAGS="-DKERNEL_MAC_TEST -DKERNEL_MAC_TEST_FRAMES=$(MAC_PERF_FRAMES) -DKERNEL_MAC_TEST_DEPTH=$(MAC_PERF_DEPTH) -DKERNEL_MAC_TEST_VIDEO_W=2560 -DKERNEL_MAC_TEST_VIDEO_H=1440 -DKERNEL_MAC_TEST_WIDTH=$(word 1,$(subst x, ,$(MAC_PERF_RES))) -DKERNEL_MAC_TEST_HEIGHT=$(word 2,$(subst x, ,$(MAC_PERF_RES)))" \
+		$(BUILD)/mac/kernel-perf-$(MAC_PERF_RES)-$(MAC_PERF_DEPTH)/kernel.elf || exit 1; \
 	cp "$(MAC_ROM)" $(BUILD)/mac/rom.bin; cp "$(MAC_DISK)" $(BUILD)/mac/disk.img; \
-	python3 -I tools/mac_perf.py $(BUILD)/mac/kernel-perf/kernel.elf $(BUILD)/mac/rom.bin $(BUILD)/mac/disk.img $(BUILD)/mac/perf.ppm
+	python3 -I tools/mac_perf.py $(BUILD)/mac/kernel-perf-$(MAC_PERF_RES)-$(MAC_PERF_DEPTH)/kernel.elf $(BUILD)/mac/rom.bin $(BUILD)/mac/disk.img $(BUILD)/mac/perf.ppm
 
 # The Mac under UEFI (OVMF) on a 2560x1440 screen (local only): the kernel's Multiboot2 header asks GRUB
 # for 2560x1440; the card starts at MAC_UEFI_RES (default 1280x720) enlarged MAC_UEFI_HALVES/2 times (4 =
