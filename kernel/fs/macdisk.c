@@ -7,8 +7,6 @@
 
 #include "gpt.h"
 
-#include "kernel/lib/k_string.h"
-
 enum
 {
     PART_BOOT,
@@ -108,13 +106,9 @@ int macdisk_init(uint32_t slot)
     return -1;
 }
 
-uint32_t macdisk_slot_from_cmdline(const char *cmdline)
+uint32_t macdisk_slot_from_name(const char *name)
 {
-    const char *p = cmdline == NULL ? NULL : k_strstr(cmdline, "slot=");
-
-    /* Only a whole word: "slot=b" at the start or after a space. */
-    if (p != NULL && (p == cmdline || p[-1] == ' ') && (p[5] == 'b' || p[5] == 'B') &&
-        (p[6] == '\0' || p[6] == ' '))
+    if (name != NULL && (name[0] == 'b' || name[0] == 'B') && name[1] == '\0')
         return MACDISK_SLOT_B;
 
     return MACDISK_SLOT_A;

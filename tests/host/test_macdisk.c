@@ -63,14 +63,13 @@ static int boot(uint32_t slot)
     return macdisk_init(slot);
 }
 
-static void test_cmdline(void)
+static void test_slot_name(void)
 {
-    TEST_ASSERT_EQ_INT(MACDISK_SLOT_A, macdisk_slot_from_cmdline(NULL));
-    TEST_ASSERT_EQ_INT(MACDISK_SLOT_A, macdisk_slot_from_cmdline("quiet"));
-    TEST_ASSERT_EQ_INT(MACDISK_SLOT_B, macdisk_slot_from_cmdline("slot=b"));
-    TEST_ASSERT_EQ_INT(MACDISK_SLOT_B, macdisk_slot_from_cmdline("x slot=B y"));
-    TEST_ASSERT_EQ_INT(MACDISK_SLOT_A, macdisk_slot_from_cmdline("xslot=b"));
-    TEST_ASSERT_EQ_INT(MACDISK_SLOT_A, macdisk_slot_from_cmdline("slot=bb"));
+    TEST_ASSERT_EQ_INT(MACDISK_SLOT_A, macdisk_slot_from_name(NULL));
+    TEST_ASSERT_EQ_INT(MACDISK_SLOT_A, macdisk_slot_from_name("a"));
+    TEST_ASSERT_EQ_INT(MACDISK_SLOT_B, macdisk_slot_from_name("b"));
+    TEST_ASSERT_EQ_INT(MACDISK_SLOT_B, macdisk_slot_from_name("B"));
+    TEST_ASSERT_EQ_INT(MACDISK_SLOT_A, macdisk_slot_from_name("bb"));
 }
 
 static void test_layout(void)
@@ -171,7 +170,7 @@ static void test_no_layout(void)
 
 int main(void)
 {
-    TEST_RUN(test_cmdline);
+    TEST_RUN(test_slot_name);
     TEST_RUN(test_layout);
     TEST_RUN(test_persistence_and_reset);
     TEST_RUN(test_mismatch_after_image_change);

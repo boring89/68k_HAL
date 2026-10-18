@@ -50,18 +50,26 @@ static uint64_t get64(const uint8_t *p)
     return (uint64_t)get32(p) | (uint64_t)get32(p + 4) << 32;
 }
 
+/* Blocks moved per request when the overlay reads or writes many in a row. */
+#define CHUNK_BYTES (32 * 1024)
+
+static uint8_t chunk[CHUNK_BYTES];
+
 /* CRC of count blocks from lba, continuing crc. */
 static int crc_blocks(block_device_t *dev, uint64_t lba, uint64_t count,
                       uint32_t *crc)
 {
-    uint8_t buf[OVERLAY_MAX_BLOCK];
+    uint32_t per = CHUNK_BYTES / dev->block_size;
 
-    for (uint64_t i = 0; i < count; i++)
+    for (uint64_t i = 0; i < count;)
     {
-        if (block_read(dev, lba + i, 1, buf) != 0)
+        uint32_t n = count - i < per ? (uint32_t)(count - i) : per;
+
+        if (block_read(dev, lba + i, n, chunk) != 0)
             return -1;
 
-        *crc = k_crc32(*crc, buf, dev->block_size);
+        *crc = k_crc32(*crc, chunk, (size_t)n * dev->block_size);
+        i += n;
     }
 
     return 0;
@@ -122,14 +130,18 @@ static int write_header(block_device_t *store, const overlay_identity_t *id,
 
 static int zero_map(block_device_t *store, uint32_t map_blocks)
 {
-    uint8_t block[OVERLAY_MAX_BLOCK];
+    uint32_t per = CHUNK_BYTES / store->block_size;
 
-    k_memset(block, 0, store->block_size);
+    k_memset(chunk, 0, CHUNK_BYTES);
 
-    for (uint32_t i = 0; i < map_blocks; i++)
+    for (uint32_t i = 0; i < map_blocks;)
     {
-        if (block_write(store, 1 + (uint64_t)i, 1, block) != 0)
+        uint32_t n = map_blocks - i < per ? map_blocks - i : per;
+
+        if (block_write(store, 1 + (uint64_t)i, n, chunk) != 0)
             return -1;
+
+        i += n;
     }
 
     return 0;
@@ -381,20 +393,23 @@ overlay_status_t overlay_open(overlay_t *o, const char *name,
     o->mapped = 0;
 
     uint32_t per_block = base->block_size / 4;
+    uint32_t per_chunk = CHUNK_BYTES / base->block_size;
 
-    for (uint32_t mb = 0; mb < map_blocks; mb++)
+    for (uint32_t first = 0; first < map_blocks; first += per_chunk)
     {
-        if (block_read(store, 1 + (uint64_t)mb, 1, block) != 0)
+        uint32_t n = map_blocks - first < per_chunk ? map_blocks - first : per_chunk;
+
+        if (block_read(store, 1 + (uint64_t)first, n, chunk) != 0)
             return OVERLAY_ERROR;
 
-        for (uint32_t k = 0; k < per_block; k++)
+        for (uint32_t k = 0; k < n * per_block; k++)
         {
-            uint64_t index = (uint64_t)mb * per_block + k;
+            uint64_t index = (uint64_t)first * per_block + k;
 
             if (index >= base->block_count)
                 break;
 
-            uint32_t entry = get32(block + 4 * k);
+            uint32_t entry = get32(chunk + 4 * k);
 
             if (entry > data_blocks)
                 return OVERLAY_ERROR;

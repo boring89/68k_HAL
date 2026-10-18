@@ -20,6 +20,7 @@
 #include "kernel/mac/machine.h"
 #include "kernel/memory/memory.h"
 #include "kernel/block/block.h"
+#include "kernel/config/config.h"
 #include "kernel/fs/macdisk.h"
 #include "kernel/fs/volume.h"
 #include "kernel/user/process.h"
@@ -159,6 +160,9 @@ static void cmd_macsys(
     int argc,
     char **argv);
 static void cmd_mount(
+    int argc,
+    char **argv);
+static void cmd_config(
     int argc,
     char **argv);
 
@@ -315,7 +319,11 @@ static shell_command_entry_t commands[] =
         {COMMAND_MOUNT,
          "mount",
          "Use the HFS volume of a block device for ls and cat (mount <device>, see disks)",
-         cmd_mount}};
+         cmd_mount},
+        {COMMAND_CONFIG,
+         "config",
+         "Show the settings (68k_hal.cfg and the kernel command line)",
+         cmd_config}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -2265,6 +2273,30 @@ static void cmd_mount(
         terminal_write_line("mount: no HFS volume on it");
     else
         terminal_write_line("mount: ok");
+}
+
+static void cmd_config(
+    int argc,
+    char **argv)
+{
+    const char *key;
+    const char *value;
+
+    (void)argc;
+    (void)argv;
+
+    if (config_entry(0, &key, &value) != 0)
+    {
+        terminal_write_line("No settings (no 68k_hal.cfg, nothing on the command line)");
+        return;
+    }
+
+    for (int i = 0; config_entry(i, &key, &value) == 0; i++)
+    {
+        terminal_write(key);
+        terminal_write(" = ");
+        terminal_write_line(value);
+    }
 }
 
 int shell_command_count(void)

@@ -18,6 +18,8 @@
 #include "kernel/printf/printf.h"
 
 #include "kernel/block/ramdisk.h"
+#include "kernel/boot/module.h"
+#include "kernel/config/config.h"
 #include "kernel/fs/macdisk.h"
 #include "kernel/fs/volume.h"
 
@@ -52,6 +54,58 @@
 
 #include <stdint.h>
 
+/*
+ * The settings: 68k_hal.cfg (the boot module "config", put there by the Boot partition's GRUB menu), then
+ * the key=value words of the kernel command line.
+ */
+static void load_config(void)
+{
+    hal_boot_module_t module;
+
+    config_reset();
+
+    if (boot_module_find("config", &module) != NULL)
+        kernel_printf("config: %d settings from 68k_hal.cfg\n",
+                      config_parse((const char *)hal_phys_to_virt(module.base), (size_t)module.length));
+
+    config_apply_cmdline(hal_boot_cmdline());
+}
+
+static void append(char *line, size_t size, const char *text)
+{
+    size_t length = k_strlen(line);
+
+    if (length + k_strlen(text) < size)
+        k_strcpy(line + length, text);
+}
+
+/* The "mac" shell command the settings ask for (autostart=mac). */
+static void mac_command_from_config(char *line, size_t size)
+{
+    static const struct
+    {
+        const char *key;
+        const char *arg;
+    } keys[] = {{"mac_scale", " scale="}, {"mac_res", " res="}, {"mac_depth", " depth="},
+                {"mac_cards", " cards="}, {"mac_ram", " ram="}};
+
+    k_strcpy(line, "mac");
+
+    for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++)
+    {
+        const char *value = config_get(keys[i].key);
+
+        if (value != NULL && k_strlen(line) + k_strlen(keys[i].arg) + k_strlen(value) < size)
+        {
+            append(line, size, keys[i].arg);
+            append(line, size, value);
+        }
+    }
+
+    if (k_strcmp(config_get_or("mac_video", "card"), "builtin") == 0)
+        append(line, size, " builtin");
+}
+
 /* Height of the colour bars above the graphics console. */
 #define FB_BARS_HEIGHT 16
 
@@ -85,8 +139,10 @@ void kernel_main(void)
     if (volume_mount_any() == 0)
         kernel_log(LOG_INFO, "HFS volume mounted");
 
+    load_config();
+
     /* A 68k_HAL GPT disk (docs/mac_disk.md): its partitions become block devices and the system overlay opens. */
-    if (macdisk_init(macdisk_slot_from_cmdline(hal_boot_cmdline())) == 0)
+    if (macdisk_init(macdisk_slot_from_name(config_get("system_slot"))) == 0)
     {
         kernel_printf("macdisk: 68k_HAL disk, System %c, overlay %s\n",
                       macdisk_slot() == MACDISK_SLOT_A ? 'A' : 'B',
@@ -188,7 +244,19 @@ void kernel_main(void)
     if (command_line != 0 && k_strstr(command_line, "diag") != 0)
         shell_run_diagnostics();
 
-    shell_init();
+    /* autostart=mac: straight into the Mac; the shell comes when it stops (` or a failure to start). */
+    if (k_strcmp(config_get_or("autostart", "shell"), "mac") == 0)
+    {
+        char line[96];
+
+        mac_command_from_config(line, sizeof line);
+        kernel_printf("autostart: %s\n", line);
+        shell_execute(line);
+    }
+    else
+    {
+        shell_init();
+    }
 
     uint32_t last_tick = 0;
 

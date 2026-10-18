@@ -30,11 +30,8 @@
  */
 int macdisk_init(uint32_t slot);
 
-/*
- * The slot a kernel command line asks for: "slot=b" means System B, anything
- * else (or NULL) System A.
- */
-uint32_t macdisk_slot_from_cmdline(const char *cmdline);
+/* The slot a setting names: "b" or "B" is System B, anything else (or NULL) System A. */
+uint32_t macdisk_slot_from_name(const char *name);
 
 /* 1 once macdisk_init found a layout. */
 int macdisk_present(void);

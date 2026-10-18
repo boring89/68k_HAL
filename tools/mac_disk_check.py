@@ -7,7 +7,7 @@
 # boot, type shell commands, take screenshots. Local only (needs the user's Mac ROM); every run works
 # on the image file it is given (make a copy first).
 #
-# Usage: mac_disk_check.py --kernel K --rom ROM --disk IMG [--run STEPS...]
+# Usage: mac_disk_check.py --kernel K --rom ROM --disk IMG [--append CMDLINE] [--config CFG] [--run STEPS...]
 #
 # STEPS, in order:
 #   shell:TEXT       type TEXT and Enter at the shell prompt (e.g. "shell:video 1024 768", "shell:mac")
@@ -29,18 +29,27 @@ import sys
 import tempfile
 import time
 
+OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
+OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
+
 KEYS = {" ": "spc", "\n": "ret", "=": "equal", "`": "grave_accent", "/": "slash", ".": "dot", "-": "minus",
         "_": "shift-minus", ":": "shift-semicolon", ",": "comma"}
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--kernel", required=True)
-    ap.add_argument("--rom", required=True)
+    ap.add_argument("--kernel")
+    ap.add_argument("--rom")
     ap.add_argument("--disk", required=True)
     ap.add_argument("--machine", default="")
     ap.add_argument("--mem", default="512")
     ap.add_argument("--serial-out")
+    ap.add_argument("--append", default="", help="kernel command line")
+    ap.add_argument("--config", help="a 68k_hal.cfg, given to the kernel as the boot module config")
+    ap.add_argument("--uefi", action="store_true",
+                    help="boot the disk image itself with OVMF (q35, the disk on AHCI): no --kernel/--rom")
+    ap.add_argument("--vga", default="1024x768", help="--uefi: the VGA card's resolution")
+    ap.add_argument("--no-reboot", action="store_true", help="QEMU exits instead of rebooting")
     ap.add_argument("--run", nargs="*", default=[])
     args = ap.parse_args()
 
@@ -50,18 +59,30 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         monitor = os.path.join(tmp, "monitor.sock")
         serial = os.path.join(tmp, "serial.log")
-        process = subprocess.Popen(
-            ["qemu-system-x86_64", *accel, *machine, "-m", args.mem, "-display", "none",
-             "-serial", f"file:{serial}", "-monitor", f"unix:{monitor},server,nowait",
-             "-drive", f"file={args.disk},format=raw,if=ide,index=0,media=disk",
-             "-kernel", args.kernel, "-initrd", f"{args.rom} mac_rom"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        common = ["qemu-system-x86_64", *accel, "-m", args.mem, "-display", "none",
+                  "-serial", f"file:{serial}", "-monitor", f"unix:{monitor},server,nowait"]
+        if args.uefi:
+            variables = os.path.join(tmp, "vars.fd")
+            subprocess.run(["cp", OVMF_VARS, variables], check=True)
+            xres, yres = args.vga.split("x")
+            command = [*common, "-machine", "q35", *(["-no-reboot"] if args.no_reboot else []),
+                       "-drive", f"if=pflash,format=raw,readonly=on,file={OVMF_CODE}",
+                       "-drive", f"if=pflash,format=raw,file={variables}",
+                       "-drive", f"file={args.disk},format=raw,if=none,id=d0",
+                       "-device", "ide-hd,drive=d0,bus=ide.0",
+                       "-vga", "none", "-device", f"VGA,xres={xres},yres={yres},vgamem_mb=64"]
+        else:
+            command = [*common, *machine,
+                       "-drive", f"file={args.disk},format=raw,if=ide,index=0,media=disk",
+                       "-kernel", args.kernel, "-append", args.append,
+                       "-initrd", f"{args.rom} mac_rom" + (f",{args.config} config" if args.config else "")]
+        process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         def log():
             return open(serial, errors="replace").read() if os.path.exists(serial) else ""
 
         try:
-            deadline = time.time() + 60
+            deadline = time.time() + 120
             while time.time() < deadline and "Shell ready" not in log():
                 time.sleep(0.5)
             for _ in range(50):

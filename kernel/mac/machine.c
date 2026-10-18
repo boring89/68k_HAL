@@ -16,6 +16,7 @@
 #include "hal/timer.h"
 #include "kernel/lib/k_time.h"
 #include "kernel/block/block.h"
+#include "kernel/config/config.h"
 #include "kernel/fs/macdisk.h"
 #include "kernel/boot/module.h"
 #include "kernel/display/fb_scale.h"
@@ -779,10 +780,24 @@ int mac_machine_run(uint32_t frames)
      */
     block_device_t *system_disk = macdisk_system();
     block_device_t *apps_disk = macdisk_apps();
+    const char *disk_setting = config_get_or("mac_disk", "auto");
+
+    /* mac_disk=<device> (68k_hal.cfg): that whole block device is the Mac's only disk. */
+    if (k_strcmp(disk_setting, "auto") != 0)
+    {
+        system_disk = block_device_find(disk_setting);
+        apps_disk = NULL;
+
+        if (system_disk == NULL)
+        {
+            kernel_printf("mac: mac_disk=%s: no such block device (see disks)\n", disk_setting);
+            goto out;
+        }
+    }
     bool disk_in_memory = system_disk == NULL && boot_module_find(MAC_MODULE_DISK, &disk_module) != NULL;
     block_device_t *drive = system_disk != NULL ? system_disk : disk_in_memory ? NULL : block_device_find("ata0");
 
-    if (macdisk_present() && system_disk == NULL)
+    if (macdisk_present() && system_disk == NULL && k_strcmp(disk_setting, "auto") == 0)
     {
         kernel_printf("%s\n", "mac: the system overlay is not usable (see macsys status; macsys reset starts a new one)");
         goto out;
@@ -907,7 +922,7 @@ int mac_machine_run(uint32_t frames)
         mac->disk.blocks = drive->block_count > 0xFFFFFFFFu ? 0xFFFFFFFFu : (uint32_t)drive->block_count;
         mac->disk.read_only = drive->ops->write == NULL;
     }
-    if (apps_disk != NULL && apps_disk->block_size == BLOCK_SIZE && system_disk != NULL)
+    if (apps_disk != NULL && apps_disk->block_size == BLOCK_SIZE && system_disk != NULL && system_disk == macdisk_system())
     {
         mac->more_disks[0].read = drive_read;
         mac->more_disks[0].write = drive_write;
