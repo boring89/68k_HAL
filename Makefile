@@ -476,8 +476,10 @@ test-mac-hotkeys:
 
 # The Mac's sound: the system beeps (mac_sysbeep, injected at frame 1200) in the
 # kernel under QEMU with an HDA sound card whose output is recorded; the
-# recording must contain the 440 Hz beep. Local only: needs MAC_ROM and
-# MAC_DISK.
+# recording must contain the 440 Hz beep. The test run is not paced, so the Mac
+# is about 3 times faster than real time while the sound card plays at real
+# time: QEMU keeps running 5 s after the last frame, until the beep has left the
+# card's ring buffer (P9). Local only: needs MAC_ROM and MAC_DISK.
 test-mac-sound:
 	@if [ ! -f "$(MAC_ROM)" ] || [ ! -f "$(MAC_DISK)" ]; then \
 		echo "test-mac-sound: SKIP (no ROM or disk; set MAC_ROM and MAC_DISK)"; exit 0; fi; \
@@ -497,6 +499,7 @@ test-mac-sound:
 		-initrd "$(BUILD)/mac/rom.bin mac_rom,$(BUILD)/mac/disk.img mac_disk" > $$out 2>&1 & \
 	pid=$$!; n=0; \
 	until grep -q "mac: screen crc\|mac: could not run" $$out || [ $$n -ge 900 ]; do sleep 1; n=$$((n + 1)); done; \
+	sleep 5; \
 	kill -INT $$pid 2>/dev/null; sleep 1; kill $$pid 2>/dev/null; wait $$pid 2>/dev/null; \
 	python3 -I tools/check_wav.py $(BUILD)/mac/beep.wav 440
 
