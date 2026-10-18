@@ -314,8 +314,10 @@ int macdisk_promote(void (*progress)(unsigned int percent))
             progress(shown = percent);
     }
 
-    /* The check: read the new slot back. */
+    /* The check: read the new slot back from the disk, not from cached lines the copy updated. */
     uint32_t crc_to = 0;
+
+    block_cache_drop();
 
     for (uint64_t lba = 0; lba < from->block_count; lba += PROMOTE_CHUNK_BLOCKS)
     {

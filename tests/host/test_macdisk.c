@@ -9,6 +9,7 @@
 #include <stdlib.h>
 
 #include "kernel/block/block.h"
+#include "kernel/block/cache.h"
 #include "kernel/fs/macdisk.h"
 #include "kernel/memory/heap.h"
 
@@ -25,9 +26,15 @@ static int mem_read(block_device_t *d, uint64_t lba, uint32_t count, void *buf)
     return 0;
 }
 
+/* Set: writes report success but never reach the disk (a failing medium). */
+static int drop_writes;
+
 static int mem_write(block_device_t *d, uint64_t lba, uint32_t count,
                      const void *buf)
 {
+    if (drop_writes)
+        return 0;
+
     memcpy((uint8_t *)d->driver_data + lba * 512, buf, (size_t)count * 512);
     return 0;
 }
@@ -302,6 +309,50 @@ static void test_switch_and_promote(void)
     big = NULL;
 }
 
+/* Line buffers for the cache, from a static pool (the cache never frees them). */
+#define POOL_LINES 16
+
+static uint8_t pool[POOL_LINES][BLOCK_CACHE_LINE_BYTES];
+static int pool_used;
+
+static void *alloc_line(void)
+{
+    return pool_used < POOL_LINES ? pool[pool_used++] : NULL;
+}
+
+/* The read-back check of promote must see the disk, not the cached lines the copy just updated. */
+static void test_promote_checks_the_disk(void)
+{
+    uint8_t data[512];
+    uint8_t buf[512];
+
+    heap_init((uintptr_t)arena, sizeof(arena));
+    if (load_big() != 0)
+        return;
+
+    memset(data, 0x5A, sizeof data);
+    TEST_ASSERT_EQ_INT(0, boot_big(MACDISK_SLOT_A));
+    TEST_ASSERT_EQ_INT(0, block_cache_init(POOL_LINES * BLOCK_CACHE_LINE_BYTES, alloc_line));
+    TEST_ASSERT_EQ_INT(0, block_cache_enable(&big_disk));
+    TEST_ASSERT_EQ_INT(0, block_write(macdisk_system(), 9, 1, data));
+
+    /* All of System B in the cache, then a disk that loses every write. */
+    block_device_t *sys_b = macdisk_slot_device(MACDISK_SLOT_B);
+
+    for (uint64_t lba = 0; lba < sys_b->block_count; lba++)
+        TEST_ASSERT_EQ_INT(0, block_read(sys_b, lba, 1, buf));
+
+    drop_writes = 1;
+    TEST_ASSERT_EQ_INT(-1, macdisk_promote(NULL));
+    drop_writes = 0;
+    TEST_ASSERT_EQ_INT(MACDISK_SLOT_A, macdisk_slot());
+    TEST_ASSERT_EQ_INT(1, overlay_used_blocks(macdisk_overlay()));
+
+    block_reset();
+    free(big);
+    big = NULL;
+}
+
 int main(void)
 {
     TEST_RUN(test_slot_name);
@@ -311,6 +362,7 @@ int main(void)
     TEST_RUN(test_no_layout);
     TEST_RUN(test_env_and_confirm);
     TEST_RUN(test_switch_and_promote);
+    TEST_RUN(test_promote_checks_the_disk);
 
     return TEST_REPORT("macdisk");
 }
