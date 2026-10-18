@@ -231,6 +231,21 @@ static int overlay_read(block_device_t *device, uint64_t lba, uint32_t count,
     return 0;
 }
 
+/* Write map block mb from the map in memory (entries past the end of the base are 0). */
+static int write_map_block(const overlay_t *o, uint64_t mb, uint8_t *block)
+{
+    uint32_t per_block = o->block_size / 4;
+
+    for (uint32_t k = 0; k < per_block; k++)
+    {
+        uint64_t index = mb * per_block + k;
+
+        put32(block + 4 * k, index < o->base->block_count ? o->map[index] : 0);
+    }
+
+    return block_write(o->store, 1 + mb, 1, block);
+}
+
 static int overlay_write(block_device_t *device, uint64_t lba, uint32_t count,
                          const void *buffer)
 {
@@ -277,6 +292,9 @@ static int overlay_write(block_device_t *device, uint64_t lba, uint32_t count,
             i += run;
         }
 
+        /* The data blocks are taken now, even if writing the map fails below. */
+        o->next_free = next;
+
         /* Phase 2: the map blocks that gained entries, each written once. */
         uint32_t per_block = o->block_size / 4;
         uint64_t last_map = UINT64_MAX;
@@ -297,29 +315,16 @@ static int overlay_write(block_device_t *device, uint64_t lba, uint32_t count,
             if (mb != last_map)
             {
                 /* The previous map block is complete: write it. */
-                if (last_map != UINT64_MAX)
-                {
-                    for (uint32_t k = 0; k < per_block; k++)
-                        put32(block + 4 * k, o->map[last_map * per_block + k]);
-
-                    if (block_write(o->store, 1 + last_map, 1, block) != 0)
-                        return -1;
-                }
+                if (last_map != UINT64_MAX && write_map_block(o, last_map, block) != 0)
+                    return -1;
 
                 last_map = mb;
             }
         }
 
-        if (last_map != UINT64_MAX)
-        {
-            for (uint32_t k = 0; k < per_block; k++)
-                put32(block + 4 * k, o->map[last_map * per_block + k]);
+        if (last_map != UINT64_MAX && write_map_block(o, last_map, block) != 0)
+            return -1;
 
-            if (block_write(o->store, 1 + last_map, 1, block) != 0)
-                return -1;
-        }
-
-        o->next_free = next;
         done += n;
     }
 

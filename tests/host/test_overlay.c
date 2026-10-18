@@ -386,6 +386,35 @@ static void test_rebind_bigger(void)
     TEST_ASSERT(memcmp(back, data, 512) == 0);
 }
 
+/* A map write that fails: the data block it used is not given out again in this boot. */
+static void test_failed_map_write(void)
+{
+    uint8_t a[512];
+    uint8_t b[512];
+    uint8_t back[512];
+
+    setup();
+    TEST_ASSERT_EQ_INT(0, overlay_format(&store_dev, &base_dev, 0));
+    TEST_ASSERT_EQ_INT(OVERLAY_OK, reopen(0));
+    pattern(a, 1, 0x10);
+    pattern(b, 1, 0x80);
+
+    write_budget = 1;       /* the data block is written, the map block is not */
+    TEST_ASSERT_EQ_INT(-1, block_write(block_device_find("ovl"), 20, 1, a));
+    write_budget = -1;
+
+    TEST_ASSERT_EQ_INT(0, block_write(block_device_find("ovl"), 30, 1, b));
+    TEST_ASSERT_EQ_INT(0, block_read(block_device_find("ovl"), 30, 1, back));
+    TEST_ASSERT(memcmp(back, b, 512) == 0);
+    TEST_ASSERT_EQ_INT(0, block_read(block_device_find("ovl"), 20, 1, back));
+    TEST_ASSERT(memcmp(back, b, 512) != 0);
+
+    /* Map entries past the end of the base are written as 0 (base: 64 blocks, a map block: 128). */
+    for (int k = BASE_BLOCKS; k < 128; k++)
+        TEST_ASSERT_EQ_INT(0, store_mem[512 + 4 * k] | store_mem[512 + 4 * k + 1] |
+                                  store_mem[512 + 4 * k + 2] | store_mem[512 + 4 * k + 3]);
+}
+
 int main(void)
 {
     TEST_RUN(test_empty_store);
@@ -398,6 +427,7 @@ int main(void)
     TEST_RUN(test_reset_interrupted);
     TEST_RUN(test_rebind);
     TEST_RUN(test_rebind_bigger);
+    TEST_RUN(test_failed_map_write);
 
     return TEST_REPORT("overlay");
 }
