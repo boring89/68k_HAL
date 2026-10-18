@@ -148,11 +148,14 @@ typedef struct
  * the Slot Manager keeps parameter RAM only for those (slot $9 gets
  * smSlotOOBErr from sPutPRAMRec, ROM 0x40806230).
  */
-#define MAC_CARD_SLOT 0xC
-#define MAC_CARD_VRAM_BASE ((uint32_t)MAC_CARD_SLOT << 28)
+#define MAC_CARD_SLOT 0xC                       /* the first card; a second one goes into $D */
+#define MAC_CARDS 2
+#define MAC_CARD_VRAM_BASE_OF(slot) ((uint32_t)(slot) << 28)
+#define MAC_CARD_ROM_END_OF(slot) (0xF1000000u + ((uint32_t)(slot) << 24))  /* slot $C: last byte 0xFCFFFFFF */
+#define MAC_CARD_SLOT_IRQ_OF(slot) (1u << ((slot) - 9))  /* the slot's bit in the RBV's slot interrupt flags */
+#define MAC_CARD_VRAM_BASE MAC_CARD_VRAM_BASE_OF(MAC_CARD_SLOT)
+#define MAC_CARD_ROM_END MAC_CARD_ROM_END_OF(MAC_CARD_SLOT)
 #define MAC_CARD_VRAM_SIZE 0x2000000u          /* 32 MiB: 3840x2160 at 32 bits fits */
-#define MAC_CARD_ROM_END (0xF1000000u + ((uint32_t)MAC_CARD_SLOT << 24))   /* last ROM byte at 0xFCFFFFFF */
-#define MAC_CARD_SLOT_IRQ (1u << (MAC_CARD_SLOT - 9))   /* the slot's bit in the RBV's slot interrupt flags */
 #define MAC_CARD_ROM_MAX 4096u
 #define MAC_CARD_DIRTY_SHIFT 10                 /* video RAM changes are tracked per KiB */
 #define MAC_CARD_DIRTY_WORDS (MAC_CARD_VRAM_SIZE >> MAC_CARD_DIRTY_SHIFT >> 5)
@@ -172,6 +175,7 @@ extern const uint32_t mac_card_resolution_count;
 typedef struct
 {
     bool present;
+    uint32_t slot;              /* $C or $D */
     uint8_t *vram;              /* MAC_CARD_VRAM_SIZE bytes, set by the host */
     uint8_t rom[MAC_CARD_ROM_MAX];  /* the declaration ROM, its last byte at MAC_CARD_ROM_END - 1 */
     uint32_t rom_size;
@@ -188,6 +192,7 @@ typedef struct
     bool all_dirty;             /* the whole picture must be converted again */
     uint32_t dirty[MAC_CARD_DIRTY_WORDS];   /* bit n = KiB n of the video RAM was written */
     uint32_t mode_changes;      /* counts resolution and depth switches (for the host) */
+    uint16_t refnum;            /* the driver's reference number once it is open (0 = not yet) */
 } mac_card_t;
 
 typedef struct
@@ -254,7 +259,7 @@ typedef struct
     uint32_t vram_size;
     uint32_t vram_base;         /* guest address of the first byte */
 
-    mac_card_t card;            /* the NuBus video card (mac_card_attach) */
+    mac_card_t card[MAC_CARDS]; /* the NuBus video cards (mac_card_attach): slot $C, then $D */
 
     mac_via_t via1;
     uint32_t via_rem;           /* CPU cycles not yet given to the VIAs (< 32) */
@@ -374,12 +379,13 @@ uint32_t mac_iwm_access(mac_iwm_t *iwm, uint32_t offset, bool write,
 int mac_sysbeep(mac_t *mac);
 
 /*
- * Plug the NuBus video card into slot $C (after mac_init, before mac_reset):
+ * Plug a NuBus video card into the next free slot, $C then $D (after
+ * mac_init, before mac_reset; at most MAC_CARDS):
  * 'vram' is MAC_CARD_VRAM_SIZE bytes; 'res' indexes mac_card_resolutions and
  * is the resolution the card starts in, 'depth' (0-5 = 1, 2, 4, 8, 16, 32
  * bits) the depth the Mac starts in. With the card the built-in video
  * reports "no monitor" and stays off, so the card is the only screen.
- * Returns 0, or -1 for bad arguments.
+ * Returns 0, or -1 for bad arguments or when every slot is taken.
  */
 int mac_card_attach(mac_t *mac, uint8_t *vram, uint32_t res, uint32_t depth);
 
@@ -397,8 +403,20 @@ bool mac_card_write(mac_t *mac, uint32_t addr, int size, uint32_t value);
 /* Index of the resolution w x h in mac_card_resolutions, or -1. */
 int mac_card_find_resolution(uint32_t width, uint32_t height);
 
-/* Size of the Mac's screen now: the card's mode, or the built-in 640x480. */
+/* Size of the Mac's screen now: the first card's mode, or the built-in 640x480. */
 void mac_screen_size(const mac_t *mac, uint32_t *width, uint32_t *height);
+
+/* Size and picture of card 'index' (0 = slot $C, 1 = $D), as mac_screen_size and mac_render_changes.
+ * Return -1 if there is no such card. */
+int mac_card_screen_size(const mac_t *mac, uint32_t index, uint32_t *width, uint32_t *height);
+int mac_card_render(mac_t *mac, uint32_t index, uint32_t *out, uint8_t *changed);
+
+/*
+ * Where the Mac puts card 'index' on its desktop: the top left corner of its GDevice's rectangle (the
+ * main screen is at 0,0; the Monitors control panel moves the others). Returns 0, or -1 if the system has
+ * no GDevice for the card (yet).
+ */
+int mac_card_position(mac_t *mac, uint32_t index, int32_t *x, int32_t *y);
 
 /*
  * Draw the rows of the screen that changed since the last call into 'out'

@@ -603,7 +603,12 @@ static void emul_slot_probe(mac_t *mac, uint32_t pc)
 {
     uint32_t a1 = m68k_vm_get_reg(M68K_VM_REG_A0 + 1);
 
-    if (mac->card.present && (a1 >> 28) == 0xF && SLOT_OF(a1) == MAC_CARD_SLOT)
+    bool card = false;
+
+    for (uint32_t i = 0; i < MAC_CARDS; i++)
+        card = card || (mac->card[i].present && (a1 >> 28) == 0xF && SLOT_OF(a1) == mac->card[i].slot);
+
+    if (card)
     {
         uint32_t d0 = m68k_vm_get_reg(M68K_VM_REG_D0);
 
@@ -807,11 +812,14 @@ int mac_reset(mac_t *mac)
     k_memset(&mac->scsi, 0, sizeof mac->scsi);
     k_memset(&mac->rbv, 0, sizeof mac->rbv);
     /* With the NuBus card the built-in video sees no monitor (sense lines 111) and stays off. */
-    mac->rbv.sense = mac->card.present ? RBV_SENSE_NONE : RBV_SENSE_13_RGB;
+    mac->rbv.sense = mac->card[0].present ? RBV_SENSE_NONE : RBV_SENSE_13_RGB;
     /* NuBus slot interrupts enabled, as the skipped InitHW would have left them (RBV_SIER_SLOTS). */
-    mac->rbv.sier = mac->card.present ? RBV_SIER_SLOTS : 0;
-    mac->card.irq_pending = false;
-    mac->card.irq_enabled = false;
+    mac->rbv.sier = mac->card[0].present ? RBV_SIER_SLOTS : 0;
+    for (uint32_t i = 0; i < MAC_CARDS; i++)
+    {
+        mac->card[i].irq_pending = false;
+        mac->card[i].irq_enabled = false;
+    }
     k_memset(&mac->dac, 0, sizeof mac->dac);
     k_memset(&mac->asc, 0, sizeof mac->asc);
     mac->overlay = true;

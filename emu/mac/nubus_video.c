@@ -12,7 +12,7 @@
 #include "kernel/lib/k_memory.h"
 
 /*
- * A video card for NuBus slot $C that exists only in software (see
+ * A video card for NuBus slot $C (and a second one in $D) that exists only in software (see
  * docs/nubus_video.md).
  *
  * The Mac learns about a card from its declaration ROM: a list of
@@ -65,6 +65,7 @@ static const uint8_t depth_bits[MAC_CARD_DEPTHS] = {1, 2, 4, 8, 16, 32};
 #define M_VID_PARAMS 1          /* mode list: the VPBlock */
 #define M_PAGE_CNT 3
 #define M_DEV_TYPE 4            /* 0 = color table, 2 = direct color */
+#define F_OPEN_AT_START 0x02    /* sRsrcFlags: the Slot Manager opens the driver at startup */
 #define F_32BIT_MODE 0x04       /* sRsrcFlags: dCtlDevBase is a 32-bit address */
 #define END_OF_LIST 0xFF
 
@@ -364,7 +365,7 @@ static uint32_t build_rom(mac_card_t *card)
     entry_offset(&w, E_TYPE, video_type);
     entry_offset(&w, E_NAME, video_name);
     entry_offset(&w, E_DRVR_DIR, driver_dir);
-    entry(&w, E_FLAGS, F_32BIT_MODE);
+    entry(&w, E_FLAGS, F_OPEN_AT_START | F_32BIT_MODE);
     entry(&w, E_HW_DEV_ID, 1);
     entry_offset(&w, E_MINOR_LENGTH, major_length);
     entry_offset(&w, E_MAJOR_BASE, major_base);
@@ -397,7 +398,7 @@ static uint32_t build_rom(mac_card_t *card)
 
 static uint32_t rom_base(const mac_card_t *card)
 {
-    return MAC_CARD_ROM_END - card->rom_size;
+    return MAC_CARD_ROM_END_OF(card->slot) - card->rom_size;
 }
 
 
@@ -425,12 +426,17 @@ int mac_card_find_resolution(uint32_t width, uint32_t height)
 
 int mac_card_attach(mac_t *mac, uint8_t *vram, uint32_t res, uint32_t depth)
 {
-    mac_card_t *card = &mac->card;
+    uint32_t index = 0;
 
-    if (vram == NULL || res >= mac_card_resolution_count || depth > max_depth(res))
+    while (index < MAC_CARDS && mac->card[index].present)
+        index++;
+    if (index == MAC_CARDS || vram == NULL || res >= mac_card_resolution_count || depth > max_depth(res))
         return -1;
 
+    mac_card_t *card = &mac->card[index];
+
     k_memset(card, 0, sizeof *card);
+    card->slot = MAC_CARD_SLOT + index;
     card->vram = vram;
     card->res = card->preferred_res = res;
     card->depth = card->preferred_depth = depth;
@@ -456,21 +462,35 @@ static uint32_t bus_get(const uint8_t *p, int size)
 }
 
 
+/* The card whose slot spaces hold 'addr' (super space 0xs0000000 or standard space 0xFsxxxxxx). */
+static mac_card_t *card_at(mac_t *mac, uint32_t addr)
+{
+    uint32_t slot = (addr >> 28) == 0xF ? (addr >> 24) & 0xF : addr >> 28;
+
+    for (uint32_t i = 0; i < MAC_CARDS; i++)
+    {
+        if (mac->card[i].present && mac->card[i].slot == slot)
+            return &mac->card[i];
+    }
+    return NULL;
+}
+
+
 bool mac_card_read(mac_t *mac, uint32_t addr, int size, uint32_t *value)
 {
-    mac_card_t *card = &mac->card;
+    mac_card_t *card = card_at(mac, addr);
 
-    if (!card->present)
+    if (card == NULL)
         return false;
 
-    if (addr - MAC_CARD_VRAM_BASE < MAC_CARD_VRAM_SIZE)
+    if (addr - MAC_CARD_VRAM_BASE_OF(card->slot) < MAC_CARD_VRAM_SIZE)
     {
-        uint32_t off = addr - MAC_CARD_VRAM_BASE;
+        uint32_t off = addr - MAC_CARD_VRAM_BASE_OF(card->slot);
 
         *value = off + (uint32_t)size <= MAC_CARD_VRAM_SIZE ? bus_get(card->vram + off, size) : 0;
         return true;
     }
-    if (addr >= rom_base(card) && addr < MAC_CARD_ROM_END)
+    if (addr >= rom_base(card) && addr < MAC_CARD_ROM_END_OF(card->slot))
     {
         uint32_t off = addr - rom_base(card);
 
@@ -483,10 +503,14 @@ bool mac_card_read(mac_t *mac, uint32_t addr, int size, uint32_t *value)
 
 bool mac_card_write(mac_t *mac, uint32_t addr, int size, uint32_t value)
 {
-    mac_card_t *card = &mac->card;
-    uint32_t off = addr - MAC_CARD_VRAM_BASE;
+    mac_card_t *card = card_at(mac, addr);
 
-    if (!card->present || off >= MAC_CARD_VRAM_SIZE)
+    if (card == NULL)
+        return false;
+
+    uint32_t off = addr - MAC_CARD_VRAM_BASE_OF(card->slot);
+
+    if (off >= MAC_CARD_VRAM_SIZE)
         return false;
 
     if (off + (uint32_t)size > MAC_CARD_VRAM_SIZE)
@@ -511,6 +535,7 @@ bool mac_card_write(mac_t *mac, uint32_t addr, int size, uint32_t value)
 /* Parameter block and DCE fields (Inside Macintosh: Devices). */
 #define PB_CS_CODE 26
 #define PB_CS_PARAM 28
+#define DCE_REFNUM 24
 #define DCE_SLOT 40
 #define DCE_DEV_BASE 42
 
@@ -592,10 +617,8 @@ static int res_from_id(uint32_t id)
 }
 
 
-static void switch_mode(mac_t *mac, uint32_t res, uint32_t depth)
+static void switch_mode(mac_card_t *card, uint32_t res, uint32_t depth)
 {
-    mac_card_t *card = &mac->card;
-
     if (res == card->res && depth == card->depth)
         return;
 
@@ -607,9 +630,8 @@ static void switch_mode(mac_t *mac, uint32_t res, uint32_t depth)
 }
 
 
-static void set_entries(mac_t *mac, uint32_t param)
+static void set_entries(mac_t *mac, mac_card_t *card, uint32_t param)
 {
-    mac_card_t *card = &mac->card;
     uint32_t table = rd32(mac, param + CS_TABLE);
     uint32_t start = rd16(mac, param + CS_START);
     uint32_t count = rd16(mac, param + CS_COUNT);
@@ -677,9 +699,9 @@ static void gray_page(mac_card_t *card)
 }
 
 
-static int control(mac_t *mac, uint32_t code, uint32_t param, uint32_t dce)
+static int control(mac_t *mac, mac_card_t *card, uint32_t code, uint32_t param, uint32_t dce)
 {
-    mac_card_t *card = &mac->card;
+    uint32_t base = MAC_CARD_VRAM_BASE_OF(card->slot);
 
     switch (code)
     {
@@ -687,10 +709,10 @@ static int control(mac_t *mac, uint32_t code, uint32_t param, uint32_t dce)
     {
         uint32_t mode = rd16(mac, param + CS_MODE);
 
-        wr32(mac, param + CS_BASE_ADDR, MAC_CARD_VRAM_BASE);
+        wr32(mac, param + CS_BASE_ADDR, base);
         if (!valid_mode(mode, card->res) || rd16(mac, param + CS_PAGE) != 0)
             return PARAM_ERR;
-        switch_mode(mac, card->res, mode - MAC_CARD_MODE_1BIT);
+        switch_mode(card, card->res, mode - MAC_CARD_MODE_1BIT);
         return NO_ERR;
     }
     case CSC_SET_ENTRIES:
@@ -699,7 +721,7 @@ static int control(mac_t *mac, uint32_t code, uint32_t param, uint32_t dce)
             return CONTROL_ERR;
         if (entries_ok(mac, param) != NO_ERR)
             return PARAM_ERR;
-        set_entries(mac, param);
+        set_entries(mac, card, param);
         return NO_ERR;
     case CSC_SET_GAMMA:
         return NO_ERR;      /* the gamma is always linear */
@@ -716,7 +738,7 @@ static int control(mac_t *mac, uint32_t code, uint32_t param, uint32_t dce)
         if (!card->irq_enabled)
         {
             card->irq_pending = false;
-            mac->rbv.slot_irq &= (uint8_t)~MAC_CARD_SLOT_IRQ;
+            mac->rbv.slot_irq &= (uint8_t)~MAC_CARD_SLOT_IRQ_OF(card->slot);
         }
         return NO_ERR;
     case CSC_SET_DEFAULT_MODE:
@@ -728,11 +750,11 @@ static int control(mac_t *mac, uint32_t code, uint32_t param, uint32_t dce)
         uint32_t mode = rd16(mac, param + CS_MODE);
         int res = res_from_id(rd32(mac, param + CS_DATA));
 
-        wr32(mac, param + CS_BASE_ADDR, MAC_CARD_VRAM_BASE);
+        wr32(mac, param + CS_BASE_ADDR, base);
         if (res < 0 || !valid_mode(mode, (uint32_t)res) || rd16(mac, param + CS_PAGE) != 0)
             return PARAM_ERR;
-        switch_mode(mac, (uint32_t)res, mode - MAC_CARD_MODE_1BIT);
-        wr32(mac, dce + DCE_DEV_BASE, MAC_CARD_VRAM_BASE);
+        switch_mode(card, (uint32_t)res, mode - MAC_CARD_MODE_1BIT);
+        wr32(mac, dce + DCE_DEV_BASE, base);
         return NO_ERR;
     }
     case CSC_SAVE_PREFERRED:
@@ -775,16 +797,16 @@ static void write_connection(mac_t *mac, uint32_t info)
 }
 
 
-static int status(mac_t *mac, uint32_t code, uint32_t param)
+static int status(mac_t *mac, mac_card_t *card, uint32_t code, uint32_t param)
 {
-    mac_card_t *card = &mac->card;
+    uint32_t base = MAC_CARD_VRAM_BASE_OF(card->slot);
 
     switch (code)
     {
     case CSC_GET_MODE:
         wr16(mac, param + CS_MODE, MAC_CARD_MODE_1BIT + card->depth);
         wr16(mac, param + CS_PAGE, 0);
-        wr32(mac, param + CS_BASE_ADDR, MAC_CARD_VRAM_BASE);
+        wr32(mac, param + CS_BASE_ADDR, base);
         return NO_ERR;
     case CSC_GET_ENTRIES:
     {
@@ -807,7 +829,7 @@ static int status(mac_t *mac, uint32_t code, uint32_t param)
         wr16(mac, param + CS_PAGE, 1);
         return NO_ERR;
     case CSC_GET_BASE_ADDR:
-        wr32(mac, param + CS_BASE_ADDR, MAC_CARD_VRAM_BASE);
+        wr32(mac, param + CS_BASE_ADDR, base);
         return rd16(mac, param + CS_PAGE) == 0 ? NO_ERR : PARAM_ERR;
     case CSC_GET_GRAY:
         wr8(mac, param + CS_MODE, card->gray ? 1 : 0);
@@ -825,7 +847,7 @@ static int status(mac_t *mac, uint32_t code, uint32_t param)
         wr16(mac, param + CS_MODE, MAC_CARD_MODE_1BIT + card->depth);
         wr32(mac, param + CS_DATA, MAC_CARD_RES_ID_BASE + card->res);
         wr16(mac, param + CS_PAGE, 0);
-        wr32(mac, param + CS_BASE_ADDR, MAC_CARD_VRAM_BASE);
+        wr32(mac, param + CS_BASE_ADDR, base);
         return NO_ERR;
     case CSC_GET_CONNECTION:
         write_connection(mac, param);
@@ -845,7 +867,7 @@ static int status(mac_t *mac, uint32_t code, uint32_t param)
         return NO_ERR;
     }
     case CSC_GET_MODE_BASE_ADDR:
-        wr32(mac, param + CS_BASE_ADDR, MAC_CARD_VRAM_BASE);
+        wr32(mac, param + CS_BASE_ADDR, base);
         return NO_ERR;
     case CSC_GET_PREFERRED:
         wr16(mac, param + CS_MODE, MAC_CARD_MODE_1BIT + card->preferred_depth);
@@ -907,22 +929,44 @@ static int status(mac_t *mac, uint32_t code, uint32_t param)
 }
 
 
+/* The card of the driver whose DCE is 'dce' (dCtlSlot); the first card if the slot is unknown. */
+static mac_card_t *card_of_dce(mac_t *mac, uint32_t dce)
+{
+    uint32_t slot = rd8(mac, dce + DCE_SLOT);
+
+    for (uint32_t i = 0; i < MAC_CARDS; i++)
+    {
+        if (mac->card[i].present && mac->card[i].slot == slot)
+            return &mac->card[i];
+    }
+    return &mac->card[0];
+}
+
+
 void mac_card_open(mac_t *mac)
 {
     uint32_t dce = m68k_vm_get_reg(M68K_VM_REG_A0 + 1);
+    mac_card_t *card = card_of_dce(mac, dce);
 
     /* The video RAM's 32-bit address (the Slot Manager should have set it from MajorBaseOS already). */
-    wr32(mac, dce + DCE_DEV_BASE, MAC_CARD_VRAM_BASE);
-    mac->card.irq_enabled = true;
+    wr32(mac, dce + DCE_DEV_BASE, MAC_CARD_VRAM_BASE_OF(card->slot));
+    card->refnum = (uint16_t)rd16(mac, dce + DCE_REFNUM);
+    card->irq_enabled = true;
     m68k_vm_set_reg(M68K_VM_REG_D0, NO_ERR);
+}
+
+
+static void stop_interrupts(mac_t *mac, mac_card_t *card)
+{
+    card->irq_enabled = false;
+    card->irq_pending = false;
+    mac->rbv.slot_irq &= (uint8_t)~MAC_CARD_SLOT_IRQ_OF(card->slot);
 }
 
 
 void mac_card_close(mac_t *mac)
 {
-    mac->card.irq_enabled = false;
-    mac->card.irq_pending = false;
-    mac->rbv.slot_irq &= (uint8_t)~MAC_CARD_SLOT_IRQ;
+    stop_interrupts(mac, card_of_dce(mac, m68k_vm_get_reg(M68K_VM_REG_A0 + 1)));
 }
 
 
@@ -932,7 +976,8 @@ static void driver_call(mac_t *mac, bool is_control)
     uint32_t dce = m68k_vm_get_reg(M68K_VM_REG_A0 + 1);
     uint32_t code = rd16(mac, pb + PB_CS_CODE);
     uint32_t param = rd32(mac, pb + PB_CS_PARAM);
-    int result = is_control ? control(mac, code, param, dce) : status(mac, code, param);
+    mac_card_t *card = card_of_dce(mac, dce);
+    int result = is_control ? control(mac, card, code, param, dce) : status(mac, card, code, param);
 
     m68k_vm_set_reg(M68K_VM_REG_D0, (uint32_t)result);
 }
@@ -952,31 +997,50 @@ void mac_card_status(mac_t *mac)
 
 void mac_card_vblank(mac_t *mac)
 {
-    if (mac->card.present && mac->card.irq_enabled)
+    for (uint32_t i = 0; i < MAC_CARDS; i++)
     {
-        mac->card.irq_pending = true;
-        mac->rbv.slot_irq |= (uint8_t)MAC_CARD_SLOT_IRQ;
+        mac_card_t *card = &mac->card[i];
+
+        if (card->present && card->irq_enabled)
+        {
+            card->irq_pending = true;
+            mac->rbv.slot_irq |= (uint8_t)MAC_CARD_SLOT_IRQ_OF(card->slot);
+        }
     }
 }
 
 
+/* The interrupt handler's acknowledge: A1 = its sqParm, the slot. */
 void mac_card_irq_ack(mac_t *mac)
 {
-    mac->card.irq_pending = false;
-    mac->rbv.slot_irq &= (uint8_t)~MAC_CARD_SLOT_IRQ;
+    uint32_t slot = m68k_vm_get_reg(M68K_VM_REG_A0 + 1);
+
+    for (uint32_t i = 0; i < MAC_CARDS; i++)
+    {
+        if (mac->card[i].present && mac->card[i].slot == slot)
+        {
+            mac->card[i].irq_pending = false;
+            mac->rbv.slot_irq &= (uint8_t)~MAC_CARD_SLOT_IRQ_OF(slot);
+        }
+    }
 }
 
 
 /* ---- The picture ---- */
 
+int mac_card_screen_size(const mac_t *mac, uint32_t index, uint32_t *width, uint32_t *height)
+{
+    if (index >= MAC_CARDS || !mac->card[index].present)
+        return -1;
+    *width = mac_card_resolutions[mac->card[index].res].width;
+    *height = mac_card_resolutions[mac->card[index].res].height;
+    return 0;
+}
+
+
 void mac_screen_size(const mac_t *mac, uint32_t *width, uint32_t *height)
 {
-    if (mac->card.present)
-    {
-        *width = mac_card_resolutions[mac->card.res].width;
-        *height = mac_card_resolutions[mac->card.res].height;
-    }
-    else
+    if (mac_card_screen_size(mac, 0, width, height) != 0)
     {
         *width = MAC_SCREEN_W;
         *height = MAC_SCREEN_H;
@@ -1035,9 +1099,7 @@ static void convert_row(const mac_card_t *card, const uint8_t *src, uint32_t *ou
 
 int mac_render_changes(mac_t *mac, uint32_t *out, uint8_t *changed)
 {
-    mac_card_t *card = &mac->card;
-
-    if (!card->present)
+    if (!mac->card[0].present)
     {
         if (mac_render(mac, out) != 0)
             return -1;
@@ -1045,6 +1107,16 @@ int mac_render_changes(mac_t *mac, uint32_t *out, uint8_t *changed)
             k_memset(changed, 1, MAC_SCREEN_H);
         return MAC_SCREEN_H;
     }
+    return mac_card_render(mac, 0, out, changed);
+}
+
+
+int mac_card_render(mac_t *mac, uint32_t index, uint32_t *out, uint8_t *changed)
+{
+    if (index >= MAC_CARDS || !mac->card[index].present)
+        return -1;
+
+    mac_card_t *card = &mac->card[index];
 
     uint32_t width = mac_card_resolutions[card->res].width;
     uint32_t height = mac_card_resolutions[card->res].height;
@@ -1067,4 +1139,36 @@ int mac_render_changes(mac_t *mac, uint32_t *out, uint8_t *changed)
     k_memset(card->dirty, 0, sizeof card->dirty);
     card->all_dirty = false;
     return drawn;
+}
+
+
+/* QuickDraw's list of screens: low memory DeviceList, handle -> GDevice; gdRefNum +0, gdNextGD +0x1E,
+ * gdRect +0x22 (top, left, bottom, right) (Inside Macintosh: Imaging With QuickDraw, "GDevice"). */
+#define LM_DEVICE_LIST 0x8A8
+#define GD_REFNUM 0x00
+#define GD_NEXT 0x1E
+#define GD_RECT 0x22
+
+int mac_card_position(mac_t *mac, uint32_t index, int32_t *x, int32_t *y)
+{
+    if (index >= MAC_CARDS || !mac->card[index].present || mac->card[index].refnum == 0)
+        return -1;
+
+    uint32_t handle = rd32(mac, LM_DEVICE_LIST);
+
+    for (int n = 0; handle != 0 && handle < mac->ram_size && n < 16; n++)
+    {
+        uint32_t gd = rd32(mac, handle);
+
+        if (gd == 0 || gd >= mac->ram_size)
+            return -1;
+        if (rd16(mac, gd + GD_REFNUM) == mac->card[index].refnum)
+        {
+            *y = (int16_t)rd16(mac, gd + GD_RECT);
+            *x = (int16_t)rd16(mac, gd + GD_RECT + 2);
+            return 0;
+        }
+        handle = rd32(mac, gd + GD_NEXT);
+    }
+    return -1;
 }

@@ -58,6 +58,10 @@ int mac_machine_set_resolution(uint32_t width, uint32_t height);
  */
 int mac_machine_set_depth(uint32_t bits);
 
+/* The number of NuBus video cards: 1 (default) or 2 (a second screen in slot $D, beside the first as the
+ * Mac arranges them; 32 MiB more memory). Returns -1 for other numbers. */
+int mac_machine_set_cards(uint32_t cards);
+
 /* true: no NuBus card; the IIci's built-in video (640x480, 8 bits at most) is the screen. */
 void mac_machine_set_builtin(bool builtin);
 

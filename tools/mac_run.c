@@ -28,6 +28,8 @@
  *   -G   with -F, list the QuickDraw GDevices (DeviceList) at the end
  *   -C   WxH[xD]: the NuBus video card (slot $C) starts in this resolution (default 640x480) and depth
  *        (D = 1, 2, 4, 8, 16 or 32 bits per pixel; default 1)
+ *   -2   WxH: a second NuBus video card (slot $D) in this resolution
+ *   -q   with -2, write the second card's screen as a PPM image at the end
  *   -I   no NuBus video card: the built-in video (640x480, 8 bits at most) is the screen
  *   -V   addr: print every change of the 32-bit guest value at that address (hex), with the instruction that did it
  *   -L   @addr: print the registers each time the PC is addr (hex)
@@ -179,7 +181,7 @@ static const uint32_t *render_screen(void)
         screen = calloc((size_t)w * h, 4);
         screen_w = w;
         screen_h = h;
-        mac.card.all_dirty = true;
+        mac.card[0].all_dirty = true;
     }
     if (screen == NULL || mac_render_changes(&mac, screen, NULL) < 0)
         return NULL;
@@ -208,6 +210,8 @@ static bool show_gd;
 static int card_res;            /* -C: index in mac_card_resolutions (0 = 640x480) */
 static bool builtin_only;       /* -I */
 static uint32_t card_depth;     /* -C: 0-5 = 1-32 bits */
+static int second_res = -1;     /* -2: the second card's resolution */
+static const char *second_ppm;  /* -q */
 static uint32_t dis_addr, dis_n;
 static bool trap_log;
 static uint32_t trap_filter;
@@ -514,6 +518,22 @@ int main(int argc, char **argv)
                 return 1;
             }
         }
+        else if (argv[i][0] == '-' && argv[i][1] == '2' && i + 1 < argc)
+        {
+            unsigned int w = 0, h = 0;
+
+            sscanf(argv[++i], "%ux%u", &w, &h);
+            second_res = mac_card_find_resolution(w, h);
+            if (second_res < 0)
+            {
+                fprintf(stderr, "-2: the card has no %ux%u mode\n", w, h);
+                return 1;
+            }
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'q' && i + 1 < argc)
+        {
+            second_ppm = argv[++i];
+        }
         else if (argv[i][0] == '-' && argv[i][1] == 'I')
         {
             card_res = -1;
@@ -615,6 +635,12 @@ int main(int argc, char **argv)
     if (!builtin_only && mac_card_attach(&mac, calloc(1, MAC_CARD_VRAM_SIZE), (uint32_t)card_res, card_depth) != 0)
     {
         fprintf(stderr, "cannot attach the video card\n");
+        return 1;
+    }
+    if (!builtin_only && second_res >= 0 &&
+        mac_card_attach(&mac, calloc(1, MAC_CARD_VRAM_SIZE), (uint32_t)second_res, 0) != 0)
+    {
+        fprintf(stderr, "cannot attach the second video card\n");
         return 1;
     }
     if (disk_path != NULL)
@@ -734,6 +760,31 @@ int main(int argc, char **argv)
         {
             printf("mac: screen crc %x after %u frames (%ux%u)\n",
                    crc32(shot, screen_w * screen_h), frames, screen_w, screen_h);
+        }
+        if (second_ppm != NULL && mac.card[1].present)
+        {
+            uint32_t w, h;
+
+            mac_card_screen_size(&mac, 1, &w, &h);
+            uint32_t *second = calloc((size_t)w * h, 4);
+
+            mac.card[1].all_dirty = true;
+            if (second != NULL && mac_card_render(&mac, 1, second, NULL) >= 0)
+            {
+                uint32_t keep_w = screen_w, keep_h = screen_h;
+
+                screen_w = w;
+                screen_h = h;
+                write_ppm(second_ppm, second);
+                screen_w = keep_w;
+                screen_h = keep_h;
+                int32_t x = 0, y = 0;
+                bool placed = mac_card_position(&mac, 1, &x, &y) == 0;
+
+                printf("mac: second screen %ux%u written to %s (%s at %d,%d)\n", w, h, second_ppm,
+                       placed ? "on the desktop" : "not a screen", (int)x, (int)y);
+            }
+            free(second);
         }
         if (show_gd)
         {

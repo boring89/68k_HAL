@@ -265,10 +265,10 @@ static void test_resolutions(void)
     wr(PARAM + 2, 4, MAC_CARD_RES_ID_BASE + 12);
     wr(PARAM + 6, 2, 0);
     TEST_ASSERT_EQ_INT(-50, call(true, 10));
-    TEST_ASSERT_EQ_INT(MAC_CARD_MODE_1BIT + 5, mac.card.rom[mac.card.last_mode_entry]);
+    TEST_ASSERT_EQ_INT(MAC_CARD_MODE_1BIT + 5, mac.card[0].rom[mac.card[0].last_mode_entry]);
     wr(PARAM, 2, MAC_CARD_MODE_1BIT + 4);
     TEST_ASSERT_EQ_INT(0, call(true, 10));
-    TEST_ASSERT_EQ_INT(0xFF, mac.card.rom[mac.card.last_mode_entry]);
+    TEST_ASSERT_EQ_INT(0xFF, mac.card[0].rom[mac.card[0].last_mode_entry]);
     wr(PARAM, 4, MAC_CARD_RES_ID_BASE + 11);
     TEST_ASSERT_EQ_INT(0, call(false, 17));
     TEST_ASSERT_EQ_INT(MAC_CARD_MODE_1BIT + 4, (int)rd(PARAM + 20, 2));
@@ -290,16 +290,69 @@ static void test_vblank_interrupt(void)
     TEST_ASSERT_EQ_INT(0x00, rd(0x50F26002u, 1) & 0x08);
     TEST_ASSERT(mac_rbv_irq(&mac.rbv));
 
-    /* The handler's acknowledge clears it. */
+    /* The handler's acknowledge (A1 = its sqParm, the slot) clears it. */
+    m68k_vm_set_reg(M68K_VM_REG_A0 + 1, MAC_CARD_SLOT);
     mac_card_irq_ack(&mac);
     TEST_ASSERT_EQ_INT(0x08, rd(0x50F26002u, 1) & 0x08);
     TEST_ASSERT(!mac_rbv_irq(&mac.rbv));
 
     /* cscSetInterrupt with csMode 1 turns them off. */
+    wr(DCE + 40, 1, MAC_CARD_SLOT);         /* dCtlSlot */
     wr(PARAM, 1, 1);
     TEST_ASSERT_EQ_INT(0, call(true, 7));
     mac_card_vblank(&mac);
     TEST_ASSERT(!mac_rbv_irq(&mac.rbv));
+}
+
+static void test_two_cards(void)
+{
+    static uint8_t *vram2;
+    uint32_t w, h;
+
+    if (vram2 == NULL)
+        vram2 = calloc(1, MAC_CARD_VRAM_SIZE);
+    memset(rom, 0, sizeof rom);
+    TEST_ASSERT_EQ_INT(0, mac_init(&mac, ram, RAM_SIZE, rom, ROM_SIZE));
+    TEST_ASSERT_EQ_INT(0, mac_card_attach(&mac, vram, 0, 0));
+    TEST_ASSERT_EQ_INT(0, mac_card_attach(&mac, vram2, 2, 0));
+    TEST_ASSERT_EQ_INT(-1, mac_card_attach(&mac, vram2, 2, 0));    /* only $C and $D */
+    mac_reset(&mac);
+    mac.overlay = false;
+
+    /* Slot $D: its own ROM at the top of 0xFDxxxxxx, its own video RAM at 0xD0000000. */
+    TEST_ASSERT_EQ_INT(0x0F, rd(0xFDFFFFFFu, 1));
+    TEST_ASSERT_EQ_INT(0x0F, rd(0xFCFFFFFFu, 1));
+    vram[0] = 0;
+    wr(0xD0000000u, 1, 0x5A);
+    TEST_ASSERT_EQ_INT(0x5A, vram2[0]);
+    TEST_ASSERT_EQ_INT(0, vram[0]);
+    TEST_ASSERT_EQ_INT(0, mac_card_screen_size(&mac, 1, &w, &h));
+    TEST_ASSERT_EQ_INT(1024, (int)w);
+    TEST_ASSERT_EQ_INT(-1, mac_card_screen_size(&mac, 2, &w, &h));
+
+    /* The driver works on the card of its DCE's slot: switch only the second one. */
+    wr(DCE + 40, 1, 0xD);
+    wr(PARAM, 2, MAC_CARD_MODE_1BIT + 3);
+    wr(PARAM + 2, 4, MAC_CARD_RES_ID_BASE + 1);
+    wr(PARAM + 6, 2, 0);
+    TEST_ASSERT_EQ_INT(0, call(true, 10));
+    TEST_ASSERT_EQ_INT((int)0xD0000000u, (int)rd(PARAM + 8, 4));
+    mac_card_screen_size(&mac, 1, &w, &h);
+    TEST_ASSERT_EQ_INT(800, (int)w);
+    mac_card_screen_size(&mac, 0, &w, &h);
+    TEST_ASSERT_EQ_INT(640, (int)w);
+
+    /* Each slot has its own interrupt bit (3 = $C, 4 = $D). */
+    m68k_vm_set_reg(M68K_VM_REG_A0 + 1, DCE);
+    mac_card_open(&mac);
+    mac_card_vblank(&mac);
+    TEST_ASSERT_EQ_INT(0x00, rd(0x50F26002u, 1) & 0x10);
+    TEST_ASSERT_EQ_INT(0x08, rd(0x50F26002u, 1) & 0x08);
+    m68k_vm_set_reg(M68K_VM_REG_A0 + 1, 0xD);
+    mac_card_irq_ack(&mac);
+    TEST_ASSERT_EQ_INT(0x10, rd(0x50F26002u, 1) & 0x10);
+    free(vram2);
+    vram2 = NULL;
 }
 
 int main(void)
@@ -308,6 +361,7 @@ int main(void)
     TEST_RUN(test_render_changes);
     TEST_RUN(test_resolutions);
     TEST_RUN(test_vblank_interrupt);
+    TEST_RUN(test_two_cards);
     free(vram);
     return TEST_REPORT("mac_card");
 }

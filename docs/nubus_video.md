@@ -51,7 +51,7 @@ NuBus 每個 slot `$s`（`$9`–`$E`）有兩段位址：
          sRsrcType   (1) = 類別 3 Display, cType 1 Video, DrvrSW 1 (Apple), DrvrHW 'hH'
          sRsrcName   (2) = "Display_Video_Apple_68kHAL"
          sRsrcDrvrDir(4) → sMacOS68020 (2) → DRVR（第 4 節）
-         sRsrcFlags  (7) = f32BitMode
+         sRsrcFlags  (7) = fOpenAtStart | f32BitMode（第 7.5 節）
          sRsrcHWDevId(8) = 1
          MinorLength(11) = 32 MiB（ROM 的開機視訊碼一定要讀它，見第 7 節）
          MajorBaseOS(12) = 0、MajorLength(13) = 32 MiB
@@ -156,6 +156,15 @@ int mac_card_render(mac_t *mac, uint32_t *out, uint32_t out_pitch, uint32_t *row
 - 以前 ROM 寫入參數 RAM 預設值時也只寫到第一個位元組，XPRAM `0x01` 留著 `0xFF`；開機碼向 `_InternalWait` 要的旗標（`0x40801464`）bit 7 因此是 1，就不等 SCSI 磁碟。修好後是 0，開機碼會輪詢 SCSI 直到逾時（Mac 時間約 10 秒，Finder 晚 500 幀出現）。現在讀 `0x01` 時固定設 bit 7–6（我們的 SCSI 匯流排永遠是空的）。
 - 結果：開機時間與畫面和以前相同（1024x768 在第 1200 幀的 CRC 不變）；`make test-rom-qemu` 的黃金 CRC 仍由 host 與 kernel 一起決定。
 
+## 7.5 兩張卡（多螢幕，P9 N10）
+
+`mac cards=2`（kernel）、`mac_run -2 WxH -q 第二個螢幕.ppm`（host）：第二張同樣的卡插在 slot `$D`（ROM 在 `0xFDFFxxxx`、VRAM 在 `0xD0000000`、RBV slot 中斷 bit 4）。程式上 `mac_t.card[]` 變成陣列；bus 依位址的 slot 找卡，驅動依 DCE 的 `dCtlSlot` 找卡，中斷處理程式的 sqParm 就是 slot。
+
+- **要 fOpenAtStart**：一開始第二張卡沒有變成螢幕——ROM 只開啟開機螢幕的驅動；其他顯示卡的驅動要由 Slot Manager 在開機時開啟，條件是 sRsrcFlags 有 `fOpenAtStart`（bit 1）。現在 video sResource 的 flags = `fOpenAtStart | f32BitMode`。之後 System（沒有 `'scrn'` 資源時）替每張卡建一個 GDevice，桌面延伸到第二個螢幕，游標可以移過去（host 截圖）。
+- **排列跟著 Mac**：System 把第二個螢幕放在主螢幕旁邊（同大小時在右邊；試過 1024x768＋800x600 時放在左邊）。`mac_card_position` 從 QuickDraw 的 DeviceList 找到該卡驅動的 GDevice，讀 gdRect 的左上角；kernel 依這個位置把兩個畫面擺在實體螢幕上，整體用同一個倍率、置中。在 Monitors 拖動螢幕，kernel 也會跟著重排（每幀檢查）。
+- 第二張卡的解析度與第一張相同（預設解析度依「實體寬度的一半」選），可以在 Monitors 分別換。畫面 CRC 只算第一張。
+- 驗證：`tests/host/test_mac_card.c` 的 `test_two_cards`；QEMU 2560x1440、兩張 640x480、2x 的截圖（`build/p9/n10_two_screens_half.png`）。
+
 ## 8. 檔案與介面
 
 | 檔案 | 內容 |
@@ -168,6 +177,6 @@ int mac_card_render(mac_t *mac, uint32_t *out, uint32_t out_pitch, uint32_t *row
 | `tools/mac_run.c` | `-C WxH[xD]`（卡的起始解析度與色深）、`-I`（內建視訊） |
 | `tools/mac_monitors.sh` | 用 Monitors 切解析度的滑鼠腳本 |
 
-**kernel 的 `mac` 指令**：`mac [scale=1|1.5|2|2.5|3|4|auto] [res=WxH] [depth=1|2|4|8|16|32] [builtin]`（`depth` 預設 1）。預設 `res` 依實體螢幕選（2560x1440 → 1280x720 以 2x 填滿；1920x1080 → 1280x720 以 1.5x 填滿；640x480 → 640x480），預設倍率是能放進螢幕的最大值。執行中：Ctrl+Alt+PgUp／PgDn 放大／縮小半倍、Ctrl+Alt+Home 回到最大（這三個組合 kernel 自己吃掉，不送給 Mac；Control-Command-PgUp 在 Mac 沒有意義）。Mac 在 Monitors 換解析度時，kernel 自動重新計算置中與倍率（倍率維持使用者要的，放不下就降）。
+**kernel 的 `mac` 指令**：`mac [scale=1|1.5|2|2.5|3|4|auto] [res=WxH] [depth=1|2|4|8|16|32] [cards=1|2] [builtin]`（`depth` 預設 1、`cards` 預設 1）。預設 `res` 依實體螢幕選（2560x1440 → 1280x720 以 2x 填滿；1920x1080 → 1280x720 以 1.5x 填滿；640x480 → 640x480），預設倍率是能放進螢幕的最大值。執行中：Ctrl+Alt+PgUp／PgDn 放大／縮小半倍、Ctrl+Alt+Home 回到最大（這三個組合 kernel 自己吃掉，不送給 Mac；Control-Command-PgUp 在 Mac 沒有意義）。Mac 在 Monitors 換解析度時，kernel 自動重新計算置中與倍率（倍率維持使用者要的，放不下就降）。
 
 **測試**：`tests/host/test_mac_card.c`（ROM 格式與 CRC、目錄、驅動位元組、bus、髒區與各色深的轉換、解析度清單、切換、4K 沒有 32 位元、VBL 中斷）、`tests/host/test_fb_scale.c`（1.5x、自動選擇）；本機：`make test-rom`（GDevice 數、Monitors 切三種解析度）、`make test-rom-qemu`（host 與 kernel 的畫面 CRC 相同，卡 640x480：`fa963b30`）、`make test-mac-perf`、`make mac-uefi-shot`。

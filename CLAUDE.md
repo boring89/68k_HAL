@@ -152,7 +152,7 @@ Claude 依照上方工作規則直接實作。
 
 - `emu/mac`：Mac IIci 機器模型與 `kernel/mac`（P3，見 `docs/mac.md`）。同樣是由自動排程一次做完的，沒有走協作模式的逐步確認，使用者尚未審核；之後修改時請先帶使用者過一遍 `docs/mac.md`
 
-- P9（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：Mac 的虛擬 NuBus 顯示卡（slot `$C`、640x480–3840x2160、1–32 位元、Monitors 切換；`docs/nubus_video.md`）、kernel 端的髒列輸出與 0.5 倍步進 HiDPI、開機時 2560x1440（kernel-gfx1440.elf）、VBE 執行期切換（x86emu；`docs/gpu.md` 第 6–8 節）。P9 的規劃與紀錄在 `P9_PLAN.md`（不進 git）。
+- P9（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：Mac 的虛擬 NuBus 顯示卡（slot `$C`，`mac cards=2` 再加 `$D` 當第二個螢幕；640x480–3840x2160、1–32 位元、Monitors 切換；`docs/nubus_video.md`）、kernel 端的髒列輸出與 0.5 倍步進 HiDPI、開機時 2560x1440（kernel-gfx1440.elf）、VBE 執行期切換（x86emu；`docs/gpu.md` 第 6–8 節）。P9 的規劃與紀錄在 `P9_PLAN.md`（不進 git）。
 - P8（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：x86-64 kernel（`docs/x86_64.md`）、PCI 全 bus 掃描與 4 GiB 以上 BAR、PAT write-combining 的 framebuffer 與 Mac 的效能數據、Mac 執行時 fbcon 暫停、Mac 的空 slot 與 GDevice 數量（`docs/mac.md` 第 4 節）、UEFI 的 1920x1080 解析度（`docs/p520.md`）。P8 的規劃與紀錄在 `P8_PLAN.md`（不進 git）。
 - P7（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：Multiboot2 與 UEFI 開機（`docs/hal.md`）、行程與排程與訊號與管線（`docs/process.md`）、APIC 與 MSI（`docs/apic.md`）、xHCI 與 USB 鍵盤滑鼠（`docs/usb.md`）、NVMe（`docs/storage.md`）、實機的顯示（`docs/gpu.md` 4.5）、e1000e（`docs/net.md`）。P7 的規劃與紀錄在 `P7_PLAN.md`（不進 git）。
 - P6（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：CPU（`docs/cpu.md`）、使用者模式與 C SDK 與 VFS（`docs/userland.md`）、PCI 與驅動框架（`docs/pci.md`）、網路（`docs/net.md`）、聲音（`docs/sound.md`）、顯示（`docs/gpu.md`）、Mac 的聲音／時鐘／磁碟寫入（`docs/mac.md` 第 11、12 節）。P6 的規劃與紀錄在 `P6_PLAN.md`（不進 git）。

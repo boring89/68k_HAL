@@ -1254,6 +1254,7 @@ static void cmd_mac(
     int bits = 0;
 
     mac_machine_set_depth(1);
+    mac_machine_set_cards(1);
     for (int i = 1; i < argc; i++)
     {
         const char *arg = argv[i];
@@ -1265,6 +1266,8 @@ static void cmd_mac(
             halves = 0;
         else if (k_strcmp(arg, "builtin") == 0)
             builtin = true;
+        else if (k_strcmp(arg, "cards=1") == 0 || k_strcmp(arg, "cards=2") == 0)
+            mac_machine_set_cards((uint32_t)(arg[6] - '0'));
         else if (k_strncmp(arg, "depth=", 6) == 0 && (k_atoi(arg + 6, &bits), bits > 0) &&
                  mac_machine_set_depth((uint32_t)bits) == 0)
             continue;
@@ -1275,7 +1278,7 @@ static void cmd_mac(
             halves = (uint32_t)(arg[0] - '0') * 2 + (arg[1] == '.' ? 1 : 0);
         else
         {
-            terminal_write_line("usage: mac [scale=1|1.5|2|2.5|3|4|auto] [res=WxH] [depth=1|2|4|8|16|32] [builtin]");
+            terminal_write_line("usage: mac [scale=1|1.5|2|2.5|3|4|auto] [res=WxH] [depth=1|2|4|8|16|32] [cards=1|2] [builtin]");
             terminal_write_line("  res: 640x480 800x600 1024x768 1152x870 1280x720 1280x960 1280x1024 1440x900");
             terminal_write_line("       1600x1200 1920x1080 1920x1200 2560x1440 3840x2160 (default: fills the screen)");
             terminal_write_line("  Ctrl+Alt+PgUp/PgDn/Home: larger/smaller/largest while it runs; ` stops");
