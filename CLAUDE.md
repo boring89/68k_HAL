@@ -34,6 +34,9 @@ make test-fb      # GRUB 的 640x480 圖形模式：色條、framebuffer 文字�
 make test-mac-keys # Alt-N（= Command-N）在 Mac 建立資料夾（本機專用）
 make test-net / test-virtio-net  # TCP（host 的 http.server 經 slirp 10.0.2.2）、socket、DNS；virtio-net 網卡
 make test-mac-sound / test-mac-clock / test-mac-persist  # Mac 的聲音、時鐘、ATA 寫入（本機專用，需要 ROM 與磁碟）
+make mac-disk     # 68k_HAL 磁碟映像 build/68k_HAL_mac.img（GPT、UEFI：Boot、System A/B、疊加層、Applications；docs/mac_disk.md；本機專用）
+make test-mac-disk # 上面的配置（小一號）在 QEMU+OVMF 開機兩次：自動進 Mac、資料夾保存、電源鍵、macsys reset（本機專用）
+make test-macdisk # 合成的 GPT 映像接 AHCI：分割區與疊加層（在 make test 中）
 make clean
 ```
 
@@ -61,7 +64,7 @@ arch/x86_64/   64 位元專屬：gdt、interrupt（16 位元組 IDT）、mmu（4
 arch/x86/      CPU（32 位元專用與兩者共用的 cpu、io）：cpu（hal_cpu、CPUID、控制暫存器）、gdt（含 TSS）、interrupt（IDT、例外、IRQ stub）、mmu（分頁、hal_mmu、space = 每個行程一份分頁目錄）、task（context 切換、FPU）、io（port I/O）、user（ring 3、int 0x80）、test
 platform/pc/   PC 平台：boot（Multiboot 進入點、hal_boot）、video（framebuffer、BGA 模式設定、vbe：x86emu 執行 VGA BIOS 的 VBE）、rtc（CMOS 時鐘）、interrupt（8259 PIC、local APIC、I/O APIC、hal_irq；見 docs/apic.md）、timer（PIT、TSC、hal_timer）、acpi、smp（INIT-SIPI-SIPI）、pci（列舉、驅動清單）、dma、vmap（0xE0000000 視窗）、hal_init.c、test
 drivers/       裝置驅動：vga、serial、ps2_keyboard、ps2_mouse、ata（讀寫，見 docs/storage.md）、ahci（SATA）、e1000 與 virtio_net（網卡）、hda（Intel HD Audio）、bga（Bochs VBE 顯示）、usb_host（列舉 USB 控制器）、xhci（xHCI 控制器、HID 鍵盤滑鼠）、nvme（NVMe，輪詢）、e1000e（82574L 與 I219）
-kernel/        與硬體無關的核心：main.c、panic、memory（pmm、heap）、block（區塊裝置、ramdisk）、fs（apm、hfs 唯讀、volume；見 docs/hfs.md）、display（含 fb_scale、fbcon 圖形模式文字終端）、console、terminal（含 mirror、ANSI 解析器 ansi）、keyboard（keycode、state、keychar、keyseq 按鍵序列）、input、shell、log、printf、lib、m68k（guest RAM 與示範）、mac（在 kernel 裡執行 Mac；見 docs/mac.md）、user（ELF 載入器、系統呼叫、console；見 docs/userland.md）、vfs（ramfs、tarfs、hfsfs、devfs 的 console；見 docs/userland.md）、net（packet 純函式、tcp、net 堆疊；見 docs/net.md）、usb（控制器註冊表；見 docs/usb.md）、sound（見 docs/sound.md）、pci（名稱表；見 docs/pci.md）、test
+kernel/        與硬體無關的核心：main.c、panic、memory（pmm、heap）、block（區塊裝置、ramdisk、overlay 寫入時複製的疊加層）、fs（apm、gpt、macdisk = 68k_HAL 磁碟配置、hfs 唯讀、volume；見 docs/hfs.md、docs/mac_disk.md）、config（68k_hal.cfg 與命令列的設定）、display（含 fb_scale、fbcon 圖形模式文字終端）、console、terminal（含 mirror、ANSI 解析器 ansi）、keyboard（keycode、state、keychar、keyseq 按鍵序列）、input、shell、log、printf、lib、m68k（guest RAM 與示範）、mac（在 kernel 裡執行 Mac；見 docs/mac.md）、user（ELF 載入器、系統呼叫、console；見 docs/userland.md）、vfs（ramfs、tarfs、hfsfs、devfs 的 console；見 docs/userland.md）、net（packet 純函式、tcp、net 堆疊；見 docs/net.md）、usb（控制器註冊表；見 docs/usb.md）、sound（見 docs/sound.md）、pci（名稱表；見 docs/pci.md）、test
 emu/m68k/      68k 虛擬機：Musashi 的封裝層（vm：含可選的 bus 與逐指令 hook）、A-line trap 分派（trap）、Musashi 設定（m68kconf.h）；freestanding/ 是 kernel 建置用的 libc 替身
 emu/mac/       Mac IIci 機器模型（M-P3，見 docs/mac.md）：記憶體配置與模擬 opcode（mac.c）、ROM 修補（rom_patch.c）、VIA（via.c）、RBV/DAC/視訊（video.c）、虛擬 NuBus 顯示卡（nubus_video.c、nubus_driver.s；docs/nubus_video.md）、IWM、SCSI、.Disk 驅動（disk.c、stub.s）；與硬體無關，檔案由使用者提供，不在 repo
 third_party/   第三方原始碼，不修改：musashi（68k CPU 核心，MIT）、x86emu（X.org 的真實模式 x86 模擬器，MIT/X11 類；platform/pc/video/vbe.c 用）；downloads/ 是下載的 musl、Lua、TinyCC、Haiku（gitignore）
@@ -152,6 +155,7 @@ Claude 依照上方工作規則直接實作。
 
 - `emu/mac`：Mac IIci 機器模型與 `kernel/mac`（P3，見 `docs/mac.md`）。同樣是由自動排程一次做完的，沒有走協作模式的逐步確認，使用者尚未審核；之後修改時請先帶使用者過一遍 `docs/mac.md`
 
+- P10（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：68k_HAL 磁碟（GPT、A/B 槽、疊加層、Applications、`make mac-disk`）、開機直接進 Mac（`autostart=mac`、`68k_hal.cfg`）、.Disk 多磁碟、Mac 的記憶體設定、Shut Down/Restart/電源鍵對應 ACPI（`docs/mac_disk.md`，`docs/mac.md` 第 6 節）。P10 的規劃與紀錄在 `P10_PLAN.md`（不進 git）。
 - P9（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：Mac 的虛擬 NuBus 顯示卡（slot `$C`，`mac cards=2` 再加 `$D` 當第二個螢幕；640x480–3840x2160、1–32 位元、Monitors 切換；`docs/nubus_video.md`）、kernel 端的髒列輸出與 0.5 倍步進 HiDPI、開機時 2560x1440（kernel-gfx1440.elf）、VBE 執行期切換（x86emu；`docs/gpu.md` 第 6–8 節）。P9 的規劃與紀錄在 `P9_PLAN.md`（不進 git）。
 - P8（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：x86-64 kernel（`docs/x86_64.md`）、PCI 全 bus 掃描與 4 GiB 以上 BAR、PAT write-combining 的 framebuffer 與 Mac 的效能數據、Mac 執行時 fbcon 暫停、Mac 的空 slot 與 GDevice 數量（`docs/mac.md` 第 4 節）、UEFI 的 1920x1080 解析度（`docs/p520.md`）。P8 的規劃與紀錄在 `P8_PLAN.md`（不進 git）。
 - P7（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：Multiboot2 與 UEFI 開機（`docs/hal.md`）、行程與排程與訊號與管線（`docs/process.md`）、APIC 與 MSI（`docs/apic.md`）、xHCI 與 USB 鍵盤滑鼠（`docs/usb.md`）、NVMe（`docs/storage.md`）、實機的顯示（`docs/gpu.md` 4.5）、e1000e（`docs/net.md`）。P7 的規劃與紀錄在 `P7_PLAN.md`（不進 git）。
@@ -167,6 +171,7 @@ Claude 依照上方工作規則直接實作。
 - 滑鼠事件（`INPUT_EVENT_MOUSE`）進入 input buffer 但主迴圈忽略。
 - HFS 名稱比較只對 ASCII 不分大小寫，查詢是線性掃描（見 `docs/hfs.md`）。
 - ATA 驅動只支援 primary master、LBA28、輪詢（可讀寫，寫入後 FLUSH CACHE）。
+- 68k_HAL 磁碟（`docs/mac_disk.md`）：只支援 UEFI 開機；系統卷宗的大小是原始映像的大小（不是分割區的 1 GiB）；區塊大小必須是 512（4 KiB 區塊的 NVMe 不行）；疊加層的資料區用完時寫入失敗（不回收）。
 - 使用者程式：多工（fork／execve／wait／pipe／訊號，最多 64 個行程；協作式排程加上「只在使用者模式被計時器打斷」的搶佔；kernel 內不搶佔；fork 複製整個位址空間；沒有執行緒、alarm、作業控制，見 `docs/process.md` 第 9 節）；終端機沒有 UTF-8；沒有 NX（可讀即可執行）；堆疊固定 2 MiB。見 `docs/userland.md` 第 7 節。
 - 網路：TCP 沒有亂序重組、壅塞控制、選擇性確認；沒有 IP 分片、IPv6；一次只用一張網卡；HDA 只有輸出；BGA 只有 32 bpp；AHCI 只用輪詢與一個命令槽；USB：xHCI 的 HID 鍵盤滑鼠、hub、隨身碟（Bulk-Only）可用，其餘控制器只列出（見 `docs/usb.md`）；中斷由 I/O APIC + local APIC 處理（沒有 APIC 或命令列有 `noapic` 時用 8259，見 `docs/apic.md`），其他處理器只回報後 `hlt`（沒有 per-CPU 資料）。
 - `vmap`（`0xE0000000`–`0xF0000000`）與 `hal_dma_free` 的虛擬位址不重用。
