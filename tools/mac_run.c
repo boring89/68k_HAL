@@ -26,6 +26,8 @@
  *   -T   opcode: log each A-line trap (opcode 0 = all) with D0/A0/A1 (the Mac OS trap dispatcher entry)
  *   -D   addr,count: disassemble count instructions from addr (hex) and exit
  *   -G   with -F, list the QuickDraw GDevices (DeviceList) at the end
+ *   -C   WxH: the NuBus video card (slot $9) starts in this resolution (default 640x480)
+ *   -I   no NuBus video card: the built-in video (640x480, 8 bits at most) is the screen
  *   -V   addr: print every change of the 32-bit guest value at that address (hex), with the instruction that did it
  *   -L   @addr: print the registers each time the PC is addr (hex)
  *   -L   lo-hi: print every instruction with the registers while the instruction count (decimal) is in that range
@@ -159,10 +161,50 @@ static void print_regs(void)
 
 
 static mac_t mac;
+
+/* The whole picture, kept up to date with the rows that changed (mac_render_changes). */
+static uint32_t *screen;
+static uint32_t screen_w, screen_h;
+
+static const uint32_t *render_screen(void)
+{
+    uint32_t w, h;
+
+    mac_screen_size(&mac, &w, &h);
+    if (w != screen_w || h != screen_h)
+    {
+        free(screen);
+        screen = calloc((size_t)w * h, 4);
+        screen_w = w;
+        screen_h = h;
+        mac.card.all_dirty = true;
+    }
+    if (screen == NULL || mac_render_changes(&mac, screen, NULL) < 0)
+        return NULL;
+    return screen;
+}
+
+static void write_ppm(const char *path, const uint32_t *pixels)
+{
+    FILE *f = fopen(path, "wb");
+
+    if (f == NULL)
+        return;
+    fprintf(f, "P6\n%u %u\n255\n", screen_w, screen_h);
+    for (uint32_t i = 0; i < screen_w * screen_h; i++)
+    {
+        fputc(pixels[i] >> 16, f);
+        fputc(pixels[i] >> 8, f);
+        fputc(pixels[i], f);
+    }
+    fclose(f);
+}
 static uint32_t g_tail = 32;
 static uint32_t log_lo, log_hi, log_pc;
 static bool want_log;
 static bool show_gd;
+static int card_res;            /* -C: index in mac_card_resolutions (0 = 640x480) */
+static bool builtin_only;       /* -I */
 static uint32_t dis_addr, dis_n;
 static bool trap_log;
 static uint32_t trap_filter;
@@ -454,6 +496,23 @@ int main(int argc, char **argv)
         {
             sscanf(argv[++i], "%x,%u", &dis_addr, &dis_n);
         }
+        else if (argv[i][0] == '-' && argv[i][1] == 'C' && i + 1 < argc)
+        {
+            unsigned int w = 0, h = 0;
+
+            sscanf(argv[++i], "%ux%u", &w, &h);
+            card_res = mac_card_find_resolution(w, h);
+            if (card_res < 0)
+            {
+                fprintf(stderr, "-C: the card has no %ux%u mode\n", w, h);
+                return 1;
+            }
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'I')
+        {
+            card_res = -1;
+            builtin_only = true;
+        }
         else if (argv[i][0] == '-' && argv[i][1] == 'G')
         {
             show_gd = true; /* -G: with -F, list the QuickDraw GDevices (DeviceList) at the end */
@@ -547,6 +606,11 @@ int main(int argc, char **argv)
     mac.vram = calloc(1, VRAM_SIZE);
     mac.vram_size = VRAM_SIZE;
     mac.vram_base = VRAM_BASE;
+    if (!builtin_only && mac_card_attach(&mac, calloc(1, MAC_CARD_VRAM_SIZE), (uint32_t)card_res) != 0)
+    {
+        fprintf(stderr, "cannot attach the video card\n");
+        return 1;
+    }
     if (disk_path != NULL)
     {
         FILE *df = fopen(disk_path, "rb");
@@ -599,7 +663,7 @@ int main(int argc, char **argv)
     if (frames > 0)
     {
         /* Exactly what the kernel does (kernel/mac/machine.c): whole frames. */
-        static uint32_t shot[MAC_SCREEN_W * MAC_SCREEN_H];
+        const uint32_t *shot;
 
         /* -b works in frame mode too: the run stops at the first time the PC gets there. */
         mac.break_lo = break_pc;
@@ -655,26 +719,15 @@ int main(int argc, char **argv)
             write_wav(wav_path);
             printf("mac: %zu audio samples\n", audio_length);
         }
-        if (ppm_path != NULL && mac_render(&mac, shot) == 0)
+        shot = render_screen();
+        if (ppm_path != NULL && shot != NULL)
         {
-            FILE *pf = fopen(ppm_path, "wb");
-
-            if (pf != NULL)
-            {
-                fprintf(pf, "P6\n%d %d\n255\n", MAC_SCREEN_W, MAC_SCREEN_H);
-                for (uint32_t i = 0; i < MAC_SCREEN_W * MAC_SCREEN_H; i++)
-                {
-                    fputc(shot[i] >> 16, pf);
-                    fputc(shot[i] >> 8, pf);
-                    fputc(shot[i], pf);
-                }
-                fclose(pf);
-            }
+            write_ppm(ppm_path, shot);
         }
-        if (mac_render(&mac, shot) == 0)
+        if (shot != NULL)
         {
-            printf("mac: screen crc %x after %u frames\n",
-                   crc32(shot, MAC_SCREEN_W * MAC_SCREEN_H), frames);
+            printf("mac: screen crc %x after %u frames (%ux%u)\n",
+                   crc32(shot, screen_w * screen_h), frames, screen_w, screen_h);
         }
         if (show_gd)
         {
@@ -779,24 +832,12 @@ int main(int argc, char **argv)
     }
     if (ppm_path != NULL)
     {
-        static uint32_t pixels[MAC_SCREEN_W * MAC_SCREEN_H];
-        FILE *f = fopen(ppm_path, "wb");
+        const uint32_t *pixels = render_screen();
 
-        if (f != NULL && mac_render(&mac, pixels) == 0)
+        if (pixels != NULL)
         {
-            fprintf(f, "P6\n%d %d\n255\n", MAC_SCREEN_W, MAC_SCREEN_H);
-            for (uint32_t i = 0; i < MAC_SCREEN_W * MAC_SCREEN_H; i++)
-            {
-                fputc(pixels[i] >> 16, f);
-                fputc(pixels[i] >> 8, f);
-                fputc(pixels[i], f);
-            }
-            printf("screen written to %s (depth %u bpp)\n", ppm_path,
-                   1u << (mac.rbv.depth & 3));
-        }
-        if (f != NULL)
-        {
-            fclose(f);
+            write_ppm(ppm_path, pixels);
+            printf("screen written to %s (%ux%u)\n", ppm_path, screen_w, screen_h);
         }
     }
     for (int k = 0; k < ndump; k++)

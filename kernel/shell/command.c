@@ -222,7 +222,7 @@ static shell_command_entry_t commands[] =
          cmd_cat},
         {COMMAND_MAC,
          "mac",
-         "Run the Macintosh IIci on boot modules mac_rom and mac_disk (` stops); fills the screen in whole multiples, mac 2 asks for exactly twofold",
+         "Run the Macintosh IIci on boot modules mac_rom and mac_disk (` stops): mac [scale=1|1.5|2|auto] [res=WxH] [builtin]",
          cmd_mac},
         {COMMAND_CPUINFO,
          "cpuinfo",
@@ -1219,23 +1219,70 @@ static void cmd_cat(
 }
 
 
+/* "WxH" (for example 1280x720) into its two numbers. Returns 0, or -1 if it is not one. */
+static int parse_resolution(
+    const char *text,
+    uint32_t *width,
+    uint32_t *height)
+{
+    uint32_t value[2] = {0, 0};
+    int part = 0;
+
+    for (; *text != '\0'; text++)
+    {
+        if (*text == 'x' && part == 0)
+            part = 1;
+        else if (*text >= '0' && *text <= '9' && value[part] < 100000)
+            value[part] = value[part] * 10 + (uint32_t)(*text - '0');
+        else
+            return -1;
+    }
+    if (part != 1 || value[0] == 0 || value[1] == 0)
+        return -1;
+    *width = value[0];
+    *height = value[1];
+    return 0;
+}
+
 static void cmd_mac(
     int argc,
     char **argv)
 {
-    int scale = 0; /* as large as the screen allows, in whole multiples */
+    uint32_t halves = 0;
+    uint32_t width = 0, height = 0;
+    bool builtin = false;
 
-    if (argc > 1)
-        k_atoi(argv[1], &scale);
-
-    if (scale < 0 || scale > 4)
+    for (int i = 1; i < argc; i++)
     {
-        terminal_write_line("usage: mac [scale 0..4] (0 = as large as the screen allows)");
-        return;
-    }
+        const char *arg = argv[i];
 
-    /* The Mac takes the screen (and gives it back, in the mode and with the text it had: machine.c). */
-    mac_machine_set_scale((uint32_t)scale);
+        if (k_strncmp(arg, "scale=", 6) == 0)
+            arg += 6;
+
+        if (k_strcmp(arg, "auto") == 0 || k_strcmp(arg, "0") == 0)
+            halves = 0;
+        else if (k_strcmp(arg, "builtin") == 0)
+            builtin = true;
+        else if (k_strncmp(arg, "res=", 4) == 0 && parse_resolution(arg + 4, &width, &height) == 0 &&
+                 mac_machine_set_resolution(width, height) == 0)
+            continue;
+        else if (arg[0] >= '1' && arg[0] <= '4' && (arg[1] == '\0' || (arg[1] == '.' && arg[2] == '5' && arg[3] == '\0')))
+            halves = (uint32_t)(arg[0] - '0') * 2 + (arg[1] == '.' ? 1 : 0);
+        else
+        {
+            terminal_write_line("usage: mac [scale=1|1.5|2|2.5|3|4|auto] [res=WxH] [builtin]");
+            terminal_write_line("  res: 640x480 800x600 1024x768 1152x870 1280x720 1280x960 1280x1024 1440x900");
+            terminal_write_line("       1600x1200 1920x1080 1920x1200 2560x1440 3840x2160 (default: fills the screen)");
+            terminal_write_line("  Ctrl+Alt+PgUp/PgDn/Home: larger/smaller/largest while it runs; ` stops");
+            return;
+        }
+    }
+    if (width == 0)
+        mac_machine_set_resolution(0, 0);
+
+    /* The Mac takes the screen (and gives it back, with the text it had: machine.c). */
+    mac_machine_set_scale_halves(halves);
+    mac_machine_set_builtin(builtin);
     mac_machine_run(0);
 }
 

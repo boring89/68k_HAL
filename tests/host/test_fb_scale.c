@@ -96,12 +96,71 @@ static void test_best_scale(void)
     TEST_ASSERT_EQ_INT(1, fb_best_scale(0, 0, 100, 100));
 }
 
+static void test_halves(void)
+{
+    const uint32_t source[2 * 2] = {1, 2, 3, 4};
+    uint32_t screen[3 * 3];
+    uint32_t row[3];
+    const uint8_t only_second[2] = {0, 1};
+
+    /* 1.5x: 2x2 becomes 3x3; source pixel 0 covers destination pixels 0 and 1. */
+    memset(screen, 0, sizeof(screen));
+    TEST_ASSERT_EQ_INT(2, (int)fb_blit_halves((uint8_t *)screen, 3 * 4, source, NULL, 2, 2, 3, row));
+    const uint32_t want[9] = {1, 1, 2, 1, 1, 2, 3, 3, 4};
+    TEST_ASSERT(memcmp(screen, want, sizeof(want)) == 0);
+
+    /* Only the changed row is drawn: row 1 of the source is destination row 2 at 1.5x. */
+    memset(screen, 0, sizeof(screen));
+    TEST_ASSERT_EQ_INT(1, (int)fb_blit_halves((uint8_t *)screen, 3 * 4, source, only_second, 2, 2, 3, row));
+    TEST_ASSERT_EQ_INT(0, (int)screen[0]);
+    TEST_ASSERT_EQ_INT(0, (int)screen[3]);
+    TEST_ASSERT_EQ_INT(3, (int)screen[6]);
+    TEST_ASSERT_EQ_INT(4, (int)screen[8]);
+
+    /* 2x through the same function. */
+    uint32_t big[4 * 4];
+    uint32_t row4[4];
+    TEST_ASSERT_EQ_INT(2, (int)fb_blit_halves((uint8_t *)big, 4 * 4, source, NULL, 2, 2, 4, row4));
+    TEST_ASSERT_EQ_INT(2, (int)big[3]);
+    TEST_ASSERT_EQ_INT(3, (int)big[3 * 4]);
+    TEST_ASSERT_EQ_INT(0, (int)fb_blit_halves((uint8_t *)big, 16, source, NULL, 2, 2, 1, row4));
+    TEST_ASSERT_EQ_INT(960, (int)fb_scaled_size(640, 3));
+}
+
+static void test_choose_size(void)
+{
+    const uint16_t w[] = {640, 800, 1024, 1280, 1920, 2560};
+    const uint16_t h[] = {480, 600, 768, 720, 1080, 1440};
+    uint32_t index, halves;
+
+    /* 2560x1440: 1280x720 at 2x fills it (a tie with 2560x1440 at 1x; the larger enlargement wins). */
+    TEST_ASSERT_EQ_INT(0, fb_choose_size(w, h, 6, 2560, 1440, &index, &halves));
+    TEST_ASSERT_EQ_INT(3, (int)index);
+    TEST_ASSERT_EQ_INT(4, (int)halves);
+
+    /* 1920x1080: 1280x720 at 1.5x. */
+    fb_choose_size(w, h, 6, 1920, 1080, &index, &halves);
+    TEST_ASSERT_EQ_INT(3, (int)index);
+    TEST_ASSERT_EQ_INT(3, (int)halves);
+
+    /* 640x480: itself at 1x. */
+    fb_choose_size(w, h, 6, 640, 480, &index, &halves);
+    TEST_ASSERT_EQ_INT(0, (int)index);
+    TEST_ASSERT_EQ_INT(2, (int)halves);
+
+    /* Too small for anything. */
+    TEST_ASSERT_EQ_INT(-1, fb_choose_size(w, h, 6, 320, 200, &index, &halves));
+    TEST_ASSERT_EQ_INT(0, (int)index);
+}
+
 int main(void)
 {
     TEST_RUN(test_double);
     TEST_RUN(test_scale_one_and_three);
     TEST_RUN(test_changed_rows_only);
     TEST_RUN(test_best_scale);
+    TEST_RUN(test_halves);
+    TEST_RUN(test_choose_size);
 
     return TEST_REPORT("fb_scale");
 }

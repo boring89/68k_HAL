@@ -101,6 +101,8 @@ typedef struct
     uint8_t sier;               /* slot interrupt enable (register 0x12) */
     uint8_t rier;               /* interrupt enable (register 0x13) */
     uint8_t depth;              /* bits 0-2 of register 0x10: 0=1 bpp .. 3=8 bpp */
+    uint8_t sense;              /* monitor sense lines reported in bits 3-5 of 0x10 */
+    uint8_t slot_irq;           /* NuBus slot interrupts pending: bit 0 = slot $9 .. bit 5 = $E */
     uint8_t other[0x20];        /* registers without special behavior */
 } mac_rbv_t;
 
@@ -136,6 +138,53 @@ typedef struct
     uint8_t lines;      /* bit n = state of IWM line n (see iwm.c) */
     uint8_t mode;       /* mode register, 5 bits */
 } mac_iwm_t;
+
+
+/*
+ * The virtual NuBus video card in slot $9 (see nubus_video.c and
+ * docs/nubus_video.md): its declaration ROM sits at the top of the slot's
+ * standard space (0xF9xxxxxx), its video RAM in the slot's super space
+ * (0x90000000).
+ */
+#define MAC_CARD_SLOT 9
+#define MAC_CARD_VRAM_BASE 0x90000000u
+#define MAC_CARD_VRAM_SIZE 0x2000000u          /* 32 MiB: 3840x2160 at 32 bits fits */
+#define MAC_CARD_ROM_END 0xFA000000u            /* the last ROM byte is at 0xF9FFFFFF */
+#define MAC_CARD_ROM_MAX 4096u
+#define MAC_CARD_DIRTY_SHIFT 10                 /* video RAM changes are tracked per KiB */
+#define MAC_CARD_DIRTY_WORDS (MAC_CARD_VRAM_SIZE >> MAC_CARD_DIRTY_SHIFT >> 5)
+#define MAC_CARD_DEPTHS 6                       /* 1, 2, 4, 8, 16 and 32 bits per pixel */
+#define MAC_CARD_MODE_1BIT 0x80                 /* Apple's mode number of the first depth */
+#define MAC_CARD_RES_ID_BASE 0x80               /* display mode id of the first resolution */
+
+typedef struct
+{
+    uint16_t width, height;
+} mac_card_res_t;
+
+/* The resolutions the card offers, smallest first (nubus_video.c). */
+extern const mac_card_res_t mac_card_resolutions[];
+extern const uint32_t mac_card_resolution_count;
+
+typedef struct
+{
+    bool present;
+    uint8_t *vram;              /* MAC_CARD_VRAM_SIZE bytes, set by the host */
+    uint8_t rom[MAC_CARD_ROM_MAX];  /* the declaration ROM, its last byte at MAC_CARD_ROM_END - 1 */
+    uint32_t rom_size;
+    uint32_t vpblock[MAC_CARD_DEPTHS];  /* offsets in rom[] of the VPBlock of each depth */
+    uint32_t gamma;             /* offset in rom[] of the gamma table (GammaTbl) */
+    uint32_t res;               /* index in mac_card_resolutions */
+    uint32_t depth;             /* 0..5 = 1..32 bits per pixel */
+    uint32_t preferred_res, preferred_depth;
+    uint8_t clut[256][3];
+    bool gray;                  /* luminance mapping (cscSetGray) */
+    bool irq_enabled;           /* vertical blanking interrupts on (cscSetInterrupt) */
+    bool irq_pending;
+    bool all_dirty;             /* the whole picture must be converted again */
+    uint32_t dirty[MAC_CARD_DIRTY_WORDS];   /* bit n = KiB n of the video RAM was written */
+    uint32_t mode_changes;      /* counts resolution and depth switches (for the host) */
+} mac_card_t;
 
 typedef struct
 {
@@ -201,6 +250,8 @@ typedef struct
     uint32_t vram_size;
     uint32_t vram_base;         /* guest address of the first byte */
 
+    mac_card_t card;            /* the NuBus video card (mac_card_attach) */
+
     mac_via_t via1;
     uint32_t via_rem;           /* CPU cycles not yet given to the VIAs (< 32) */
     uint32_t frame_cycles;      /* CPU cycles since the last 60 Hz tick */
@@ -237,6 +288,11 @@ int mac_rom_patch(uint8_t *rom, uint32_t size);
 #define MAC_EMUL_OP_DISK_STATUS 0x7113
 #define MAC_EMUL_OP_SCSI_DISPATCH 0x7128
 #define MAC_EMUL_OP_SLOT_PROBE 0x7129
+#define MAC_EMUL_OP_CARD_OPEN 0x712A
+#define MAC_EMUL_OP_CARD_CONTROL 0x712B
+#define MAC_EMUL_OP_CARD_STATUS 0x712C
+#define MAC_EMUL_OP_CARD_IRQ 0x712D
+#define MAC_EMUL_OP_CARD_CLOSE 0x712E
 
 /* Native handlers of the .Disk driver (emu/mac/disk.c). They work on the
  * guest state of the emulated opcode that called them. */
@@ -272,6 +328,8 @@ void mac_rbv_set_sound_irq(mac_rbv_t *rbv, bool asserted);
  * enabled). */
 void mac_rbv_vblank(mac_rbv_t *rbv);
 #define RBV_SENSE_13_RGB 6      /* Apple 13" RGB, 640x480 */
+#define RBV_SENSE_NONE 7        /* no monitor connected */
+#define RBV_SIER_SLOTS 0x3F     /* slot interrupt enable bits of slots $9-$E */
 
 /* DAC registers: the address register at offset 0, data at offset 4. */
 uint32_t mac_dac_access(mac_dac_t *dac, uint32_t offset, bool write,
@@ -310,6 +368,41 @@ uint32_t mac_iwm_access(mac_iwm_t *iwm, uint32_t offset, bool write,
  * already under way.
  */
 int mac_sysbeep(mac_t *mac);
+
+/*
+ * Plug the NuBus video card into slot $9 (after mac_init, before mac_reset):
+ * 'vram' is MAC_CARD_VRAM_SIZE bytes; 'res' indexes mac_card_resolutions and
+ * is the resolution the card starts in. With the card the built-in video
+ * reports "no monitor" and stays off, so the card is the only screen.
+ * Returns 0, or -1 for bad arguments.
+ */
+int mac_card_attach(mac_t *mac, uint8_t *vram, uint32_t res);
+
+/* Native parts of the card's driver (nubus_video.c). */
+void mac_card_open(mac_t *mac);
+void mac_card_control(mac_t *mac);
+void mac_card_status(mac_t *mac);
+void mac_card_close(mac_t *mac);
+void mac_card_irq_ack(mac_t *mac);
+/* The card's vertical blanking: once per 60 Hz frame. */
+void mac_card_vblank(mac_t *mac);
+/* Bus accesses that belong to the card: true if 'addr' is its ROM or video RAM. */
+bool mac_card_read(mac_t *mac, uint32_t addr, int size, uint32_t *value);
+bool mac_card_write(mac_t *mac, uint32_t addr, int size, uint32_t value);
+/* Index of the resolution w x h in mac_card_resolutions, or -1. */
+int mac_card_find_resolution(uint32_t width, uint32_t height);
+
+/* Size of the Mac's screen now: the card's mode, or the built-in 640x480. */
+void mac_screen_size(const mac_t *mac, uint32_t *width, uint32_t *height);
+
+/*
+ * Draw the rows of the screen that changed since the last call into 'out'
+ * (width * height 0x00RRGGBB pixels of mac_screen_size; a new size means
+ * that everything is drawn). 'changed', if not NULL, gets one byte per row:
+ * 1 = drawn. Returns the number of rows drawn, or -1 if there is no video
+ * RAM. The built-in video is always drawn whole.
+ */
+int mac_render_changes(mac_t *mac, uint32_t *out, uint8_t *changed);
 
 /* Power-on reset: overlay on, CPU reads SSP/PC from the ROM. */
 int mac_reset(mac_t *mac);

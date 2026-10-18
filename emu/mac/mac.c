@@ -229,6 +229,13 @@ uint32_t mac_bus_read(mac_t *mac, uint32_t addr, int size)
         return 0;
     }
 
+    uint32_t card_value;
+
+    if (mac_card_read(mac, addr, size, &card_value))
+    {
+        return card_value;
+    }
+
     if (mac->vram != NULL && addr >= mac->vram_base &&
         addr - mac->vram_base + size <= mac->vram_size)
     {
@@ -286,6 +293,11 @@ void mac_bus_write(mac_t *mac, uint32_t addr, int size, uint32_t value)
     }
 
     if (addr >= MAC_ROM_BASE && addr < MAC_ROM_END)
+    {
+        return;
+    }
+
+    if (mac_card_write(mac, addr, size, value))
     {
         return;
     }
@@ -565,11 +577,22 @@ static void emul_patch_boot_globs(mac_t *mac)
 }
 
 
-/* "move.b (A1),D0" of the Slot Manager's probe of the slot address spaces: no card answers. A real
- * empty slot raises a bus error and the handler resumes at the recovery address in A2. */
-static void emul_slot_probe(mac_t *mac)
+/* "move.b (A1),D0" of the Slot Manager's probe of the slot address spaces. A real empty slot raises a bus
+ * error and the handler resumes at the recovery address in A2; only the NuBus video card's slot answers. */
+#define SLOT_OF(addr) (((addr) >> 24) & 0xF)
+
+static void emul_slot_probe(mac_t *mac, uint32_t pc)
 {
-    (void)mac;
+    uint32_t a1 = m68k_vm_get_reg(M68K_VM_REG_A0 + 1);
+
+    if (mac->card.present && (a1 >> 28) == 0xF && SLOT_OF(a1) == MAC_CARD_SLOT)
+    {
+        uint32_t d0 = m68k_vm_get_reg(M68K_VM_REG_D0);
+
+        m68k_vm_set_reg(M68K_VM_REG_D0, (d0 & ~0xFFu) | mac_bus_read(mac, a1, 1));
+        m68k_vm_set_reg(M68K_VM_REG_PC, pc + 2);
+        return;
+    }
     m68k_vm_set_reg(M68K_VM_REG_PC, m68k_vm_get_reg(M68K_VM_REG_A0 + 2));
 }
 
@@ -615,7 +638,22 @@ static void emul_op(mac_t *mac, uint32_t pc, uint16_t op)
         emul_scsi_dispatch(mac);
         break;
     case MAC_EMUL_OP_SLOT_PROBE:
-        emul_slot_probe(mac);
+        emul_slot_probe(mac, pc);
+        break;
+    case MAC_EMUL_OP_CARD_OPEN:
+        mac_card_open(mac);
+        break;
+    case MAC_EMUL_OP_CARD_CONTROL:
+        mac_card_control(mac);
+        break;
+    case MAC_EMUL_OP_CARD_STATUS:
+        mac_card_status(mac);
+        break;
+    case MAC_EMUL_OP_CARD_IRQ:
+        mac_card_irq_ack(mac);
+        break;
+    case MAC_EMUL_OP_CARD_CLOSE:
+        mac_card_close(mac);
         break;
     default:
         log_unimpl(mac, pc, 2, false, op);
@@ -750,6 +788,12 @@ int mac_reset(mac_t *mac)
     k_memset(&mac->iwm, 0, sizeof mac->iwm);
     k_memset(&mac->scsi, 0, sizeof mac->scsi);
     k_memset(&mac->rbv, 0, sizeof mac->rbv);
+    /* With the NuBus card the built-in video sees no monitor (sense lines 111) and stays off. */
+    mac->rbv.sense = mac->card.present ? RBV_SENSE_NONE : RBV_SENSE_13_RGB;
+    /* NuBus slot interrupts enabled, as the skipped InitHW would have left them (RBV_SIER_SLOTS). */
+    mac->rbv.sier = mac->card.present ? RBV_SIER_SLOTS : 0;
+    mac->card.irq_pending = false;
+    mac->card.irq_enabled = false;
     k_memset(&mac->dac, 0, sizeof mac->dac);
     k_memset(&mac->asc, 0, sizeof mac->asc);
     mac->overlay = true;
@@ -787,6 +831,7 @@ static void advance_devices(mac_t *mac, int used)
         mac->frame_cycles -= CPU_HZ / TICK_HZ;
         mac_via_set_flag(&mac->via1, VIA_INT_CA1);
         mac_rbv_vblank(&mac->rbv);
+        mac_card_vblank(mac);
 
         /*
          * The clock chip's one-second interrupt (VIA1 CA2, "Guide to the

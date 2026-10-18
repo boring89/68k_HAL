@@ -6,6 +6,7 @@
 #ifndef KERNEL_MAC_MACHINE_H
 #define KERNEL_MAC_MACHINE_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /*
@@ -15,8 +16,8 @@
  * user's own and never part of this repository:
  *   mac_rom   the 512 KiB Mac IIci ROM image (checksum 368CADFE)
  *   mac_disk  a raw HFS disk image with a System Folder
- * and, for a picture, the graphics mode (640x480 32 bpp framebuffer). Without
- * a framebuffer the machine runs without showing anything.
+ * and, for a picture, a graphics mode (32 bpp framebuffer). Without a
+ * framebuffer the machine runs without showing anything.
  */
 
 #define MAC_MODULE_ROM "mac_rom"
@@ -35,14 +36,22 @@
 int mac_machine_run(uint32_t frames);
 
 /*
- * Enlargement of the Mac's screen: each Mac pixel becomes scale x scale
- * screen pixels (2 = "HiDPI": 640x480 shown as 1280x960). 1 is the default
- * and never changes the video mode. For 2 or more, mac_machine_run switches
- * the display to 640*scale x 480*scale if the adapter allows (see
- * hal_framebuffer_set_mode), otherwise it uses the largest scale that fits
- * the current mode. 0 means "as large as fits the current mode".
+ * The Mac's screen is a virtual NuBus video card (emu/mac, docs/nubus_video.md) with resolutions from
+ * 640x480 to 3840x2160; the Mac can switch between them (Monitors). The picture is enlarged to the physical
+ * screen in steps of a half: 'halves' = 2 is 1x, 3 is 1.5x, 4 is 2x ... up to 8 (4x); 0 = the largest that
+ * fits. During the run Ctrl+Alt+Page Up / Page Down / Home change it. The video mode of the screen is never
+ * changed.
  */
-void mac_machine_set_scale(uint32_t scale);
+void mac_machine_set_scale_halves(uint32_t halves);
+
+/*
+ * The resolution the card starts in. 0 x 0 (the default) = the one that fills the screen best with an
+ * enlargement of 2x, 1.5x or 1x (2560x1440: 1280x720 at 2x). Returns -1 if the card has no such mode.
+ */
+int mac_machine_set_resolution(uint32_t width, uint32_t height);
+
+/* true: no NuBus card; the IIci's built-in video (640x480, 8 bits at most) is the screen. */
+void mac_machine_set_builtin(bool builtin);
 
 /* CRC-32 of the last rendered screen (see tools/mac_run.c, which prints the
  * same number for the same number of frames). */

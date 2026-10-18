@@ -161,21 +161,53 @@ static uint32_t crc32(const uint32_t *pixels, uint32_t count)
 }
 
 
-/* 0: the largest whole-number enlargement that fits the screen (see fb_best_scale). */
-static uint32_t screen_scale = 0;
+/* What the next run asks for: enlargement in halves (0 = automatic), the card's resolution (-1 = automatic) and
+ * whether to use the built-in video instead of the NuBus card. */
+static uint32_t want_halves = 0;
+static int want_resolution = -1;
+static bool want_builtin = false;
 
-void mac_machine_set_scale(uint32_t scale)
+void mac_machine_set_scale_halves(uint32_t halves)
 {
-    screen_scale = scale;
+    want_halves = halves <= FB_SCALE_HALVES_MAX && halves != 1 ? halves : 0;
+}
+
+int mac_machine_set_resolution(uint32_t width, uint32_t height)
+{
+    if (width == 0 && height == 0)
+    {
+        want_resolution = -1;
+        return 0;
+    }
+    int res = mac_card_find_resolution(width, height);
+
+    if (res < 0)
+        return -1;
+    want_resolution = res;
+    return 0;
+}
+
+void mac_machine_set_builtin(bool builtin)
+{
+    want_builtin = builtin;
 }
 
 /*
- * What the Mac's picture looks like on the screen after the last show(), to draw only the rows that changed:
- * the screen is write combining memory (hal/mmu.h), where writes are cheap and reads are not, and a Mac
- * desktop changes in a small part of the picture from one update to the next.
+ * How the Mac's picture is laid out on the screen: its size (the card's mode, which the Mac can change), the
+ * enlargement in halves and where it starts. The picture itself (pixels) is kept up to date row by row: only
+ * the rows the Mac changed are converted (mac_render_changes) and drawn.
  */
-static uint32_t *shown;
-static bool shown_valid;
+static struct
+{
+    uint32_t width, height;     /* the Mac's screen */
+    uint32_t halves;            /* the enlargement now: 2 = 1x, 3 = 1.5x, 4 = 2x */
+    uint32_t requested;         /* what the user asked for (0 = the largest that fits) */
+    bool fits;                  /* false: the screen is smaller than the picture; the top left part is shown */
+    uint32_t x0, y0;
+    uint32_t *pixels;
+    uint32_t *row;              /* one enlarged row */
+    uint8_t *changed;           /* per row of the picture: drawn in the last render */
+} view;
 
 /* Figures of the run (mac_machine_report): time in the emulation, the rendering and the screen. */
 static struct
@@ -189,42 +221,96 @@ static struct
     uint64_t instructions;
 } perf;
 
-/* Copy the rendered screen into the framebuffer, enlarged by scale and centered; only what changed. */
-static void show(const hal_framebuffer_t *fb, const uint32_t *pixels, uint32_t scale)
+/* The largest enlargement (in halves, 8 = 4x at most) at which the picture fits the screen; 0 if none. */
+static uint32_t largest_halves(const hal_framebuffer_t *fb, uint32_t width, uint32_t height)
+{
+    for (uint32_t h = FB_SCALE_HALVES_MAX; h >= 2; h--)
+    {
+        if (fb_scaled_size(width, h) <= fb->width && fb_scaled_size(height, h) <= fb->height)
+            return h;
+    }
+    return 0;
+}
+
+/* Fill the screen with black (display memory: written only). */
+static void clear_screen(const hal_framebuffer_t *fb)
+{
+    for (uint32_t y = 0; y < fb->height; y++)
+        k_memset(fb->base + (size_t)y * fb->pitch, 0, (size_t)fb->width * 4);
+}
+
+/*
+ * Lay the picture out again: at the start, when the Mac switches its resolution and when the enlargement
+ * changes. Returns -1 if there is no memory for the picture.
+ */
+static int relayout(mac_t *mac, const hal_framebuffer_t *fb, bool have_screen)
+{
+    uint32_t width, height;
+
+    mac_screen_size(mac, &width, &height);
+    if (width != view.width || height != view.height || view.pixels == NULL)
+    {
+        kfree(view.pixels);
+        kfree(view.changed);
+        view.pixels = kmalloc((size_t)width * height * 4);
+        view.changed = kmalloc(height);
+        if (view.pixels == NULL || view.changed == NULL)
+            return -1;
+        view.width = width;
+        view.height = height;
+    }
+    mac->card.all_dirty = true;
+
+    if (!have_screen)
+        return 0;
+
+    uint32_t largest = largest_halves(fb, width, height);
+
+    view.fits = largest != 0;
+    view.halves = view.requested != 0 && view.requested <= largest ? view.requested : largest;
+    if (!view.fits)
+        view.halves = 2;
+
+    uint32_t shown_w = fb_scaled_size(width, view.halves);
+    uint32_t shown_h = fb_scaled_size(height, view.halves);
+
+    view.x0 = view.fits ? (fb->width - shown_w) / 2 : 0;
+    view.y0 = view.fits ? (fb->height - shown_h) / 2 : 0;
+    kfree(view.row);
+    view.row = kmalloc((size_t)shown_w * 4);
+    if (view.row == NULL)
+        return -1;
+
+    clear_screen(fb);
+    kernel_printf("mac: screen %ux%u, enlarged %u.%ux\n", width, height, view.halves / 2,
+                  view.halves % 2 ? 5u : 0u);
+    return 0;
+}
+
+/* Draw the rows of the picture that changed (view.changed) on the screen. */
+static void show(const hal_framebuffer_t *fb)
 {
     uint64_t start = hal_timer_ns();
-    uint32_t shown_w = MAC_SCREEN_W * scale;
-    uint32_t shown_h = MAC_SCREEN_H * scale;
-    const uint32_t *previous = shown_valid ? shown : NULL;
 
-    if (fb->width < shown_w || fb->height < shown_h)
+    if (view.fits)
     {
-        /* A smaller screen than the picture: show the top left part, unscaled. */
-        uint32_t w = fb->width < MAC_SCREEN_W ? fb->width : MAC_SCREEN_W;
-        uint32_t h = fb->height < MAC_SCREEN_H ? fb->height : MAC_SCREEN_H;
-
-        for (uint32_t y = 0; y < h; y++)
-        {
-            if (previous != NULL && k_memcmp(pixels + y * MAC_SCREEN_W, previous + y * MAC_SCREEN_W, w * 4) == 0)
-                continue;
-
-            k_memcpy(fb->base + y * fb->pitch, pixels + y * MAC_SCREEN_W, w * 4);
-            perf.rows++;
-        }
+        perf.rows += fb_blit_halves(fb->base + (size_t)view.y0 * fb->pitch + (size_t)view.x0 * 4, fb->pitch,
+                                    view.pixels, view.changed, view.width, view.height, view.halves, view.row);
     }
     else
     {
-        uint32_t x0 = (fb->width - shown_w) / 2;
-        uint32_t y0 = (fb->height - shown_h) / 2;
+        /* A smaller screen than the picture: the top left part, unscaled. */
+        uint32_t w = fb->width < view.width ? fb->width : view.width;
+        uint32_t h = fb->height < view.height ? fb->height : view.height;
 
-        perf.rows += fb_blit_scaled_rows(fb->base + y0 * fb->pitch + x0 * 4, fb->pitch, pixels, previous,
-                                         MAC_SCREEN_W, MAC_SCREEN_H, scale);
-    }
+        for (uint32_t y = 0; y < h; y++)
+        {
+            if (!view.changed[y])
+                continue;
 
-    if (shown != NULL)
-    {
-        k_memcpy(shown, pixels, MAC_SCREEN_W * MAC_SCREEN_H * 4);
-        shown_valid = true;
+            k_memcpy(fb->base + (size_t)y * fb->pitch, view.pixels + (size_t)y * view.width, (size_t)w * 4);
+            perf.rows++;
+        }
     }
 
     perf.updates++;
@@ -263,29 +349,68 @@ static void report_performance(uint64_t wall_ns)
     kernel_printf("\n");
     print_tenths("mac: per screen update: render ", ms10_render, " ms");
     print_tenths(", screen ", ms10_show, " ms");
-    print_tenths(" (", rows10, " of 480 rows drawn)");
+    print_tenths(" (", rows10, " rows drawn of ");
+    kernel_printf("%ux%u)", view.width, view.height);
     kernel_printf("\n");
 }
 
 
 /*
- * Pass keyboard and mouse events on to the Mac. The grave accent key (`) stops
- * the Mac: it is the one key the Mac side does not need. Returns true to stop.
+ * The enlargement hot keys: Ctrl+Alt+Page Up / Page Down make the picture half a step larger / smaller,
+ * Ctrl+Alt+Home goes back to the largest that fits. Control-Command with these keys means nothing to the Mac,
+ * and the kernel keeps these key presses to itself. Returns the new requested enlargement (halves, 0 =
+ * largest), or -1 if the key is not one of them.
  */
-static bool handle_input(mac_t *mac)
+static int scale_hot_key(keycode_t key, uint32_t halves)
+{
+    switch (key)
+    {
+    case KEY_PAGE_UP:
+        return halves < FB_SCALE_HALVES_MAX ? (int)halves + 1 : (int)halves;
+    case KEY_PAGE_DOWN:
+        return halves > 2 ? (int)halves - 1 : 2;
+    case KEY_HOME:
+        return 0;
+    default:
+        return -1;
+    }
+}
+
+/*
+ * Pass keyboard and mouse events on to the Mac. The grave accent key (`) stops
+ * the Mac: it is the one key the Mac side does not need. Returns true to stop;
+ * *rescale is set when the enlargement was changed with a hot key.
+ */
+static bool handle_input(mac_t *mac, bool *rescale)
 {
     input_event_t event;
+    static bool ctrl_down, alt_down;
 
     while (input_event_pop(&event) == 0)
     {
         if (event.type == INPUT_EVENT_KEYBOARD)
         {
             int code;
+            keycode_t key = event.data.keyboard.key;
+
+            if (key == KEY_LEFT_CTRL || key == KEY_RIGHT_CTRL)
+                ctrl_down = event.data.keyboard.pressed;
+            if (key == KEY_LEFT_ALT || key == KEY_RIGHT_ALT)
+                alt_down = event.data.keyboard.pressed;
 
             if (event.data.keyboard.pressed &&
                 event.data.keyboard.key == KEY_GRAVE)
             {
                 return true;
+            }
+            if (ctrl_down && alt_down && scale_hot_key(key, view.halves) >= 0)
+            {
+                if (event.data.keyboard.pressed)
+                {
+                    view.requested = (uint32_t)scale_hot_key(key, view.halves);
+                    *rescale = true;
+                }
+                continue;
             }
             code = mac_adb_key_code(event.data.keyboard.key);
 
@@ -479,33 +604,24 @@ int mac_machine_run(uint32_t frames)
     hal_framebuffer_t original;
     bool screen_taken = false;
     bool have_screen;
-    uint32_t scale = screen_scale;
     mac_t *mac = kmalloc(sizeof *mac);
     uint8_t *rom = kmalloc(ROM_SIZE);
     uint8_t *vram = kmalloc(VRAM_SIZE);
-    uint32_t *pixels = kmalloc(MAC_SCREEN_W * MAC_SCREEN_H * 4);
+    uint8_t *card_vram = want_builtin ? NULL : kmalloc(MAC_CARD_VRAM_SIZE);
     overlay_t *ov = kmalloc(sizeof *ov);
     have_screen = hal_framebuffer_get(&fb) == 0;
     original = fb;
-    shown = kmalloc(MAC_SCREEN_W * MAC_SCREEN_H * 4);
-    shown_valid = false;
     k_memset(&perf, 0, sizeof perf);
-
-    /* Enlarged: ask the display adapter for a mode that fits the picture exactly. */
-    if (scale > 1 && hal_framebuffer_set_mode(MAC_SCREEN_W * scale, MAC_SCREEN_H * scale) == 0)
-        have_screen = hal_framebuffer_get(&fb) == 0;
-
-    if (have_screen && (scale == 0 || MAC_SCREEN_W * scale > fb.width || MAC_SCREEN_H * scale > fb.height))
-        scale = fb_best_scale(MAC_SCREEN_W, MAC_SCREEN_H, fb.width, fb.height);
-
-    if (scale == 0)
-        scale = 1;
+    k_memset(&view, 0, sizeof view);
+    view.requested = want_halves;
 
     int16_t *audio_out = sound_get() != NULL ? kmalloc(AUDIO_FRAMES * 4) : NULL;
     int status = -1;
 
-    if (mac == NULL || rom == NULL || vram == NULL || pixels == NULL ||
-        ov == NULL)
+    if (!want_builtin && card_vram == NULL)
+        kernel_printf("%s\n", "mac: no memory for the video card's 32 MiB: using the built-in video");
+
+    if (mac == NULL || rom == NULL || vram == NULL || ov == NULL)
     {
         kernel_printf("%s\n", "mac: out of memory");
         goto out;
@@ -563,6 +679,34 @@ int mac_machine_run(uint32_t frames)
     mac->vram = vram;
     mac->vram_size = VRAM_SIZE;
     mac->vram_base = VRAM_BASE;
+
+    if (card_vram != NULL)
+    {
+        /* The card's first resolution: as asked, or the one that fills this screen best (with its enlargement). */
+        uint32_t res = 0;
+
+        if (want_resolution >= 0)
+        {
+            res = (uint32_t)want_resolution;
+        }
+        else if (have_screen)
+        {
+            uint16_t widths[16], heights[16];
+            uint32_t count = mac_card_resolution_count < 16 ? mac_card_resolution_count : 16;
+            uint32_t halves;
+
+            for (uint32_t i = 0; i < count; i++)
+            {
+                widths[i] = mac_card_resolutions[i].width;
+                heights[i] = mac_card_resolutions[i].height;
+            }
+            if (fb_choose_size(widths, heights, count, fb.width, fb.height, &res, &halves) == 0 &&
+                view.requested == 0)
+                view.requested = halves;
+        }
+        k_memset(card_vram, 0, MAC_CARD_VRAM_SIZE);
+        mac_card_attach(mac, card_vram, res);
+    }
     mac->rtc_seconds = RTC_START;
 
     /* An interactive run keeps real time; the tests keep a fixed date so that they are repeatable. */
@@ -601,6 +745,12 @@ int mac_machine_run(uint32_t frames)
         screen_taken = true;
     }
 
+    if (relayout(mac, &fb, have_screen) != 0)
+    {
+        kernel_printf("%s\n", "mac: out of memory");
+        goto out;
+    }
+
     uint64_t paced_start = hal_timer_ns();
 
     for (uint32_t frame = 1; frames == 0 || frame <= frames; frame++)
@@ -632,20 +782,34 @@ int mac_machine_run(uint32_t frames)
         if (audio_out != NULL)
             audio_flush(audio_out);
 
+        bool rescale = false;
+        uint32_t width, height;
+
+        /* The Mac switched its resolution: a new picture and layout. */
+        mac_screen_size(mac, &width, &height);
+        if (width != view.width || height != view.height)
+            rescale = true;
+
         if (have_screen && frame % SHOW_EVERY == 0)
         {
+            if (rescale && relayout(mac, &fb, have_screen) != 0)
+                break;
+            rescale = false;
+
             uint64_t render_start = hal_timer_ns();
-            int rendered = mac_render(mac, pixels);
+            int rendered = mac_render_changes(mac, view.pixels, view.changed);
 
             perf.render_ns += hal_timer_ns() - render_start;
 
-            if (rendered == 0)
-                show(&fb, pixels, scale);
+            if (rendered > 0)
+                show(&fb);
         }
-        if (handle_input(mac) && frames == 0)
+        if (handle_input(mac, &rescale) && frames == 0)
         {
             break;
         }
+        if (rescale && relayout(mac, &fb, have_screen) != 0)
+            break;
 
         if (frames == 0)
         {
@@ -664,12 +828,15 @@ int mac_machine_run(uint32_t frames)
     }
     uint64_t wall_ns = hal_timer_ns() - paced_start;
 
-    if (mac_render(mac, pixels) == 0)
+    /* The whole picture once more, for its CRC (the same as tools/mac_run prints). */
+    if (relayout(mac, &fb, false) == 0 && mac_render_changes(mac, view.pixels, view.changed) >= 0)
     {
-        last_crc = crc32(pixels, MAC_SCREEN_W * MAC_SCREEN_H);
+        last_crc = crc32(view.pixels, view.width * view.height);
         if (have_screen)
         {
-            show(&fb, pixels, scale);
+            relayout(mac, &fb, true);
+            mac_render_changes(mac, view.pixels, view.changed);
+            show(&fb);
         }
     }
     status = 0;
@@ -687,9 +854,11 @@ out:
     if (screen_taken && frames == 0)
         release_screen(&original);
 
-    kfree(shown);
-    shown = NULL;
-    shown_valid = false;
+    kfree(view.pixels);
+    kfree(view.changed);
+    kfree(view.row);
+    k_memset(&view, 0, sizeof view);
+    kfree(card_vram);
 
     kfree(audio_out);
 
@@ -702,7 +871,6 @@ out:
         kfree(ov->slot);
     }
     kfree(ov);
-    kfree(pixels);
     kfree(vram);
     kfree(rom);
     kfree(mac);

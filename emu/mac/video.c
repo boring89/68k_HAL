@@ -47,6 +47,7 @@
 #define RBV_DEPTH_MASK 0x07
 #define RBV_SENSE_SHIFT 3
 #define SIFR_VIDEO 0x40
+#define SIFR_SLOTS 0x3F         /* bits 0-5: NuBus slots $9-$E */
 #define IFR_SLOT 0x02
 #define IFR_SOUND 0x10
 #define IFR_ANY 0x80
@@ -59,7 +60,7 @@ static uint8_t rbv_ifr(const mac_rbv_t *rbv)
 {
     uint8_t ifr = 0;
 
-    if (rbv->vblank_latched && (rbv->sier & SIFR_VIDEO))
+    if ((rbv->vblank_latched && (rbv->sier & SIFR_VIDEO)) || (rbv->slot_irq & rbv->sier & SIFR_SLOTS))
     {
         ifr |= IFR_SLOT;
     }
@@ -99,12 +100,12 @@ uint32_t mac_rbv_read(mac_rbv_t *rbv, uint32_t reg, bool vblank)
     switch (reg)
     {
     case RBV_REG_SIFR:
-        /* Active low: 0 while the frame is being blanked. */
-        return 0xBF | (vblank ? 0 : SIFR_VIDEO);
+        /* Active low: 0 while the frame is being blanked, 0 for a slot whose card interrupts. */
+        return (0xBF | (vblank ? 0 : SIFR_VIDEO)) & ~(uint32_t)rbv->slot_irq;
     case RBV_REG_IFR:
         return rbv_ifr(rbv);
     case RBV_REG_VIDEO:
-        return (RBV_SENSE_13_RGB << RBV_SENSE_SHIFT) |
+        return (uint32_t)(rbv->sense << RBV_SENSE_SHIFT) |
                (rbv->depth & RBV_DEPTH_MASK);
     case RBV_REG_SIER:
         return rbv->sier | SET_BIT;

@@ -175,7 +175,8 @@ static void test_rbv_registers(void)
 {
     mac_rbv_t rbv = { 0 };
 
-    /* Monitor sense (13" RGB = 6) in bits 5-3, depth in bits 2-0. */
+    /* Monitor sense (13" RGB = 6, set by mac_reset) in bits 5-3, depth in bits 2-0. */
+    rbv.sense = RBV_SENSE_13_RGB;
     mac_rbv_write(&rbv, 0x10, 3);
     TEST_ASSERT_EQ_INT((6 << 3) | 3, mac_rbv_read(&rbv, 0x10, false));
 

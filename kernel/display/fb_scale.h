@@ -38,4 +38,34 @@ uint32_t fb_blit_scaled_rows(uint8_t *destination, uint32_t pitch, const uint32_
 uint32_t fb_best_scale(uint32_t width, uint32_t height, uint32_t screen_width,
                        uint32_t screen_height);
 
+/*
+ * Enlargement in steps of a half: 'halves' = 2 is 1x, 3 is 1.5x, 4 is 2x. Each destination pixel takes the
+ * nearest source pixel (no blending: one-pixel lines and the Mac's dither patterns stay sharp; at 1.5x every
+ * second source pixel is drawn twice as wide and twice as tall). Destination pixel (x, y) shows source pixel
+ * (x * 2 / halves, y * 2 / halves).
+ */
+#define FB_SCALE_HALVES_MAX 8
+
+/* Size of a picture of 'size' pixels enlarged by halves/2 (rounded down). */
+uint32_t fb_scaled_size(uint32_t size, uint32_t halves);
+
+/*
+ * Draw the rows of source (width x height) whose entry in 'changed' is not 0 (NULL = all), enlarged by
+ * halves/2, at destination (the top left pixel of the target area, rows pitch bytes apart). 'row' is room for
+ * one destination row (fb_scaled_size(width, halves) pixels): each destination row is built there and then
+ * copied, so the destination (display memory) is only written, in long runs. Returns the number of source
+ * rows drawn.
+ */
+uint32_t fb_blit_halves(uint8_t *destination, uint32_t pitch, const uint32_t *source, const uint8_t *changed,
+                        uint32_t width, uint32_t height, uint32_t halves, uint32_t *row);
+
+/*
+ * Choose a picture size and enlargement for a screen: among 'count' sizes (widths[i] x heights[i]) and the
+ * enlargements 2x, 1.5x and 1x, the one that covers the largest part of the screen; on a tie the larger
+ * enlargement (sharper text on a high resolution screen). Writes the index and the enlargement in halves.
+ * Returns 0, or -1 if nothing fits (then index 0 at 1x).
+ */
+int fb_choose_size(const uint16_t *widths, const uint16_t *heights, uint32_t count, uint32_t screen_width,
+                   uint32_t screen_height, uint32_t *index, uint32_t *halves);
+
 #endif
