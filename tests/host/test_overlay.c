@@ -320,6 +320,40 @@ static void test_reset_interrupted(void)
     }
 }
 
+static uint8_t other_mem[BASE_BLOCKS * 512];
+static block_device_t other_dev = {"other", 512, BASE_BLOCKS, &base_ops, other_mem};
+
+/* Rebinding to another slot: the old changes are gone, the new base shows through, and it persists. */
+static void test_rebind(void)
+{
+    uint8_t data[512];
+    uint8_t back[512];
+
+    setup();
+    memset(other_mem, 0x77, sizeof other_mem);
+    TEST_ASSERT_EQ_INT(0, overlay_format(&store_dev, &base_dev, 0));
+    TEST_ASSERT_EQ_INT(OVERLAY_OK, reopen(0));
+    pattern(data, 1, 5);
+    TEST_ASSERT_EQ_INT(0, block_write(block_device_find("ovl"), 7, 1, data));
+
+    TEST_ASSERT_EQ_INT(0, overlay_rebind(&ov, &other_dev, 1));
+    TEST_ASSERT_EQ_INT(0, overlay_used_blocks(&ov));
+    TEST_ASSERT_EQ_INT(0, block_read(block_device_find("ovl"), 7, 1, back));
+    TEST_ASSERT_EQ_INT(0x77, back[0]);
+
+    TEST_ASSERT_EQ_INT(0, block_write(block_device_find("ovl"), 8, 1, data));
+
+    /* After a "reboot" the overlay belongs to the other base and slot 1. */
+    block_reset();
+    TEST_ASSERT_EQ_INT(OVERLAY_MISMATCH, overlay_open(&ov, "ovl", &base_dev, &store_dev, 0));
+    block_reset();
+    TEST_ASSERT_EQ_INT(OVERLAY_OK, overlay_open(&ov, "ovl", &other_dev, &store_dev, 1));
+    TEST_ASSERT_EQ_INT(1, overlay_used_blocks(&ov));
+    TEST_ASSERT_EQ_INT(0, block_read(block_device_find("ovl"), 8, 1, back));
+    TEST_ASSERT(memcmp(back, data, 512) == 0);
+    TEST_ASSERT_EQ_INT(0, base_writes);
+}
+
 int main(void)
 {
     TEST_RUN(test_empty_store);
@@ -330,6 +364,7 @@ int main(void)
     TEST_RUN(test_full);
     TEST_RUN(test_power_fail);
     TEST_RUN(test_reset_interrupted);
+    TEST_RUN(test_rebind);
 
     return TEST_REPORT("overlay");
 }

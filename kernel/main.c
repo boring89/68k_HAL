@@ -145,9 +145,9 @@ void kernel_main(void)
     /* A 68k_HAL GPT disk (docs/mac_disk.md): its partitions become block devices and the system overlay opens. */
     if (macdisk_init(macdisk_slot_from_name(config_get("system_slot"))) == 0)
     {
-        kernel_printf("macdisk: 68k_HAL disk, System %c, overlay %s\n",
+        kernel_printf("macdisk: 68k_HAL disk, System %c, overlay %s, kernel slot %s\n",
                       macdisk_slot() == MACDISK_SLOT_A ? 'A' : 'B',
-                      overlay_status_name(macdisk_overlay_status()));
+                      overlay_status_name(macdisk_overlay_status()), config_get_or("kernel_slot", "?"));
 
         if (macdisk_overlay_status() == OVERLAY_MISMATCH)
             kernel_log(LOG_WARN, "macdisk: the system overlay belongs to another System image and is not applied; 'macsys reset' starts a new one");
@@ -244,6 +244,18 @@ void kernel_main(void)
 
     if (command_line != 0 && k_strstr(command_line, "diag") != 0)
         shell_run_diagnostics();
+
+    /* The kernel came up: after a trial boot of a new kernel slot, that slot becomes the confirmed one. */
+    if (macdisk_present())
+    {
+        const char *kernel_slot = config_get("kernel_slot");
+        int confirmed = macdisk_confirm_kernel_slot(kernel_slot, k_strcmp(config_get_or("kernel_confirm", "0"), "1") == 0);
+
+        if (confirmed == 1)
+            kernel_printf("macdisk: kernel slot %s works: it is the confirmed slot now\n", kernel_slot);
+        else if (confirmed < 0)
+            kernel_log(LOG_WARN, "macdisk: cannot write the confirmed kernel slot to grubenv");
+    }
 
     /* autostart=mac: straight into the Mac; the shell comes when it stops (` or a failure to start). */
     if (k_strcmp(config_get_or("autostart", "shell"), "mac") == 0)

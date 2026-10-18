@@ -314,7 +314,7 @@ static shell_command_entry_t commands[] =
          cmd_irqs},
         {COMMAND_MACSYS,
          "macsys",
-         "The Mac system disk: macsys status | reset (drop the Mac's changes to the system disk)",
+         "The Mac system disk: macsys status | reset (drop the Mac's changes) | promote (keep them in the other System slot) | switch a|b [force]",
          cmd_macsys},
         {COMMAND_MOUNT,
          "mount",
@@ -2224,6 +2224,23 @@ static void cmd_irqs(
     write_number_line("total: ", hal_irq_count(), 0);
 }
 
+static void macsys_progress(unsigned int percent)
+{
+    write_number_line("macsys: promote ", percent, 0);
+}
+
+static void macsys_report(int result, const char *done)
+{
+    if (result == 0)
+        terminal_write_line(done);
+    else if (result == MACDISK_NOT_SAVED)
+        terminal_write_line("macsys: done, but grubenv could not be written: the next boot uses the old System slot");
+    else if (result == MACDISK_OVERLAY_NOT_EMPTY)
+        terminal_write_line("macsys: the overlay holds the Mac's changes: 'macsys promote' keeps them, 'macsys switch <slot> force' drops them");
+    else
+        terminal_write_line("macsys: failed");
+}
+
 static void cmd_macsys(
     int argc,
     char **argv)
@@ -2243,14 +2260,46 @@ static void cmd_macsys(
         return;
     }
 
-    if (argc >= 2 && k_strcmp(argv[1], "status") != 0)
+    if (argc >= 3 && k_strcmp(argv[1], "switch") == 0 &&
+        (k_strcmp(argv[2], "a") == 0 || k_strcmp(argv[2], "b") == 0))
     {
-        terminal_write_line("usage: macsys status | reset");
+        uint32_t slot = argv[2][0] == 'b' ? MACDISK_SLOT_B : MACDISK_SLOT_A;
+        int force = argc >= 4 && k_strcmp(argv[3], "force") == 0;
+
+        macsys_report(macdisk_switch(slot, force), "macsys: switched; the overlay is empty and belongs to the new System slot");
         return;
     }
 
+    if (argc >= 2 && k_strcmp(argv[1], "promote") == 0)
+    {
+        terminal_write_line("macsys: copying the system disk (with the Mac's changes) into the other System slot...");
+        macsys_report(macdisk_promote(macsys_progress), "macsys: promoted; the other slot is active, the overlay is empty, the old slot is kept");
+        return;
+    }
+
+    if (argc >= 2 && k_strcmp(argv[1], "status") != 0)
+    {
+        terminal_write_line("usage: macsys status | reset | promote | switch a|b [force]");
+        return;
+    }
+
+    grubenv_t env;
+    int have_env = macdisk_env_read(&env) == 0;
+
     terminal_write("System slot: ");
     terminal_write_line(macdisk_slot() == MACDISK_SLOT_A ? "A" : "B");
+
+    for (uint32_t slot = MACDISK_SLOT_A; slot <= MACDISK_SLOT_B; slot++)
+    {
+        block_device_t *dev = macdisk_slot_device(slot);
+
+        terminal_write(slot == MACDISK_SLOT_A ? "  System A: " : "  System B: ");
+        if (dev == NULL)
+            terminal_write_line("missing");
+        else
+            write_number_line(slot == macdisk_slot() ? "active, blocks " : "blocks ", (uint32_t)dev->block_count, 0);
+    }
+
     terminal_write("Overlay: ");
     terminal_write_line(overlay_status_name(macdisk_overlay_status()));
 
@@ -2265,6 +2314,17 @@ static void cmd_macsys(
     {
         terminal_write_line("  The overlay belongs to another System image and is not applied.");
         terminal_write_line("  'macsys reset' empties it and binds it to this image.");
+    }
+
+    terminal_write("Kernel slot: ");
+    terminal_write(config_get_or("kernel_slot", "?"));
+    terminal_write(", confirmed: ");
+    terminal_write_line(have_env && grubenv_get(&env, "boot_slot") != NULL ? grubenv_get(&env, "boot_slot") : "?");
+
+    if (have_env && grubenv_get(&env, "trial") != NULL && grubenv_get(&env, "trial")[0] != '\0')
+    {
+        terminal_write("  trial at the next boot: ");
+        terminal_write_line(grubenv_get(&env, "trial"));
     }
 }
 

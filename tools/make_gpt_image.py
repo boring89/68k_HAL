@@ -7,7 +7,10 @@
 # (tests/host/test_gpt.c): protective MBR, primary header and entries, backup
 # entries and header, and a marker in the first block of each partition.
 #
-# Usage: tools/make_gpt_image.py <output>
+# Usage: tools/make_gpt_image.py <output> [boot.img]
+#
+# With boot.img (e.g. a FAT32 volume from tools/make_fat_image.sh) the Boot partition is that image and
+# the other partitions follow it.
 #
 # Layout and fields: UEFI Specification 2.10, section 5.3 (GPT) and 5.2.3
 # (protective MBR). 512-byte blocks.
@@ -18,7 +21,6 @@ import sys
 import uuid
 
 BLOCK = 512
-TOTAL = 256
 ENTRY_SIZE = 128
 ENTRY_COUNT = 128
 
@@ -26,14 +28,27 @@ APPLE_HFS = "48465300-0000-11AA-AA11-00306543ECAC"
 OVERLAY = "68AC0001-4F56-4C59-8D1E-68A1D5C0DE01"
 ESP = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
 
-# (name, type guid, first block, block count)
-PARTITIONS = [
-    ("68k_HAL Boot", ESP, 34, 30),
-    ("68k_HAL System A", APPLE_HFS, 64, 40),
-    ("68k_HAL System B", APPLE_HFS, 104, 40),
-    ("68k_HAL Overlay", OVERLAY, 144, 50),
-    ("Applications", APPLE_HFS, 194, 28),
+# (name, type guid, block count); the partitions follow each other from block 34.
+SIZES = [
+    ("68k_HAL Boot", ESP, 30),
+    ("68k_HAL System A", APPLE_HFS, 40),
+    ("68k_HAL System B", APPLE_HFS, 40),
+    ("68k_HAL Overlay", OVERLAY, 50),
+    ("Applications", APPLE_HFS, 28),
 ]
+PARTITIONS = []
+TOTAL = 0
+
+
+def layout(boot_blocks):
+    global TOTAL
+    first = 34
+    for name, ptype, count in SIZES:
+        if boot_blocks and name == "68k_HAL Boot":
+            count = boot_blocks
+        PARTITIONS.append((name, ptype, first, count))
+        first += count
+    TOTAL = first + 34
 
 
 def crc(data):
@@ -63,9 +78,11 @@ def header(my_lba, other_lba, entries_lba, entries_crc):
 
 
 def main():
-    if len(sys.argv) != 2:
-        sys.exit("usage: make_gpt_image.py <output>")
+    if len(sys.argv) not in (2, 3):
+        sys.exit("usage: make_gpt_image.py <output> [boot.img]")
 
+    boot = open(sys.argv[2], "rb").read() if len(sys.argv) == 3 else None
+    layout(len(boot) // BLOCK if boot else 0)
     img = bytearray(TOTAL * BLOCK)
 
     # Protective MBR: one 0xEE partition covering the disk.
@@ -87,6 +104,9 @@ def main():
         TOTAL - 1, 1, backup_entries, blob_crc)
 
     for name, _, first, _ in PARTITIONS:
+        if boot and name == "68k_HAL Boot":
+            img[first * BLOCK:first * BLOCK + len(boot)] = boot
+            continue
         marker = ("FIRST-BLOCK-OF-" + name).encode("ascii")
         img[first * BLOCK:first * BLOCK + len(marker)] = marker
 

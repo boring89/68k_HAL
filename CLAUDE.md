@@ -37,6 +37,7 @@ make test-mac-sound / test-mac-clock / test-mac-persist  # Mac 的聲音、時�
 make mac-disk     # 68k_HAL 磁碟映像 build/68k_HAL_mac.img（GPT、UEFI：Boot、System A/B、疊加層、Applications；docs/mac_disk.md；本機專用）
 make test-mac-disk # 上面的配置（小一號）在 QEMU+OVMF 開機兩次：自動進 Mac、資料夾保存、電源鍵、macsys reset（本機專用）
 make test-macdisk # 合成的 GPT 映像接 AHCI：分割區與疊加層（在 make test 中）
+make test-mac-update # 更新腳本 tools/update_68khal.sh（只對 build/ 的映像檔）、kernel 槽試開與退回、macsys promote/switch（本機專用）
 make clean
 ```
 
@@ -64,7 +65,7 @@ arch/x86_64/   64 位元專屬：gdt、interrupt（16 位元組 IDT）、mmu（4
 arch/x86/      CPU（32 位元專用與兩者共用的 cpu、io）：cpu（hal_cpu、CPUID、控制暫存器）、gdt（含 TSS）、interrupt（IDT、例外、IRQ stub）、mmu（分頁、hal_mmu、space = 每個行程一份分頁目錄）、task（context 切換、FPU）、io（port I/O）、user（ring 3、int 0x80）、test
 platform/pc/   PC 平台：boot（Multiboot 進入點、hal_boot）、video（framebuffer、BGA 模式設定、vbe：x86emu 執行 VGA BIOS 的 VBE）、rtc（CMOS 時鐘）、interrupt（8259 PIC、local APIC、I/O APIC、hal_irq；見 docs/apic.md）、timer（PIT、TSC、hal_timer）、acpi、smp（INIT-SIPI-SIPI）、pci（列舉、驅動清單）、dma、vmap（0xE0000000 視窗）、hal_init.c、test
 drivers/       裝置驅動：vga、serial、ps2_keyboard、ps2_mouse、ata（讀寫，見 docs/storage.md）、ahci（SATA）、e1000 與 virtio_net（網卡）、hda（Intel HD Audio）、bga（Bochs VBE 顯示）、usb_host（列舉 USB 控制器）、xhci（xHCI 控制器、HID 鍵盤滑鼠）、nvme（NVMe，輪詢）、e1000e（82574L 與 I219）
-kernel/        與硬體無關的核心：main.c、panic、memory（pmm、heap）、block（區塊裝置、ramdisk、overlay 寫入時複製的疊加層）、fs（apm、gpt、macdisk = 68k_HAL 磁碟配置、hfs 唯讀、volume；見 docs/hfs.md、docs/mac_disk.md）、config（68k_hal.cfg 與命令列的設定）、display（含 fb_scale、fbcon 圖形模式文字終端）、console、terminal（含 mirror、ANSI 解析器 ansi）、keyboard（keycode、state、keychar、keyseq 按鍵序列）、input、shell、log、printf、lib、m68k（guest RAM 與示範）、mac（在 kernel 裡執行 Mac；見 docs/mac.md）、user（ELF 載入器、系統呼叫、console；見 docs/userland.md）、vfs（ramfs、tarfs、hfsfs、devfs 的 console；見 docs/userland.md）、net（packet 純函式、tcp、net 堆疊；見 docs/net.md）、usb（控制器註冊表；見 docs/usb.md）、sound（見 docs/sound.md）、pci（名稱表；見 docs/pci.md）、test
+kernel/        與硬體無關的核心：main.c、panic、memory（pmm、heap）、block（區塊裝置、ramdisk、overlay 寫入時複製的疊加層）、fs（apm、gpt、fat（只找檔案的磁區）、grubenv、macdisk = 68k_HAL 磁碟配置與槽、hfs 唯讀、volume；見 docs/hfs.md、docs/mac_disk.md）、config（68k_hal.cfg 與命令列的設定）、display（含 fb_scale、fbcon 圖形模式文字終端）、console、terminal（含 mirror、ANSI 解析器 ansi）、keyboard（keycode、state、keychar、keyseq 按鍵序列）、input、shell、log、printf、lib、m68k（guest RAM 與示範）、mac（在 kernel 裡執行 Mac；見 docs/mac.md）、user（ELF 載入器、系統呼叫、console；見 docs/userland.md）、vfs（ramfs、tarfs、hfsfs、devfs 的 console；見 docs/userland.md）、net（packet 純函式、tcp、net 堆疊；見 docs/net.md）、usb（控制器註冊表；見 docs/usb.md）、sound（見 docs/sound.md）、pci（名稱表；見 docs/pci.md）、test
 emu/m68k/      68k 虛擬機：Musashi 的封裝層（vm：含可選的 bus 與逐指令 hook）、A-line trap 分派（trap）、Musashi 設定（m68kconf.h）；freestanding/ 是 kernel 建置用的 libc 替身
 emu/mac/       Mac IIci 機器模型（M-P3，見 docs/mac.md）：記憶體配置與模擬 opcode（mac.c）、ROM 修補（rom_patch.c）、VIA（via.c）、RBV/DAC/視訊（video.c）、虛擬 NuBus 顯示卡（nubus_video.c、nubus_driver.s；docs/nubus_video.md）、IWM、SCSI、.Disk 驅動（disk.c、stub.s）；與硬體無關，檔案由使用者提供，不在 repo
 third_party/   第三方原始碼，不修改：musashi（68k CPU 核心，MIT）、x86emu（X.org 的真實模式 x86 模擬器，MIT/X11 類；platform/pc/video/vbe.c 用）；downloads/ 是下載的 musl、Lua、TinyCC、Haiku（gitignore）

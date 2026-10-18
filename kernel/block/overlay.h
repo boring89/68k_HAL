@@ -98,6 +98,15 @@ overlay_status_t overlay_open(overlay_t *overlay, const char *name,
  */
 int overlay_reset(overlay_t *overlay);
 
+/*
+ * Bind an open overlay to another base (another System slot): the store is
+ * formatted for it (whatever the overlay held is gone) and the merged device
+ * reads as the new base from now on. The new base must not have more blocks
+ * than the old one had (the map is reused). Returns 0, or -1 (the overlay
+ * keeps its old base if the store could not be formatted).
+ */
+int overlay_rebind(overlay_t *overlay, block_device_t *base, uint32_t slot);
+
 /* Written blocks and capacity, for status displays. */
 uint32_t overlay_used_blocks(const overlay_t *overlay);
 uint32_t overlay_capacity_blocks(const overlay_t *overlay);

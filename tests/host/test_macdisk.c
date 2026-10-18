@@ -6,6 +6,7 @@
 #include "test.h"
 
 #include <stdint.h>
+#include <stdlib.h>
 
 #include "kernel/block/block.h"
 #include "kernel/fs/macdisk.h"
@@ -168,6 +169,131 @@ static void test_no_layout(void)
     TEST_ASSERT_EQ_INT(-1, macdisk_reset());
 }
 
+/* With a FAT32 Boot partition (tools/make_gpt_image.py ... fat.img): grubenv, switch and promote. */
+#define FAT_IMAGE_PATH "build/images/gpt_fat.img"
+
+static uint8_t *big;
+static size_t big_size;
+static block_device_t big_disk = {"sdb", 512, 0, &ops, NULL};
+
+static int boot_big(uint32_t slot)
+{
+    block_reset();
+    macdisk_forget();
+    big_disk.block_count = big_size / 512;
+    big_disk.driver_data = big;
+    TEST_ASSERT_EQ_INT(0, block_register(&big_disk));
+
+    return macdisk_init(slot);
+}
+
+static int load_big(void)
+{
+    FILE *f = fopen(FAT_IMAGE_PATH, "rb");
+
+    if (f == NULL)
+    {
+        fprintf(stderr, "  cannot open %s\n", FAT_IMAGE_PATH);
+        test_failures++;
+        return -1;
+    }
+
+    fseek(f, 0, SEEK_END);
+    big_size = (size_t)ftell(f);
+    fseek(f, 0, SEEK_SET);
+    free(big);
+    big = malloc(big_size);
+    TEST_ASSERT_EQ_INT(big_size, fread(big, 1, big_size, f));
+    fclose(f);
+
+    return 0;
+}
+
+static void test_env_and_confirm(void)
+{
+    grubenv_t env;
+
+    heap_init((uintptr_t)arena, sizeof(arena));
+    if (load_big() != 0)
+        return;
+
+    TEST_ASSERT_EQ_INT(0, boot_big(MACDISK_SLOT_A));
+    TEST_ASSERT_EQ_INT(0, macdisk_env_read(&env));
+    TEST_ASSERT_EQ_STR("a", grubenv_get(&env, "boot_slot"));
+
+    /* No trial boot, or the same slot: nothing to write. */
+    TEST_ASSERT_EQ_INT(0, macdisk_confirm_kernel_slot("b", 0));
+    TEST_ASSERT_EQ_INT(0, macdisk_confirm_kernel_slot("a", 1));
+    TEST_ASSERT_EQ_INT(0, macdisk_confirm_kernel_slot("x", 1));
+    TEST_ASSERT_EQ_INT(0, macdisk_confirm_kernel_slot(NULL, 1));
+
+    /* A trial boot of slot b that came up: b is confirmed. */
+    TEST_ASSERT_EQ_INT(1, macdisk_confirm_kernel_slot("b", 1));
+    TEST_ASSERT_EQ_INT(0, boot_big(MACDISK_SLOT_A));
+    TEST_ASSERT_EQ_INT(0, macdisk_env_read(&env));
+    TEST_ASSERT_EQ_STR("b", grubenv_get(&env, "boot_slot"));
+    TEST_ASSERT_EQ_STR("a", grubenv_get(&env, "system_slot"));
+}
+
+static void test_switch_and_promote(void)
+{
+    uint8_t data[512];
+    uint8_t back[512];
+    grubenv_t env;
+
+    heap_init((uintptr_t)arena, sizeof(arena));
+    if (load_big() != 0)
+        return;
+
+    memset(data, 0x6B, sizeof data);
+    TEST_ASSERT_EQ_INT(0, boot_big(MACDISK_SLOT_A));
+    TEST_ASSERT_EQ_INT(OVERLAY_OK, macdisk_overlay_status());
+    TEST_ASSERT_EQ_INT(0, block_write(macdisk_system(), 9, 1, data));
+
+    /* The overlay holds a change: switching needs force. */
+    TEST_ASSERT_EQ_INT(MACDISK_OVERLAY_NOT_EMPTY, macdisk_switch(MACDISK_SLOT_B, 0));
+    TEST_ASSERT_EQ_INT(MACDISK_SLOT_A, macdisk_slot());
+
+    /* Promote: System B = A plus the change; the overlay is empty, B is active and saved. */
+    block_device_t *sys_a = macdisk_slot_device(MACDISK_SLOT_A);
+    uint8_t a_before[512];
+
+    TEST_ASSERT_EQ_INT(0, block_read(sys_a, 9, 1, a_before));
+    TEST_ASSERT_EQ_INT(0, macdisk_promote(NULL));
+    TEST_ASSERT_EQ_INT(MACDISK_SLOT_B, macdisk_slot());
+    TEST_ASSERT_EQ_INT(0, overlay_used_blocks(macdisk_overlay()));
+    TEST_ASSERT_EQ_INT(0, block_read(macdisk_system(), 9, 1, back));
+    TEST_ASSERT(memcmp(back, data, 512) == 0);
+    TEST_ASSERT_EQ_INT(0, block_read(macdisk_slot_device(MACDISK_SLOT_B), 9, 1, back));
+    TEST_ASSERT(memcmp(back, data, 512) == 0);
+    TEST_ASSERT_EQ_INT(0, block_read(sys_a, 9, 1, back));
+    TEST_ASSERT(memcmp(back, a_before, 512) == 0);          /* the old slot is untouched */
+    TEST_ASSERT_EQ_INT(0, macdisk_env_read(&env));
+    TEST_ASSERT_EQ_STR("b", grubenv_get(&env, "system_slot"));
+
+    /* The next boot (GRUB passes system_slot=b) finds the overlay bound to B. */
+    TEST_ASSERT_EQ_INT(0, boot_big(MACDISK_SLOT_B));
+    TEST_ASSERT_EQ_INT(OVERLAY_OK, macdisk_overlay_status());
+    TEST_ASSERT_EQ_INT(0, block_read(macdisk_system(), 9, 1, back));
+    TEST_ASSERT(memcmp(back, data, 512) == 0);
+
+    /* Back to A (the overlay is empty: no force needed). */
+    TEST_ASSERT_EQ_INT(0, macdisk_switch(MACDISK_SLOT_A, 0));
+    TEST_ASSERT_EQ_INT(0, block_read(macdisk_system(), 9, 1, back));
+    TEST_ASSERT(memcmp(back, a_before, 512) == 0);
+    TEST_ASSERT_EQ_INT(0, boot_big(MACDISK_SLOT_A));
+    TEST_ASSERT_EQ_INT(OVERLAY_OK, macdisk_overlay_status());
+    TEST_ASSERT_EQ_INT(0, macdisk_env_read(&env));
+    TEST_ASSERT_EQ_STR("a", grubenv_get(&env, "system_slot"));
+
+    /* Without a Boot partition holding grubenv, the switch happens but is not saved. */
+    TEST_ASSERT_EQ_INT(0, boot(MACDISK_SLOT_A));
+    TEST_ASSERT_EQ_INT(MACDISK_NOT_SAVED, macdisk_switch(MACDISK_SLOT_B, 1));
+    TEST_ASSERT_EQ_INT(MACDISK_SLOT_B, macdisk_slot());
+    free(big);
+    big = NULL;
+}
+
 int main(void)
 {
     TEST_RUN(test_slot_name);
@@ -175,6 +301,8 @@ int main(void)
     TEST_RUN(test_persistence_and_reset);
     TEST_RUN(test_mismatch_after_image_change);
     TEST_RUN(test_no_layout);
+    TEST_RUN(test_env_and_confirm);
+    TEST_RUN(test_switch_and_promote);
 
     return TEST_REPORT("macdisk");
 }

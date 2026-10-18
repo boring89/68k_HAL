@@ -447,6 +447,27 @@ int overlay_reset(overlay_t *o)
     return 0;
 }
 
+int overlay_rebind(overlay_t *o, block_device_t *base, uint32_t slot)
+{
+    uint32_t map_blocks;
+    uint32_t data_blocks;
+
+    if (o == NULL || base == NULL || base->block_count > o->base->block_count ||
+        geometry(o->store, base, &map_blocks, &data_blocks) != 0 ||
+        overlay_format(o->store, base, slot) != 0 || overlay_identity(base, slot, &o->id) != 0)
+        return -1;
+
+    k_memset(o->map, 0, (size_t)o->base->block_count * 4);
+    o->base = base;
+    o->map_blocks = map_blocks;
+    o->data_blocks = data_blocks;
+    o->next_free = 0;
+    o->mapped = 0;
+    o->device.block_count = base->block_count;
+
+    return 0;
+}
+
 uint32_t overlay_used_blocks(const overlay_t *o)
 {
     return o->mapped;

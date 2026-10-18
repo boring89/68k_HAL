@@ -98,6 +98,7 @@ kernel ── 設定（第 5 節）── macdisk：GPT → 分割區 → 疊加
 | `mac_disk` | `auto`、區塊裝置名稱 | `auto` | `auto` = 68k_HAL 磁碟的 System + Applications；裝置名稱（`disks` 列出）= 整顆當成唯一的磁碟 |
 | `system_slot` | `a`、`b` | `a` | 用哪個 System 槽（GRUB 從 grubenv 傳入；第 8 節） |
 | `kernel_slot` | `a`、`b` | — | 這次開機用的 kernel 槽（GRUB 傳入，只供顯示與第 8 節的確認） |
+| `kernel_confirm` | `0`、`1` | `0` | GRUB 傳入：這次是試開，成功就確認（第 8 節） |
 
 ## 6. 重置與狀態
 
@@ -111,9 +112,61 @@ kernel ── 設定（第 5 節）── macdisk：GPT → 分割區 → 疊加
 - 主機的**電源鍵**（短按）：ACPI 的 fixed event（PM1 狀態暫存器的 PWRBTN_STS）。Mac 執行中 → 送 ADB 鍵盤的電源鍵 → System 7.5 顯示「Are you sure you want to shut down your computer now?」（Return = Shut Down）；在 shell 中 → 直接關機。長按 4 秒仍是硬體強制關機。細節：`platform/pc/power/hal_power.c`。
 - 按 ` 停止 Mac：回到 shell（不關機）。
 
-## 8. 非破壞性的系統升級
+## 8. 非破壞性的系統升級（P10 D11）
 
-（D11，見本節之後的更新。）
+比喻：兩個抽屜（A、B）各放一份 kernel，一張紙條（grubenv）寫著「現在用哪個抽屜」。更新時把新 kernel 放進沒在用的抽屜，紙條上加一行「下次試一次另一個抽屜」；試成功才把「現在用」改過去，試失敗就還是用舊抽屜。
+
+### 8.1 kernel 的 A/B 槽
+
+```
+grubenv:  boot_slot=a   system_slot=a   trial=
+                │              │            └─ 有值時：下一次開機試這個 kernel 槽一次
+                │              └─ Mac 用哪個 System 槽（GRUB 傳給 kernel：system_slot=）
+                └─ 確認過的 kernel 槽
+
+GRUB（grub-mac.cfg）：
+  trial 有值 → 這次用 trial 的槽，kernel_confirm=1，並且「先」把 trial 清空（save_env）
+  預設項目載入失敗（檔案壞掉）→ fallback 項目：boot_slot 的 kernel
+kernel：開機成功（設定、磁碟都好了，進入 Mac 或 shell 之前）且 kernel_confirm=1
+  → 把 grubenv 的 boot_slot 改成這個槽
+```
+
+- 新 kernel 當掉或卡住：使用者按 reset，下次開機 trial 已經是空的 → 用舊的 boot_slot。
+- 新 kernel 根本載入不了：GRUB 自己 fallback 到確認過的槽（`Falling back to '68k_HAL (Mac) - the confirmed kernel slot'`）。
+- 選單的「the other kernel slot」只試一次，不會變成確認過的槽。
+- kernel 寫 grubenv 的方法：`kernel/fs/fat.c` 在 FAT32 裡找到 `68k_hal/grubenv` 的磁區，`kernel/fs/grubenv.c` 改內容後**原地覆寫那兩個磁區**（檔案大小固定 1024 位元組，不配置新的叢集，所以不需要完整的 FAT32 寫入）。GRUB 自己的 `save_env` 也是這樣寫。
+- `macsys status` 顯示這次的 kernel 槽、確認過的槽與待試的槽。
+
+### 8.2 System 的 A/B 槽
+
+- `macsys promote`：把「目前的 System 槽＋疊加層」（也就是 Mac 現在看到的系統碟）整個複製到另一個槽，讀回來比對 CRC-32，切換過去（grubenv `system_slot`），清空疊加層。舊槽不動。適合「系統設定與更新都弄好了，定版」。
+- `macsys switch a|b`：改用另一個槽，疊加層清空並綁到新槽。疊加層裡有 Mac 的改動時會拒絕（`promote` 保留它們；`switch a force` 丟掉它們）——Mac 開機就會寫桌面資料庫等，所以通常需要 `force`。
+- 兩者都在 shell 執行（Mac 停止後）；grubenv 寫不了時（例如沒有 Boot 分割區）這次開機已經切換，但下次開機還是舊槽，會印出說明。
+
+### 8.3 Ubuntu 端的更新腳本 `tools/update_68khal.sh`
+
+```bash
+make all initrd                                         # 新的 kernel 與程式
+sudo tools/update_68khal.sh --dry-run /dev/sda          # 先看會寫什麼
+sudo tools/update_68khal.sh /dev/sda                    # kernel 寫到沒在用的槽，下次開機試
+sudo tools/update_68khal.sh --no-kernel --system new_system.img /dev/sda   # 新的 Mac 系統放進沒在用的 System 槽
+```
+
+- 只寫 Boot 分割區裡備用槽的四個檔案與 grubenv（mtools 以分割區的位移存取 FAT32，不掛載），以及（`--system`）備用的 System 分割區。**疊加層、Applications、預留空間絕不寫。**
+- 寫入前列出 SHA-256，寫入後讀回比對；`--dry-run` 什麼都不寫。目標必須是 68k_HAL 磁碟（五個分割區名稱都在），有分割區被掛載時拒絕。
+- 目標也可以是映像檔（`build/68k_HAL_mac.img`）：自動測試只用這種方式（`make test-mac-update`）。
+
+### 8.4 各種情境會保留什麼
+
+| 情境 | 怎麼做 | Mac 的系統設定（疊加層） | Applications | 退回 |
+|---|---|---|---|---|
+| 更新 kernel | `update_68khal.sh` | 保留 | 保留 | 自動（試開失敗）或選單「the other kernel slot」 |
+| 系統弄好了，定版 | `macsys promote` | 併進新槽（疊加層清空，內容在新槽裡） | 保留 | `macsys switch <舊槽> force` |
+| 換新版 Mac 系統 | `update_68khal.sh --system`，再 `macsys switch <新槽> force` | 丟棄（屬於舊系統） | 保留 | `macsys switch <舊槽> force` |
+| 套用 Apple 的更新程式 | 在 Mac 裡執行（寫進疊加層），滿意後 `macsys promote` | 更新在疊加層裡；promote 後在新槽 | 保留 | promote 前：`macsys reset`；promote 後：switch 回舊槽 |
+| 重置系統 | `macsys reset` | 丟棄 | 保留 | — |
+
+測試：`make test-mac-update`（本機，約 8 分鐘）：腳本更新 kernel 槽 b → 試開成功並確認、建兩個資料夾 → 腳本放壞的 kernel 到槽 a → GRUB fallback 到 b、資料夾都在 → `macsys promote` → 用 System B 開機、資料夾在 → `macsys switch a`（拒絕）、`switch a force` → System A 開得起來（沒有那個資料夾：它從來沒被寫過）。
 
 ## 9. 與第二階段（eHFS）的關係
 
@@ -126,6 +179,7 @@ kernel ── 設定（第 5 節）── macdisk：GPT → 分割區 → 疊加
 ```bash
 make mac-disk     # build/68k_HAL_mac.img（約 9 GiB 稀疏檔，實際約 63 MB）；MAC_ROM、MAC_DISK 指向你的檔案
 make test-mac-disk   # 本機：小一號的同樣配置，在 QEMU（q35 + OVMF）跑兩次開機（第 7 節的流程），約 4 分鐘
+make test-mac-update # 本機：更新、試開、退回、promote、switch（第 8 節），約 8 分鐘
 make test-macdisk    # make test 裡：合成的小 GPT 映像（沒有 Mac 系統）接 AHCI，檢查分割區與疊加層
 ```
 

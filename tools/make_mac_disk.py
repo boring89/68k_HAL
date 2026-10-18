@@ -119,6 +119,7 @@ def main():
 
     if os.path.exists(args.out):
         os.remove(args.out)
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, "wb") as f:
         f.truncate(total)
 
