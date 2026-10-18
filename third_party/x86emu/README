@@ -1,0 +1,15 @@
+x86emu: the real-mode x86 emulator of the X.Org X server (originally the
+SciTech "Realmode X86 Emulator Library"), used by platform/pc/video/vbe.c to
+run the VGA BIOS's VBE functions (int 0x10) on a machine started from a
+legacy BIOS.
+
+Source: xorg-server-21.1.13, hw/xfree86/x86emu/ (decode.c ops.c ops2.c
+prim_ops.c sys.c fpu.c debug.c x86emu.h x86emu/*.h), copied unchanged.
+https://www.x.org/releases/individual/xserver/xorg-server-21.1.13.tar.xz
+SHA-256 b45a02d5943f72236a360d3cc97e75134aa4f63039ff88c04686b508a3dc740c
+(as published in the xorg-announce message of the release).
+
+License: the permission notice at the top of every file (SciTech Software,
+David Mosberger-Tang, Egbert Eich; MIT/X11 style), repeated in LICENSE.
+The kernel build compiles it with stand-in headers
+(platform/pc/video/x86emu_include) and -DNO_SYS_HEADERS; see the Makefile.

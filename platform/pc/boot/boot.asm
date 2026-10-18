@@ -24,8 +24,13 @@ multiboot_header:
 %ifdef GRAPHICS
 	dd 0, 0, 0, 0, 0
 	dd 0            ; mode_type: linear graphics
+%ifdef GFX_WIDTH
+	dd GFX_WIDTH    ; width: as the Multiboot2 header (the loader falls back to a mode it has)
+	dd GFX_HEIGHT   ; height
+%else
 	dd 640          ; width
 	dd 480          ; height
+%endif
 	dd 32           ; depth
 %endif
 
@@ -50,7 +55,7 @@ mb2_header:
 %ifdef GRAPHICS
 	; Framebuffer tag: type 5, size 20, width, height, depth. 0 x 0 = no preference: the loader
 	; keeps the mode it set up itself (grub.cfg: gfxmode, e.g. the monitor's own size under UEFI).
-	; The Multiboot 1 header above keeps asking for 640x480 for the BIOS tests.
+	; The Multiboot 1 header above asks for the same size (640x480 without GFX_WIDTH).
 	align 8
 	dw 5, 0
 	dd 20

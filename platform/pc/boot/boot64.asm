@@ -15,7 +15,7 @@ section .multiboot
 align 4
 
 ; Multiboot 1 header (Multiboot Specification 0.6.96, 3.1): flags bit 1 = memory info; with
-; -d GRAPHICS also bit 2 and a 640x480x32 framebuffer request. The five address fields stay 0
+; -d GRAPHICS also bit 2 and a 640x480x32 framebuffer request (GFX_WIDTH x GFX_HEIGHT if defined). The five address fields stay 0
 ; (the kernel is an ELF file).
 MB_MAGIC equ 0x1BADB002
 %ifdef GRAPHICS
@@ -31,8 +31,13 @@ multiboot_header:
 %ifdef GRAPHICS
 	dd 0, 0, 0, 0, 0
 	dd 0            ; mode_type: linear graphics
+%ifdef GFX_WIDTH
+	dd GFX_WIDTH    ; width: as the Multiboot2 header (the loader falls back to a mode it has)
+	dd GFX_HEIGHT   ; height
+%else
 	dd 640          ; width
 	dd 480          ; height
+%endif
 	dd 32           ; depth
 %endif
 

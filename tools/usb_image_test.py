@@ -25,7 +25,7 @@ ENTRIES = [
     (0, "normal", ["Shell ready", "Interrupts: I/O APIC", "CPUs online: 2"]),  # UEFI: also 2560x1440, see below
     (1, "safe mode", ["Shell ready", "using the 8259", "CPUs online: 1"]),
     (2, "diagnostics", ["diagnostics 1/9", "Vendor"]),
-    (3, "mac", ["Shell ready"]),
+    (3, "mac", ["Shell ready", "Framebuffer: 2560x1440"]),  # BIOS: GRUB sets it through VBE
     (4, "diagnostics without USB", ["diagnostics 1/9", "driver disabled by noxhci"]),
     (5, "graphics (BIOS only)", ["Shell ready", "Framebuffer: 640x480"]),
 ]

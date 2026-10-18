@@ -55,7 +55,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: mac-uefi-shot test-mac-perf test-pci-roots test-power usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: test-vbe mac-uefi-shot test-mac-perf test-pci-roots test-power usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -116,6 +116,22 @@ $(BUILD)/$(MUSASHI)/%.o: $(MUSASHI)/%.c $(MUSASHI_GEN)/m68kops.h
 
 -include $(KMUSASHI_OBJECTS:.o=.d)
 
+# x86emu (third_party/x86emu, unchanged X.org code): the real-mode emulator that runs the VGA BIOS's VBE
+# calls (platform/pc/video/vbe.c). Built with stand-in headers and without the system headers.
+X86EMU := third_party/x86emu
+KX86EMU_CFLAGS := $(ARCH_FLAGS) -ffreestanding -O2 -w -fno-pie -fno-stack-protector \
+	-fno-asynchronous-unwind-tables -nostdlib -I$(X86EMU) \
+	-isystem platform/pc/video/x86emu_include -isystem emu/m68k/freestanding/include -MMD -MP
+KX86EMU_OBJECTS := $(patsubst %,$(BUILD)/$(X86EMU)/%.o,decode ops ops2 prim_ops sys fpu debug)
+
+$(BUILD)/$(X86EMU)/%.o: $(X86EMU)/%.c
+	mkdir -p $(dir $@)
+	$(CC) $(KX86EMU_CFLAGS) -c $< -o $@
+
+-include $(KX86EMU_OBJECTS:.o=.d)
+
+# The kernel file that drives x86emu needs its headers.
+$(BUILD)/platform/pc/video/vbe.o: CFLAGS += -I$(X86EMU) -isystem platform/pc/video/x86emu_include
 
 # Only search directories that exist (e.g. drivers/ is picked up once created).
 # emu/ (the 68k emulator) is built into the kernel as well as for host tests.
@@ -127,7 +143,7 @@ ASM_SOURCES := $(filter-out $(addsuffix %,$(ARCH_EXCLUDE)),$(shell find $(SRC_DI
 C_OBJECTS := $(C_SOURCES:%.c=$(BUILD)/%.o)
 ASM_OBJECTS := $(ASM_SOURCES:%.asm=$(BUILD)/%.o)
 
-OBJECTS := $(C_OBJECTS) $(ASM_OBJECTS) $(KMUSASHI_OBJECTS)
+OBJECTS := $(C_OBJECTS) $(ASM_OBJECTS) $(KMUSASHI_OBJECTS) $(KX86EMU_OBJECTS)
 
 
 $(BUILD)/%.o: %.c
@@ -287,6 +303,7 @@ HOST_LIB_SOURCES := \
 	platform/pc/acpi/acpi_parse.c \
 	platform/pc/pci/pci_bar.c \
 	platform/pc/rtc/rtc_decode.c \
+	platform/pc/video/vbe_parse.c \
 	platform/pc/timer/tsc_math.c \
 	$(wildcard emu/m68k/*.c) \
 	$(wildcard emu/mac/*.c)
@@ -802,7 +819,7 @@ test-shell: iso
 test-uefi: iso $(BUILD)/kernel-gfx1080.elf
 	BUILD=$(BUILD) python3 -I tools/uefi_check.py
 	SHELL_TEST_UEFI=1 python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
-		"acpi=Local APIC" "cpuinfo=Vendor" "lspci=Host bridge"
+		"acpi=Local APIC" "cpuinfo=Vendor" "lspci=Host bridge" "video list=no video BIOS"
 
 # The Q35 chipset (PCIe, ICH9, MSI-capable e1000e) with the BIOS: APIC interrupts and the network.
 test-q35: iso
@@ -852,6 +869,11 @@ test-fb: all
 
 # The standard VGA card's mode can be chosen: set 1280x960 from the shell and
 # check a QEMU screendump (in graphics mode, GRUB's 640x480, and in text mode).
+# Screen modes through the video BIOS (VBE in x86emu, platform/pc/video/vbe.c): QEMU (SeaBIOS) with
+# "nobga", two switches checked on screendumps (tools/vbe_check.py).
+test-vbe: $(BUILD)/kernel-gfx.elf
+	python3 -I tools/vbe_check.py $(BUILD)/kernel-gfx.elf
+
 test-video: iso
 	SHELL_TEST_SCREEN=1280x960 python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
 		"video 1280 960=video: 1280x960 32 bpp"
@@ -894,4 +916,4 @@ test-boundary:
 	done
 	@echo "boundary check: PASS"
 
-test: test-boundary test-host test-qemu test-noapic test-q35 test-usb test-e1000e test-shell test-video test-fb test-net test-virtio-net test-pci-roots
+test: test-boundary test-host test-qemu test-noapic test-q35 test-usb test-e1000e test-shell test-video test-vbe test-fb test-net test-virtio-net test-pci-roots

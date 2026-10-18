@@ -262,7 +262,7 @@ static shell_command_entry_t commands[] =
          cmd_beep},
         {COMMAND_VIDEO,
          "video",
-         "Show the screen mode, or set one and draw a test pattern (video <width> <height>)",
+         "Show the screen mode, or set one and draw a test pattern (video <width> <height>, video list, video edid, video native)",
          cmd_video},
         {COMMAND_HTTP,
          "http",
@@ -1725,29 +1725,95 @@ static void cmd_beep(
         terminal_write_line("No sound card");
 }
 
+/* "WxH" written to the terminal. */
+static void write_size(
+    uint32_t width,
+    uint32_t height)
+{
+    char number[16];
+
+    k_utoa(width, number);
+    terminal_write(number);
+    terminal_write("x");
+    k_utoa(height, number);
+    terminal_write(number);
+}
+
+/* Switch the screen to width x height and draw the test pattern. Returns 0 or -1 (with a message). */
+static int video_switch(
+    uint32_t width,
+    uint32_t height)
+{
+    hal_framebuffer_t fb;
+
+    if (width < 1 || height < 1 || hal_framebuffer_set_mode(width, height) != 0)
+    {
+        terminal_write_line("video: that mode is not available");
+        return -1;
+    }
+    if (hal_framebuffer_get(&fb) == 0)
+        fb_draw_test_pattern(&fb);
+    return 0;
+}
+
+/*
+ * video                 the current mode
+ * video <w> <h>         switch (the Bochs/QEMU VGA, or a VBE mode of the video BIOS)
+ * video list            the VBE modes (32 bits per pixel) of the video BIOS
+ * video edid            the monitor's native resolution (EDID through VBE/DDC)
+ * video native          switch to the native resolution
+ * VBE needs a legacy BIOS (or CSM) boot: under UEFI there is no video BIOS, and only the firmware's mode.
+ */
 static void cmd_video(
     int argc,
     char **argv)
 {
     hal_framebuffer_t fb;
-    char number[16];
+    uint32_t width, height;
 
-    if (argc >= 3)
+    if (argc == 2 && k_strcmp(argv[1], "list") == 0)
     {
-        int width = 0;
-        int height = 0;
+        static hal_video_mode_t modes[64];
+        int count = hal_framebuffer_modes(modes, 64);
 
-        k_atoi(argv[1], &width);
-        k_atoi(argv[2], &height);
-
-        if (width < 1 || height < 1 || hal_framebuffer_set_mode((uint32_t)width, (uint32_t)height) != 0)
+        if (count < 0)
         {
-            terminal_write_line("video: that mode is not available");
+            terminal_write_line("video: no video BIOS (VBE needs a legacy BIOS or CSM boot; UEFI keeps its mode)");
             return;
         }
+        for (int i = 0; i < count; i++)
+        {
+            terminal_write("  ");
+            write_size(modes[i].width, modes[i].height);
+            terminal_newline();
+        }
+        terminal_write("video: ");
+        terminal_write_line(count == 0 ? "no 32-bit VBE modes" : "VBE modes with 32 bits per pixel");
+        return;
+    }
+    if (argc == 2 && (k_strcmp(argv[1], "edid") == 0 || k_strcmp(argv[1], "native") == 0))
+    {
+        if (hal_framebuffer_native(&width, &height) != 0)
+        {
+            terminal_write_line("video: cannot read the monitor's EDID (needs VBE/DDC: a legacy BIOS boot)");
+            return;
+        }
+        terminal_write("video: native resolution ");
+        write_size(width, height);
+        terminal_newline();
+        if (k_strcmp(argv[1], "native") == 0)
+            video_switch(width, height);
+        return;
+    }
+    if (argc >= 3)
+    {
+        int w = 0;
+        int h = 0;
 
-        if (hal_framebuffer_get(&fb) == 0)
-            fb_draw_test_pattern(&fb);
+        k_atoi(argv[1], &w);
+        k_atoi(argv[2], &h);
+        if (w < 1 || h < 1 || video_switch((uint32_t)w, (uint32_t)h) != 0)
+            return;
     }
 
     if (hal_framebuffer_get(&fb) != 0)
@@ -1757,11 +1823,7 @@ static void cmd_video(
     }
 
     terminal_write("video: ");
-    k_utoa(fb.width, number);
-    terminal_write(number);
-    terminal_write("x");
-    k_utoa(fb.height, number);
-    terminal_write(number);
+    write_size(fb.width, fb.height);
     terminal_write_line(" 32 bpp");
 }
 
