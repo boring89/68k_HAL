@@ -36,7 +36,12 @@
 #define VRAM_BASE 0xFBB08000u       /* where the ROM's tables put the video RAM */
 #define RAM_SIZE (8u * 1024 * 1024)
 #define RTC_START 0xD0000000u       /* a fixed date: seconds since 1904 */
-#define SHOW_EVERY 6u               /* frames between two redraws */
+/*
+ * Frames between two redraws: every frame, so the screen follows the Mac at
+ * 60 Hz. Rendering and the write-combined screen update of the changed rows
+ * cost a few ms, well inside a 16.7 ms frame (docs/mac.md, section 8).
+ */
+#define SHOW_EVERY 1u
 #define BLOCK_SIZE 512u
 
 /*

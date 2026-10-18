@@ -164,7 +164,7 @@ Mac 的 ROM 是一本很長的開機劇本，劇本裡不斷地「去敲某個�
                       ├─ Mac RAM 8 MiB：重用 kernel/m68k/guest（PMM frame 映射在 0x10000000）
                       ├─ 視訊 RAM、畫面緩衝：kmalloc
                       ├─ 磁碟：模組唯讀 + 64 KiB 為單位的寫入覆蓋層（最多 4 MiB 的變更）
-                      └─ 每幀 416000 個 CPU 週期（約 1/60 s Mac 時間）；每 6 幀把畫面畫到 framebuffer
+                      └─ 每幀 416000 個 CPU 週期（約 1/60 s Mac 時間）；每幀把有變動的列畫到 framebuffer（60 Hz）
 ```
 
 - 需要圖形模式（640x480x32 framebuffer）才看得到畫面；沒有 framebuffer 時照樣執行，只是沒畫面。按 ` 鍵停止。
