@@ -28,7 +28,7 @@ make test-video # 設定 1280x960 並檢查 QEMU screendump
 make test-usb    # USB 鍵盤滑鼠經 xHCI（關掉 PS/2，含熱插拔）
 make test-noapic # selftest 帶 "noapic"（8259 路徑）；make test-q35：q35 晶片組的 APIC 與網路
 make test-vbe    # VBE（video BIOS 經 x86emu）切換解析度：QEMU SeaBIOS + nobga，檢查 screendump（在 make test 中）
-make test-mac-perf / mac-uefi-shot  # Mac 在 2560x1440 的效能數據；OVMF 2560x1440 下的 Mac 截圖（本機專用）
+make test-mac-perf / mac-uefi-shot / test-mac-hotkeys  # Mac 在 2560x1440 的效能數據（MAC_PERF_RES、MAC_PERF_DEPTH）；OVMF 2560x1440 下的 Mac 截圖；HiDPI 熱鍵（本機專用）
 make test-uefi   # 同一個 ISO 用 UEFI 韌體（OVMF、q35）開機：Multiboot2、ACPI RSDP、fbcon 的字大小與解析度（需要 ovmf 套件；不在 make test 中）
 make test-fb      # GRUB 的 640x480 圖形模式：色條、framebuffer 文字終端、打指令看輸出（tools/fb_check.py；擋住「驅動啟動時把螢幕關掉」這類退步）
 make test-mac-keys # Alt-N（= Command-N）在 Mac 建立資料夾（本機專用）
