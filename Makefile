@@ -271,8 +271,10 @@ HOST_LIB_SOURCES := \
 	kernel/display/fbcon.c \
 	kernel/display/fbcon_font.c \
 	kernel/fs/apm.c \
+	kernel/fs/gpt.c \
 	kernel/fs/hfs/hfs.c \
 	kernel/fs/volume.c \
+	kernel/lib/k_crc32.c \
 	kernel/lib/k_string.c \
 	kernel/lib/k_number.c \
 	kernel/lib/k_snprintf.c \
@@ -622,6 +624,10 @@ $(BUILD)/images/hfs.img: tools/make_hfs_image.sh
 	mkdir -p $(dir $@)
 	tools/make_hfs_image.sh $@
 
+$(BUILD)/images/gpt.img: tools/make_gpt_image.py
+	mkdir -p $(dir $@)
+	python3 -I $< $@
+
 # The HFS volume inside an Apple Partition Map, like a real Mac disk.
 $(BUILD)/images/disk.img: $(BUILD)/images/hfs.img tools/make_disk_image.py
 	python3 -I tools/make_disk_image.py $< $@
@@ -630,7 +636,7 @@ $(BUILD)/images/disk.img: $(BUILD)/images/hfs.img tools/make_disk_image.py
 test-mac-stub:
 	python3 -I tools/gen_mac_stub.py --check
 
-test-host: test-mac-stub $(HOST_TESTS) $(M68K_TEST_BINS) $(BUILD)/images/apm.img $(BUILD)/images/hfs.img $(BUILD)/images/disk.img
+test-host: test-mac-stub $(HOST_TESTS) $(M68K_TEST_BINS) $(BUILD)/images/apm.img $(BUILD)/images/gpt.img $(BUILD)/images/hfs.img $(BUILD)/images/disk.img
 	@for t in $(HOST_TESTS); do ./$$t || exit 1; done
 
 # SingleStepTests 68000 data (https://github.com/SingleStepTests/680x0, put
