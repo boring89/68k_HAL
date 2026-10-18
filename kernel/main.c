@@ -135,6 +135,9 @@ void kernel_main(void)
 #ifdef KERNEL_MAC_TEST_SCALE
     mac_machine_set_scale_halves(KERNEL_MAC_TEST_SCALE * 2);
 #endif
+#ifdef KERNEL_MAC_TEST_HALVES
+    mac_machine_set_scale_halves(KERNEL_MAC_TEST_HALVES);
+#endif
 #ifdef KERNEL_MAC_TEST_WIDTH
     mac_machine_set_resolution(KERNEL_MAC_TEST_WIDTH, KERNEL_MAC_TEST_HEIGHT);
 #else

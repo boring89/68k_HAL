@@ -22,7 +22,7 @@ OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 
 # (menu index, name, texts the serial output must show)
 ENTRIES = [
-    (0, "normal", ["Shell ready", "Interrupts: I/O APIC", "CPUs online: 2"]),  # UEFI: also 1920x1080, see below
+    (0, "normal", ["Shell ready", "Interrupts: I/O APIC", "CPUs online: 2"]),  # UEFI: also 2560x1440, see below
     (1, "safe mode", ["Shell ready", "using the 8259", "CPUs online: 1"]),
     (2, "diagnostics", ["diagnostics 1/9", "Vendor"]),
     (3, "mac", ["Shell ready"]),
@@ -31,9 +31,11 @@ ENTRIES = [
 ]
 
 
-# UEFI only: the entry's Multiboot2 header asks for 1920x1080 (the entry that keeps the firmware's mode is the last).
-UEFI_EXTRA = {0: "Framebuffer: 1920x1080", 3: "Framebuffer: 1920x1080"}
-UEFI_ONLY = [(5, "firmware resolution", ["Shell ready", "Framebuffer: 1280x800"])]
+# UEFI only: the entry's Multiboot2 header asks for 2560x1440; then an entry for 1920x1080 and the one that
+# keeps the firmware's mode.
+UEFI_EXTRA = {0: "Framebuffer: 2560x1440", 3: "Framebuffer: 2560x1440"}
+UEFI_ONLY = [(5, "1920x1080", ["Shell ready", "Framebuffer: 1920x1080"]),
+             (6, "firmware resolution", ["Shell ready", "Framebuffer: 1280x800"])]
 
 
 def run_entry(image, uefi, index, name, expect):
