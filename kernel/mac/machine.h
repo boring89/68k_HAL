@@ -45,18 +45,24 @@ int mac_machine_run(uint32_t frames);
 void mac_machine_set_scale_halves(uint32_t halves);
 
 /*
- * The resolution the card starts in. 0 x 0 (the default) = the one that fills the screen best with an
- * enlargement of 2x, 1.5x or 1x (2560x1440: 1280x720 at 2x). Returns -1 if the card has no such mode.
+ * The resolution the card starts in. 0 x 0 (the default) = the one the last interactive run ended in (a
+ * choice made in the Monitors control panel stays), or the first time the one that fills the screen best
+ * with an enlargement of 2x, 1.5x or 1x (2560x1440: 1280x720 at 2x). Returns -1 if the card has no such
+ * mode.
  */
 int mac_machine_set_resolution(uint32_t width, uint32_t height);
 
 /*
- * The depth the Mac starts in: 1, 2, 4, 8, 16 or 32 bits per pixel (default 1). It goes into the card's
+ * The depth the Mac starts in: 1, 2, 4, 8, 16 or 32 bits per pixel; 0 = as the last interactive run ended
+ * (1 bit the first time; see mac_machine_forget_mode). It goes into the card's
  * slot parameter RAM, where the ROM's startup code takes the video mode from; the Monitors control panel
  * changes it while the Mac runs. A resolution without that depth starts in 1 bit. Returns -1 for other
  * numbers.
  */
 int mac_machine_set_depth(uint32_t bits);
+
+/* Forget the mode of the last run: the next run starts as the first one did. */
+void mac_machine_forget_mode(void);
 
 /* The number of NuBus video cards: 1 (default) or 2 (a second screen in slot $D, beside the first as the
  * Mac arranges them; 32 MiB more memory). Returns -1 for other numbers. */

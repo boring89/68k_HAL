@@ -175,11 +175,30 @@ int mac_machine_set_cards(uint32_t cards)
     want_cards = cards;
     return 0;
 }
-static uint32_t want_depth = 0;
+static int want_depth = -1;     /* -1: as the last run ended (1 bit the first time) */
+
+/*
+ * The mode the Mac was in when the last interactive run ended (-1: none yet): the next "mac" without res= or
+ * depth= starts there, so that a choice made in the Monitors control panel stays (until the kernel restarts;
+ * the Mac's own record of it is on the disk overlay, which is gone after the run).
+ */
+static int last_resolution = -1;
+static int last_depth = -1;
+
+void mac_machine_forget_mode(void)
+{
+    last_resolution = -1;
+    last_depth = -1;
+}
 
 int mac_machine_set_depth(uint32_t bits)
 {
-    for (uint32_t depth = 0; depth < 6; depth++)
+    if (bits == 0)
+    {
+        want_depth = -1;
+        return 0;
+    }
+    for (int depth = 0; depth < 6; depth++)
     {
         if ((1u << depth) == bits)
         {
@@ -815,6 +834,10 @@ int mac_machine_run(uint32_t frames)
         {
             res = (uint32_t)want_resolution;
         }
+        else if (last_resolution >= 0)
+        {
+            res = (uint32_t)last_resolution;
+        }
         else if (have_screen)
         {
             uint16_t widths[16], heights[16];
@@ -834,14 +857,16 @@ int mac_machine_run(uint32_t frames)
         }
         k_memset(card_vram, 0, MAC_CARD_VRAM_SIZE);
         /* A resolution without that depth (3840x2160 has no 32 bits) starts in 1 bit. */
-        if (mac_card_attach(mac, card_vram, res, want_depth) != 0)
+        uint32_t depth = want_depth >= 0 ? (uint32_t)want_depth : last_depth >= 0 ? (uint32_t)last_depth : 0;
+
+        if (mac_card_attach(mac, card_vram, res, depth) != 0)
             mac_card_attach(mac, card_vram, res, 0);
 
         /* The second screen (slot $D): the same mode. */
         if (second_vram != NULL)
         {
             k_memset(second_vram, 0, MAC_CARD_VRAM_SIZE);
-            if (mac_card_attach(mac, second_vram, res, want_depth) != 0)
+            if (mac_card_attach(mac, second_vram, res, depth) != 0)
                 mac_card_attach(mac, second_vram, res, 0);
         }
     }
@@ -964,6 +989,12 @@ int mac_machine_run(uint32_t frames)
         }
     }
     uint64_t wall_ns = hal_timer_ns() - paced_start;
+
+    if (frames == 0 && mac->card[0].present)
+    {
+        last_resolution = (int)mac->card[0].res;
+        last_depth = (int)mac->card[0].depth;
+    }
 
     /* The whole picture once more, for its CRC (the same as tools/mac_run prints). */
     if (relayout(mac, &fb, false) == 0 && render(mac) >= 0)

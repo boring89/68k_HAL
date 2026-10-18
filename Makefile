@@ -55,7 +55,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: test-mac-hotkeys test-vbe mac-uefi-shot test-mac-perf test-pci-roots test-power usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: test-mac-remember test-mac-hotkeys test-vbe mac-uefi-shot test-mac-perf test-pci-roots test-power usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -473,6 +473,14 @@ test-mac-hotkeys:
 		$(BUILD)/mac/kernel-perf-1280x720-32/kernel.elf || exit 1; \
 	cp "$(MAC_ROM)" $(BUILD)/mac/rom.bin; cp "$(MAC_DISK)" $(BUILD)/mac/disk.img; \
 	python3 -I tools/mac_hotkey_check.py $(BUILD)/mac/kernel-perf-1280x720-32/kernel.elf $(BUILD)/mac/rom.bin $(BUILD)/mac/disk.img
+
+# "mac" starts in the mode the last interactive run ended in (local only): the normal kernel under QEMU,
+# typed commands mac res=800x600, `, mac, `, mac res=auto (tools/mac_remember_check.py).
+test-mac-remember: $(BUILD)/kernel.elf
+	@if [ ! -f "$(MAC_ROM)" ] || [ ! -f "$(MAC_DISK)" ]; then \
+		echo "test-mac-remember: SKIP (no ROM or disk; set MAC_ROM and MAC_DISK)"; exit 0; fi; \
+	mkdir -p $(BUILD)/mac; cp "$(MAC_ROM)" $(BUILD)/mac/rom.bin; cp "$(MAC_DISK)" $(BUILD)/mac/disk.img; \
+	python3 -I tools/mac_remember_check.py $(BUILD)/kernel.elf $(BUILD)/mac/rom.bin $(BUILD)/mac/disk.img
 
 # The Mac's sound: the system beeps (mac_sysbeep, injected at frame 1200) in the
 # kernel under QEMU with an HDA sound card whose output is recorded; the
