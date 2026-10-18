@@ -264,6 +264,7 @@ HOST_LIB_SOURCES := \
 	kernel/mac/adbkeys.c \
 	kernel/block/block.c \
 	kernel/block/ramdisk.c \
+	kernel/block/overlay.c \
 	kernel/console/sink.c \
 	kernel/display/text_display.c \
 	kernel/display/fb_pattern.c \
@@ -272,6 +273,7 @@ HOST_LIB_SOURCES := \
 	kernel/display/fbcon_font.c \
 	kernel/fs/apm.c \
 	kernel/fs/gpt.c \
+	kernel/fs/macdisk.c \
 	kernel/fs/hfs/hfs.c \
 	kernel/fs/volume.c \
 	kernel/lib/k_crc32.c \
@@ -898,6 +900,15 @@ test-usb: iso
 		"{hmp device_add usb-mouse,bus=xhci.0,port=1.2,id=m2}@@" "usb=mouse" \
 		"run /bin/evtest=reading events" "{mouse_move 7 3}=rel 0 7" "a{up}q=key 103 1"
 
+# The 68k_HAL GPT disk (a small synthetic one) on AHCI: the partitions become block devices and the
+# system overlay opens and is bound to System A. The image is a copy because the first boot formats the overlay.
+test-macdisk: iso $(BUILD)/images/gpt.img
+	cp $(BUILD)/images/gpt.img $(BUILD)/images/gpt_qemu.img
+	QEMU_ARGS="-machine q35 -drive file=$(BUILD)/images/gpt_qemu.img,format=raw,if=none,id=d0 -device ide-hd,drive=d0,bus=ide.0" \
+	python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
+		"macsys status=Overlay: ok" "macsys status=blocks written: 0" "disks=sys_a" "disks=apps" "disks=system: 40 x 512" \
+		"macsys bogus=usage: macsys"
+
 # A second root bus (pxb-pcie is a host bridge of its own, like the extra root buses of the P520): the
 # root port on bus 0x20 and the card behind it on bus 0x21 must be found (hal_pci.c scans every bus).
 test-pci-roots: iso
@@ -967,4 +978,4 @@ test-boundary:
 	done
 	@echo "boundary check: PASS"
 
-test: test-boundary test-host test-qemu test-noapic test-q35 test-usb test-e1000e test-shell test-video test-vbe test-fb test-net test-virtio-net test-pci-roots
+test: test-boundary test-host test-qemu test-noapic test-q35 test-usb test-e1000e test-shell test-macdisk test-video test-vbe test-fb test-net test-virtio-net test-pci-roots

@@ -45,7 +45,8 @@ typedef enum
     COMMAND_DIAG,
     COMMAND_POWEROFF,
     COMMAND_REBOOT,
-    COMMAND_IRQS
+    COMMAND_IRQS,
+    COMMAND_MACSYS
 
 } shell_command_id_t;
 

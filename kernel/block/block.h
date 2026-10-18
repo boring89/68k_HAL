@@ -15,7 +15,7 @@
  * read through block_read and never see the driver.
  */
 
-#define BLOCK_MAX_DEVICES 8
+#define BLOCK_MAX_DEVICES 16
 
 typedef struct block_device block_device_t;
 

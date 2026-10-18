@@ -18,6 +18,7 @@
 #include "kernel/printf/printf.h"
 
 #include "kernel/block/ramdisk.h"
+#include "kernel/fs/macdisk.h"
 #include "kernel/fs/volume.h"
 
 #include "kernel/input/event_buffer.h"
@@ -83,6 +84,19 @@ void kernel_main(void)
     /* The first HFS volume among them is what the ls and cat commands read. */
     if (volume_mount_any() == 0)
         kernel_log(LOG_INFO, "HFS volume mounted");
+
+    /* A 68k_HAL GPT disk (docs/mac_disk.md): its partitions become block devices and the system overlay opens. */
+    if (macdisk_init(macdisk_slot_from_cmdline(hal_boot_cmdline())) == 0)
+    {
+        kernel_printf("macdisk: 68k_HAL disk, System %c, overlay %s\n",
+                      macdisk_slot() == MACDISK_SLOT_A ? 'A' : 'B',
+                      overlay_status_name(macdisk_overlay_status()));
+
+        if (macdisk_overlay_status() == OVERLAY_MISMATCH)
+            kernel_log(LOG_WARN, "macdisk: the system overlay belongs to another System image and is not applied; 'macsys reset' starts a new one");
+        else if (macdisk_overlay_status() != OVERLAY_OK)
+            kernel_log(LOG_ERROR, "macdisk: the system overlay cannot be opened");
+    }
 
     /* The file tree ("/", /tmp, /dev) and the mode switch for user programs. */
     user_init();

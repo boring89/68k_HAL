@@ -20,6 +20,7 @@
 #include "kernel/mac/machine.h"
 #include "kernel/memory/memory.h"
 #include "kernel/block/block.h"
+#include "kernel/fs/macdisk.h"
 #include "kernel/fs/volume.h"
 #include "kernel/user/process.h"
 #include "kernel/vfs/vfs.h"
@@ -151,6 +152,10 @@ static void cmd_reboot(
     int argc,
     char **argv);
 static void cmd_irqs(
+    int argc,
+    char **argv);
+
+static void cmd_macsys(
     int argc,
     char **argv);
 
@@ -299,7 +304,11 @@ static shell_command_entry_t commands[] =
         {COMMAND_IRQS,
          "irqs",
          "Interrupts counted per line since boot (lines 0-15 ISA, 16 and up message signalled)",
-         cmd_irqs}};
+         cmd_irqs},
+        {COMMAND_MACSYS,
+         "macsys",
+         "The Mac system disk: macsys status | reset (drop the Mac's changes to the system disk)",
+         cmd_macsys}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -2185,6 +2194,50 @@ static void cmd_irqs(
     }
 
     write_number_line("total: ", hal_irq_count(), 0);
+}
+
+static void cmd_macsys(
+    int argc,
+    char **argv)
+{
+    if (!macdisk_present())
+    {
+        terminal_write_line("macsys: no 68k_HAL disk (GPT with System and Overlay partitions)");
+        return;
+    }
+
+    if (argc >= 2 && k_strcmp(argv[1], "reset") == 0)
+    {
+        if (macdisk_reset() == 0)
+            terminal_write_line("macsys: the system overlay is empty; the Mac starts from the original System image");
+        else
+            terminal_write_line("macsys: reset failed");
+        return;
+    }
+
+    if (argc >= 2 && k_strcmp(argv[1], "status") != 0)
+    {
+        terminal_write_line("usage: macsys status | reset");
+        return;
+    }
+
+    terminal_write("System slot: ");
+    terminal_write_line(macdisk_slot() == MACDISK_SLOT_A ? "A" : "B");
+    terminal_write("Overlay: ");
+    terminal_write_line(overlay_status_name(macdisk_overlay_status()));
+
+    const overlay_t *ov = macdisk_overlay();
+
+    if (ov != NULL)
+    {
+        write_number_line("  blocks written: ", overlay_used_blocks(ov), 0);
+        write_number_line("  blocks free:    ", overlay_capacity_blocks(ov) - overlay_used_blocks(ov), 0);
+    }
+    else if (macdisk_overlay_status() == OVERLAY_MISMATCH)
+    {
+        terminal_write_line("  The overlay belongs to another System image and is not applied.");
+        terminal_write_line("  'macsys reset' empties it and binds it to this image.");
+    }
 }
 
 int shell_command_count(void)
