@@ -20,6 +20,7 @@
 #include "kernel/mac/machine.h"
 #include "kernel/memory/memory.h"
 #include "kernel/block/block.h"
+#include "kernel/block/cache.h"
 #include "kernel/config/config.h"
 #include "kernel/fs/macdisk.h"
 #include "kernel/fs/volume.h"
@@ -163,6 +164,9 @@ static void cmd_mount(
     int argc,
     char **argv);
 static void cmd_config(
+    int argc,
+    char **argv);
+static void cmd_cache(
     int argc,
     char **argv);
 
@@ -323,7 +327,11 @@ static shell_command_entry_t commands[] =
         {COMMAND_CONFIG,
          "config",
          "Show the settings (68k_hal.cfg and the kernel command line)",
-         cmd_config}};
+         cmd_config},
+        {COMMAND_CACHE,
+         "cache",
+         "Disk cache statistics; cache drop forgets every cached block; cache bench <device> [MB] times two reads",
+         cmd_cache}};
 
 #define COMMAND_TABLE_SIZE \
     ((int)(sizeof(commands) / sizeof(commands[0])))
@@ -2370,6 +2378,81 @@ static void cmd_config(
         terminal_write(" = ");
         terminal_write_line(value);
     }
+}
+
+static void cmd_cache(
+    int argc,
+    char **argv)
+{
+    block_cache_stats_t st;
+
+    if (argc >= 2 && k_strcmp(argv[1], "drop") == 0)
+    {
+        block_cache_drop();
+        terminal_write_line("cache: dropped");
+        return;
+    }
+
+    /* cache bench <device> [MB]: read the start of a device twice and time both (the second from the cache). */
+    if (argc >= 3 && k_strcmp(argv[1], "bench") == 0)
+    {
+        static uint8_t chunk[64 * 1024];
+        block_device_t *dev = block_device_find(argv[2]);
+        size_t mb = 16;
+
+        if (argc >= 4 && (parse_size(argv[3], &mb) != 0 || mb > 4096))
+            mb = 16;
+
+        if (dev == NULL || dev->block_size == 0 || sizeof chunk % dev->block_size != 0)
+        {
+            terminal_write_line("cache: no such device");
+            return;
+        }
+
+        uint32_t per = (uint32_t)(sizeof chunk / dev->block_size);
+        uint64_t blocks = (uint64_t)mb * 1024 * 1024 / dev->block_size;
+
+        if (blocks > dev->block_count)
+            blocks = dev->block_count;
+
+        for (int pass = 1; pass <= 2; pass++)
+        {
+            uint64_t start = hal_timer_ns();
+
+            for (uint64_t lba = 0; lba < blocks; lba += per)
+            {
+                uint32_t n = blocks - lba < per ? (uint32_t)(blocks - lba) : per;
+
+                if (block_read(dev, lba, n, chunk) != 0)
+                {
+                    terminal_write_line("cache: read error");
+                    return;
+                }
+            }
+
+            write_number_line(pass == 1 ? "first read (ms):  " : "second read (ms): ",
+                              (uint32_t)((hal_timer_ns() - start) / 1000000u), 0);
+        }
+        return;
+    }
+
+    block_cache_get_stats(&st);
+
+    if (st.lines_max == 0)
+    {
+        terminal_write_line("cache: off (disk_cache = 0 or no memory)");
+        return;
+    }
+
+    uint64_t total = st.hits + st.misses;
+
+    write_number_line("lines in use (32 KiB each): ", st.lines_used, 0);
+    write_number_line("lines at most:              ", st.lines_max, 0);
+    write_number_line("hits:                       ", (uint32_t)st.hits, 0);
+    write_number_line("misses (read from disk):    ", (uint32_t)st.misses, 0);
+    write_number_line("hit rate (percent):         ", total != 0 ? (uint32_t)(st.hits * 100 / total) : 0, 0);
+    write_number_line("evictions:                  ", (uint32_t)st.evictions, 0);
+    write_number_line("writes (written through):   ", (uint32_t)st.writes, 0);
 }
 
 int shell_command_count(void)

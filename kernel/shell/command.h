@@ -48,7 +48,8 @@ typedef enum
     COMMAND_IRQS,
     COMMAND_MACSYS,
     COMMAND_MOUNT,
-    COMMAND_CONFIG
+    COMMAND_CONFIG,
+    COMMAND_CACHE
 
 } shell_command_id_t;
 

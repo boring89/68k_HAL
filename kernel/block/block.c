@@ -5,6 +5,8 @@
 
 #include "block.h"
 
+#include "cache.h"
+
 #include "kernel/lib/k_string.h"
 
 static block_device_t *devices[BLOCK_MAX_DEVICES];
@@ -59,6 +61,9 @@ int block_read(block_device_t *device, uint64_t lba, uint32_t count,
     if (lba >= device->block_count || count > device->block_count - lba)
         return -1;
 
+    if (block_cache_enabled(device))
+        return block_cache_read(device, lba, count, buffer);
+
     return device->ops->read(device, lba, count, buffer);
 }
 
@@ -71,10 +76,14 @@ int block_write(block_device_t *device, uint64_t lba, uint32_t count,
     if (lba >= device->block_count || count > device->block_count - lba)
         return -1;
 
+    if (block_cache_enabled(device))
+        return block_cache_write(device, lba, count, buffer);
+
     return device->ops->write(device, lba, count, buffer);
 }
 
 void block_reset(void)
 {
     device_total = 0;
+    block_cache_reset();
 }

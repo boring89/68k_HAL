@@ -17,6 +17,7 @@
 #include "kernel/log/log.h"
 #include "kernel/printf/printf.h"
 
+#include "kernel/block/cache.h"
 #include "kernel/block/ramdisk.h"
 #include "kernel/boot/module.h"
 #include "kernel/config/config.h"
@@ -80,6 +81,51 @@ static void append(char *line, size_t size, const char *text)
         k_strcpy(line + length, text);
 }
 
+/*
+ * The disk cache (kernel/block/cache.h): its line buffers. The 64-bit kernel reaches all RAM through the
+ * direct map, so they are PMM frames; the 32-bit kernel only has its heap.
+ */
+static void *cache_line_alloc(void)
+{
+#ifdef HAL_PHYS_BASE
+    uintptr_t frames = pmm_alloc_frames(BLOCK_CACHE_LINE_BYTES / HAL_MMU_PAGE_SIZE);
+
+    return frames != 0 ? hal_phys_to_virt(frames) : NULL;
+#else
+    return kmalloc(BLOCK_CACHE_LINE_BYTES);
+#endif
+}
+
+#ifdef HAL_PHYS_BASE
+#define DISK_CACHE_MAX_MB 8192u     /* the default's ceiling: 8 GiB */
+#else
+#define DISK_CACHE_MAX_MB 32u       /* the 32-bit heap is small */
+#endif
+
+/* disk_cache = MB (0 = off) or auto: a quarter of the free memory, at most DISK_CACHE_MAX_MB. */
+static void start_disk_cache(void)
+{
+    const char *setting = config_get_or("disk_cache", "auto");
+    uint64_t free_mb = (uint64_t)pmm_get_free_frames() * HAL_MMU_PAGE_SIZE / (1024 * 1024);
+    uint64_t mb = free_mb / 4 < DISK_CACHE_MAX_MB ? free_mb / 4 : DISK_CACHE_MAX_MB;
+
+    if (k_strcmp(setting, "auto") != 0)
+    {
+        mb = 0;
+
+        for (const char *p = setting; *p >= '0' && *p <= '9'; p++)
+            mb = mb * 10 + (uint64_t)(*p - '0');
+
+        if (mb > free_mb / 2)
+            mb = free_mb / 2;   /* never more than half of the memory */
+    }
+
+    if (block_cache_init(mb * 1024 * 1024, cache_line_alloc) != 0)
+        kernel_log(LOG_WARN, "disk cache: no memory for its table");
+    else if (mb != 0)
+        kernel_printf("disk cache: up to %u MB\n", (unsigned int)mb);
+}
+
 /* The "mac" shell command the settings ask for (autostart=mac). */
 static void mac_command_from_config(char *line, size_t size)
 {
@@ -141,6 +187,7 @@ void kernel_main(void)
         kernel_log(LOG_INFO, "HFS volume mounted");
 
     load_config();
+    start_disk_cache();
 
     /* A 68k_HAL GPT disk (docs/mac_disk.md): its partitions become block devices and the system overlay opens. */
     if (macdisk_init(macdisk_slot_from_name(config_get("system_slot"))) == 0)

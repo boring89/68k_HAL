@@ -265,6 +265,7 @@ HOST_LIB_SOURCES := \
 	kernel/block/block.c \
 	kernel/block/ramdisk.c \
 	kernel/block/overlay.c \
+	kernel/block/cache.c \
 	kernel/console/sink.c \
 	kernel/display/text_display.c \
 	kernel/display/fb_pattern.c \
@@ -1011,7 +1012,7 @@ test-macdisk: iso $(BUILD)/images/gpt.img
 	QEMU_ARGS="-machine q35 -drive file=$(BUILD)/images/gpt_qemu.img,format=raw,if=none,id=d0 -device ide-hd,drive=d0,bus=ide.0" \
 	python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
 		"macsys status=Overlay: ok" "macsys status=blocks written: 0" "disks=sys_a" "disks=apps" "disks=system: 40 x 512" \
-		"macsys bogus=usage: macsys"
+		"macsys bogus=usage: macsys" "cache bench sys_a 1=second read" "cache=hit rate"
 
 # A second root bus (pxb-pcie is a host bridge of its own, like the extra root buses of the P520): the
 # root port on bus 0x20 and the card behind it on bus 0x21 must be found (hal_pci.c scans every bus).

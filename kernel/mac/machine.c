@@ -1013,6 +1013,7 @@ int mac_machine_run(uint32_t frames)
 
     uint64_t paced_start = hal_timer_ns();
     uint32_t power_key_frames = 0;
+    bool finder_seen = false;
 
     for (uint32_t frame = 1; frames == 0 || frame <= frames; frame++)
     {
@@ -1045,6 +1046,15 @@ int mac_machine_run(uint32_t frames)
         uint32_t instructions_before = mac->insn_count;
 
         mac_run(mac, (int)MAC_FRAME_CYCLES);
+
+        /* When the Finder starts (low memory CurApName, $910): how long the start took (the disk cache shows here). */
+        if (!finder_seen && frame % 30 == 0 && mac_bus_read(mac, 0x910, 1) == 6 &&
+            mac_bus_read(mac, 0x911, 4) == 0x46696E64u && mac_bus_read(mac, 0x915, 2) == 0x6572u)
+        {
+            finder_seen = true;
+            kernel_printf("mac: the Finder runs after %u frames, %u ms\n", frame,
+                          (unsigned int)((hal_timer_ns() - paced_start) / 1000000u));
+        }
 
         /* Shut Down or Restart in the Mac OS: the run ends (the machine follows below). */
         if (mac->power_request != MAC_POWER_NONE)

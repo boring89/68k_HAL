@@ -96,6 +96,7 @@ kernel ── 設定（第 5 節）── macdisk：GPT → 分割區 → 疊加
 | `mac_video` | `card`、`builtin` | `card` | `builtin` = IIci 內建顯示（640x480） |
 | `mac_ram` | MB，8–1024 | 128 | Mac 的記憶體（32 位元 kernel 最多 256） |
 | `mac_disk` | `auto`、區塊裝置名稱 | `auto` | `auto` = 68k_HAL 磁碟的 System + Applications；裝置名稱（`disks` 列出）= 整顆當成唯一的磁碟 |
+| `disk_cache` | MB、`auto`、0 | `auto` | 磁碟快取的上限（第 11 節）；`auto` = 可用記憶體的 1/4，最多 8 GiB（32 位元 kernel 32 MB）；0 = 關閉 |
 | `system_slot` | `a`、`b` | `a` | 用哪個 System 槽（GRUB 從 grubenv 傳入；第 8 節） |
 | `kernel_slot` | `a`、`b` | — | 這次開機用的 kernel 槽（GRUB 傳入，只供顯示與第 8 節的確認） |
 | `kernel_confirm` | `0`、`1` | `0` | GRUB 傳入：這次是試開，成功就確認（第 8 節） |
@@ -186,3 +187,16 @@ make test-macdisk    # make test 裡：合成的小 GPT 映像（沒有 Mac 系�
 - `tools/make_mac_disk.py`：用 `sgdisk` 對**映像檔**建 GPT、`mformat`／`mcopy` 做 FAT32、`hformat` 做 Applications；拒絕寫入不是一般檔案的目標（例如 `/dev/sda`）。分割區大小可改：`make mac-disk MAC_DISK_SIZES="--overlay-mib 8192"`。
 - `tools/mac_disk_check.py`：在 QEMU 裡開機、打字、按電源鍵、截圖的腳本工具。
 - 寫入 `sda` 的步驟：`docs/p520.md` 第 7 節。
+
+## 11. 磁碟快取（P10 D9，`kernel/block/cache.c`）
+
+- **在哪裡**：區塊層。`block_read`／`block_write` 遇到「有快取」的裝置就走快取；只有 68k_HAL 磁碟本身（`macdisk_init` 呼叫 `block_cache_enable`），它的分割區、疊加層都經過它，所以 Mac 讀的一切都會被快取。
+- **單位**：32 KiB 的「行」（line，512 位元組區塊 × 64）。讀一個區塊會把整行讀進來（順便預讀鄰近的區塊）。行用雜湊表查找，滿了以後回收最久沒用的（LRU）。
+- **記憶體**：設定 `disk_cache`（MB）；預設 `auto` = 開機時可用記憶體的 1/4，最多 8 GiB（P520 的 64 GiB → 8 GiB；QEMU 的 512 MB → 約 125 MB）。64 位元 kernel 的行緩衝區直接向 PMM 要頁框（經過直接映射存取，不佔 1 GiB 的 heap），用到才要；32 位元 kernel 用 heap，最多 32 MB。
+- **寫入策略：write-through**（選擇理由）：每次寫入立刻寫到磁碟（照呼叫的順序，回傳時已經在媒體上），再更新快取中已有的那一行。所以：關機、`macsys`、Mac 的 Shut Down 之前**不需要 flush**；疊加層「先資料、後對照表」的斷電安全順序原封不動地到達磁碟（`tests/host/test_cache.c` 在快取上重做 D2 的斷電測試）。代價是寫入不會變快——Mac 的瓶頸是讀（開機、開程式），寫入量小。寫入失敗時，那幾行從快取中移除（磁碟上是哪個版本不確定）。
+- **統計**：shell `cache`（行數、命中、未命中、命中率、回收、寫入）；`cache drop` 清空；`cache bench <裝置> [MB]` 讀兩次並計時。
+- **量測（QEMU）**：
+  - `cache bench sys_a 32`，q35（AHCI）：第一次 313 ms、第二次（快取）44 ms。
+  - `cache bench sys_a 8`，i440fx（IDE，ATA PIO 輪詢）：第一次 21796 ms、第二次 11 ms。
+  - Mac 開機到 Finder：兩次都是 300 幀、約 4980 ms，因為 QEMU 的映像檔在主機的 page cache 裡（磁碟本來就快），而且 Mac 以每秒 60 幀的步調執行；磁碟讀取的時間只有在超過一幀的空檔時才看得出來。第二次執行的命中率 93%（只多讀了 2 行）。實機（SATA SSD）的差異要在 P520 上量。
+

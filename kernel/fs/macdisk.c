@@ -6,6 +6,8 @@
 #include "macdisk.h"
 
 #include "gpt.h"
+
+#include "kernel/block/cache.h"
 #include "fat.h"
 
 #include "kernel/lib/k_crc32.h"
@@ -79,6 +81,9 @@ int macdisk_init(uint32_t slot)
             continue;
 
         present = 1;
+
+        /* Everything the Mac reads comes from this disk: cache it (a no-op without a cache). */
+        block_cache_enable(disk);
         active_slot = slot == MACDISK_SLOT_B ? MACDISK_SLOT_B : MACDISK_SLOT_A;
 
         block_device_t *base = macdisk_slot_device(active_slot);
