@@ -1,6 +1,8 @@
-# 顯示：Bochs VBE（BGA）、Mac 畫面放大、Intel 原生顯示卡設計
+# 顯示：Bochs VBE（BGA）、VBE（video BIOS）、Mac 畫面放大、Intel 原生顯示卡設計
 
-`drivers/bga/`、`platform/pc/video/`、`hal/framebuffer.h`、`kernel/display/fb_scale.c`
+`drivers/bga/`、`platform/pc/video/`（含 `vbe.c`）、`hal/framebuffer.h`、`kernel/display/fb_scale.c`
+
+> P9（自動排程，**使用者尚未審核**）：第 3 節的 Mac 放大改為 0.5 倍步進並跟著 Mac 的虛擬 NuBus 顯示卡（`docs/nubus_video.md`）；新增第 6 節（VBE 執行期切換）、第 7 節（開機時的原生解析度）、第 8 節（為什麼沒有 60 Hz 以上）。
 
 ## 1. 目前的顯示路徑
 
@@ -52,6 +54,8 @@ QEMU 的標準 VGA（`-vga std`，PCI 1234:1111）是 Bochs 的 VBE 擴充卡。
 限制：每次切換模式都會再映射一次（`vmap` 不歸還），不要在迴圈中切換；只有 32 bpp；沒有硬體加速（所有繪圖都是 CPU 寫像素）。
 
 ## 3. Mac 畫面放大（HiDPI）
+
+> P9 起：Mac 的畫面是虛擬 NuBus 顯示卡，640x480 到 3840x2160（`docs/nubus_video.md`）。放大以 0.5 倍為單位（`fb_blit_halves`：1x、1.5x、2x… 最近鄰，1.5x 時每兩個 Mac 像素有一個畫成兩倍寬／高），**不再切換螢幕模式**；`mac scale=1|1.5|2|…|auto`，執行中 Ctrl+Alt+PgUp/PgDn/Home。以下是 P6 的原始說明（640x480、整數倍、`mac 2` 會切模式），保留作為歷史。
 
 Mac IIci 的畫面是 640×480。在現代螢幕上很小，所以 `mac 2` 先把顯示模式切成 1280×960，再把每個 Mac 像素畫成 2×2 的方塊（`kernel/display/fb_scale.c`；整數倍放大、不模糊，點陣字型與圖示保持銳利）：
 
@@ -119,6 +123,50 @@ CSM（傳統 BIOS）：顯示卡的 VBIOS 提供 VBE 模式，GRUB 用 Multiboot
 - BGA 驅動只在 PCI 1234:1111 且 VBE ID 暫存器合理時啟用，GTX 1070 不會碰到它。
 - 測試：`make test-uefi`（OVMF：GRUB 保留韌體模式 1280x800 → 字 1 倍；暫時的 ISO 要求 1920x1080 → 字 2 倍、120x33 格，並檢查螢幕截圖的色條與文字像素）；Mac 在 UEFI 1080p 的畫面是本機手動檢查（需要 ROM）。
 - **未在實機驗證**：GTX 1070 的 GOP 模式清單、像素格式（BGRX 是假設）、HiDPI 螢幕是否真的給 1920x1080 以上。
+
+## 6. VBE 執行期切換解析度（P9 N6，`platform/pc/video/vbe.c`）
+
+比喻：顯示卡自己帶了一本「說明書兼遙控器」——video BIOS（卡上的 ROM，PC 開機時被複製到 `0xC0000`）。裡面的 VBE（VESA BIOS Extensions）函式會幫你把卡切到任何它支援的模式，不必知道卡的暫存器。問題是這本說明書只能在 16 位元「真實模式」執行，而我們的 kernel 在 64 位元模式。
+
+做法：**在 kernel 裡模擬一顆 8086/386 來執行它**（x86emu，X.org 用了十幾年的同一個模擬器，MIT/X11 授權，原封不動放在 `third_party/x86emu/`，來源與 SHA-256 見那裡的 README）。
+
+```
+ shell: video 1920 1080 ─► hal_framebuffer_set_mode ─► BGA？（QEMU 的 Bochs 介面；有 nobga 就跳過）
+                                                     └► vbe_switch ─► x86emu 執行 int 0x10
+                                                                       ├ 記憶體：前 1 MiB 的私人複本
+                                                                       │  （IVT、BIOS 資料區、0xC0000 video BIOS、0xF0000 系統 BIOS）
+                                                                       └ I/O port：真的硬體（video BIOS 就是靠它設定顯示卡）
+```
+
+| 呼叫 | 用途 |
+|---|---|
+| `4F00h` | 控制器資訊：簽名 "VESA"、版本、模式清單的位址（`vbe_parse_info`） |
+| `4F01h` | 每個模式的資訊：寬、高、bpp、記憶體模型、線性 framebuffer 的實體位址、每列位元組（VBE 3.0 有線性模式專用的 pitch 與顏色遮罩；`vbe_parse_mode_info`） |
+| `4F02h` | 設定模式，BX bit 14 = 線性 framebuffer |
+| `4F15h` | VBE/DDC：讀螢幕的 EDID（128 位元組；第一個 detailed timing = 原生解析度，`edid_preferred`） |
+
+- 只用「32 位元、直接色（memory model 6）、0x00RRGGBB 的遮罩、有線性 framebuffer」的模式（`vbe_mode_usable`）。
+- 呼叫方式：在私人記憶體 `0000:0700` 放一個 `HLT`，堆疊上推入 FLAGS、CS=0、IP=0x700（就像 CPU 執行了 `INT 10h`），從中斷向量表的 `int 0x10` 開始執行，video BIOS 的 `IRET` 回到 HLT 就結束。超過 5000 萬次指令讀取視為卡住。
+- **UEFI 開機沒有 video BIOS**（`0xC0000` 沒有 `55 AA`，或 `int 0x10` 不指向 ROM）：全部回報「不支援」，`video list` 印 `no video BIOS …`。UEFI 下的解析度由開機時決定（第 7 節）。
+- 32 位元 kernel 的實體頁 0 沒有映射（null 保護），所以前 1 MiB 透過 `vmap` 讀（只在第一次呼叫時複製一次）。
+- shell：`video list`（VBE 模式）、`video edid`（原生解析度）、`video native`（切到原生）、`video W H`。
+- 測試：`tests/host/test_vbe_parse.c`（解析）；`make test-vbe`（在 `make test` 中）：QEMU（SeaBIOS 與它的 VGA BIOS）、kernel 命令列 `nobga`，`video list`、`video edid`、切到 800x600 與 1920x1080，從 screendump 檢查大小與色條；`make test-uefi` 檢查 UEFI 下回報不支援。32／64 位元都通過。
+- **未在實機驗證**：GTX 1070 的 VBIOS 在 x86emu 中是否正常（X.org 以前用同一個模擬器跑 NVIDIA 的 VBIOS，但沒有保證）；VBE 模式清單通常不含 2560x1440（VESA 標準模式只到 1600x1200，廠商可加），這要實機的 `video list` 才知道。
+
+## 7. 開機時就用原生解析度（P9 N5）
+
+- **UEFI**：GRUB 對 Multiboot2 只看 kernel header 的 framebuffer tag（`gfxpayload` 無效，已在 OVMF 試過）。所以有三個 kernel：`kernel-gfx1440.elf`（要求 2560x1440，USB 映像的預設）、`kernel-gfx1080.elf`（選單項目「UEFI: 1920x1080」）、`kernel-gfx.elf`（沒有要求＝保留韌體的模式）。GOP 沒有那個模式時 GRUB 保留韌體的模式。
+- **BIOS／CSM**：Multiboot 1 header 現在也要求同樣的大小（`GFX_WIDTH`；沒有定義時仍是 640x480），GRUB 透過 VBE 設定；USB 映像的「Macintosh」項目在 BIOS 下也用 `kernel-gfx1440.elf`。之後還可以在 shell 用 `video native`（EDID）或 `video W H` 換。
+- 測試：`make test-usb-image` 檢查 BIOS 與 UEFI 的「mac」項目都是 2560x1440、UEFI 預設 2560x1440、「UEFI: 1920x1080」、「保留韌體解析度」1280x800。
+
+## 8. 為什麼沒有 60 Hz 以上（以及 UEFI 下開機後不能換解析度）
+
+更新率（每秒畫幾次）是**顯示卡送給螢幕的時序**決定的：像素時脈、水平與垂直的 total／blank／sync。這些只有顯示卡的模式設定程式碼能改（第 4 節的 pipe 與 PLL）。我們用的 framebuffer 是韌體設定好的：
+
+- UEFI 的 GOP 只提供「解析度清單」，沒有更新率可選，而且**只能在開機服務（boot services）期間**呼叫；GRUB 把控制交給 kernel 後就不能再用。GOP 選的時序幾乎都是 60 Hz（EDID 的第一個 detailed timing 或標準模式）。
+- VBE 3.0 的 `4F02h` 可以帶 CRTC 資訊區塊指定時序（refresh rate control），但很多 VBIOS 不支援，而且只到 BIOS／CSM 開機才有。
+- GTX 1070 要 144 Hz、或 UEFI 開機後換解析度，就需要原生 NVIDIA 模式設定（PLL、display engine、HDMI/DP 連結訓練），沒有公開文件、Nouveau 是 GPL-2.0-only，不在範圍內（使用者已同意）。
+- Mac 自己的時間軸是 60.15 Hz（VIA 的 Ticks），所以 Mac 的畫面更新本來就是 60 次／秒；kernel 每個 Mac frame 畫一次有變動的列。
 
 ## 5. 不做的事
 

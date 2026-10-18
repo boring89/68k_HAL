@@ -13,7 +13,7 @@
 make            # 產生 build/kernel.elf（64 位元；`make ARCH=i386` 產生 32 位元的 build/i386/kernel.elf，兩者的測試都要過，見 docs/x86_64.md）
 make iso        # 產生 build/68k_HAL.iso（需要 grub-mkrescue）
 make run        # 在 QEMU 中開機，serial 輸出到 stdio
-make test       # test-boundary + test-host + test-qemu + test-shell + test-video，修改後必須通過（第一次會下載 musl、Lua、TinyCC 的原始碼，需要網路）
+make test       # test-boundary + test-host + test-qemu + test-shell + test-video + test-vbe 等，修改後必須通過（第一次會下載 musl、Lua、TinyCC 的原始碼，需要網路）
 make test-host  # host 單元測試（tests/host/，含 ASan/UBSan）
 make test-qemu  # 以 -DKERNEL_SELFTEST 編譯 kernel，在 QEMU 中執行 kernel/test/selftest.c
 make test-sst   # SingleStepTests 68000 測資（tests/data/sst/，需自行下載，不在 make test 中；見 docs/m68k.md）
@@ -27,6 +27,8 @@ make test-shell # 開機 ISO、用 QEMU monitor 打字執行 shell 指令並檢�
 make test-video # 設定 1280x960 並檢查 QEMU screendump
 make test-usb    # USB 鍵盤滑鼠經 xHCI（關掉 PS/2，含熱插拔）
 make test-noapic # selftest 帶 "noapic"（8259 路徑）；make test-q35：q35 晶片組的 APIC 與網路
+make test-vbe    # VBE（video BIOS 經 x86emu）切換解析度：QEMU SeaBIOS + nobga，檢查 screendump（在 make test 中）
+make test-mac-perf / mac-uefi-shot  # Mac 在 2560x1440 的效能數據；OVMF 2560x1440 下的 Mac 截圖（本機專用）
 make test-uefi   # 同一個 ISO 用 UEFI 韌體（OVMF、q35）開機：Multiboot2、ACPI RSDP、fbcon 的字大小與解析度（需要 ovmf 套件；不在 make test 中）
 make test-fb      # GRUB 的 640x480 圖形模式：色條、framebuffer 文字終端、打指令看輸出（tools/fb_check.py；擋住「驅動啟動時把螢幕關掉」這類退步）
 make test-mac-keys # Alt-N（= Command-N）在 Mac 建立資料夾（本機專用）
@@ -57,12 +59,12 @@ make clean
 hal/           HAL 介面（只有 .h）：cpu、irq、timer、mmu（含位址空間）、task（context 切換）、usermode、boot（含 module）、framebuffer、clock、init、acpi、pci、dma、usermode
 arch/x86_64/   64 位元專屬：gdt、interrupt（16 位元組 IDT）、mmu（4 層分頁、HHDM）、task、user（compatibility mode 執行 i386 程式）、test；見 docs/x86_64.md
 arch/x86/      CPU（32 位元專用與兩者共用的 cpu、io）：cpu（hal_cpu、CPUID、控制暫存器）、gdt（含 TSS）、interrupt（IDT、例外、IRQ stub）、mmu（分頁、hal_mmu、space = 每個行程一份分頁目錄）、task（context 切換、FPU）、io（port I/O）、user（ring 3、int 0x80）、test
-platform/pc/   PC 平台：boot（Multiboot 進入點、hal_boot）、video（framebuffer、BGA 模式設定）、rtc（CMOS 時鐘）、interrupt（8259 PIC、local APIC、I/O APIC、hal_irq；見 docs/apic.md）、timer（PIT、TSC、hal_timer）、acpi、smp（INIT-SIPI-SIPI）、pci（列舉、驅動清單）、dma、vmap（0xE0000000 視窗）、hal_init.c、test
+platform/pc/   PC 平台：boot（Multiboot 進入點、hal_boot）、video（framebuffer、BGA 模式設定、vbe：x86emu 執行 VGA BIOS 的 VBE）、rtc（CMOS 時鐘）、interrupt（8259 PIC、local APIC、I/O APIC、hal_irq；見 docs/apic.md）、timer（PIT、TSC、hal_timer）、acpi、smp（INIT-SIPI-SIPI）、pci（列舉、驅動清單）、dma、vmap（0xE0000000 視窗）、hal_init.c、test
 drivers/       裝置驅動：vga、serial、ps2_keyboard、ps2_mouse、ata（讀寫，見 docs/storage.md）、ahci（SATA）、e1000 與 virtio_net（網卡）、hda（Intel HD Audio）、bga（Bochs VBE 顯示）、usb_host（列舉 USB 控制器）、xhci（xHCI 控制器、HID 鍵盤滑鼠）、nvme（NVMe，輪詢）、e1000e（82574L 與 I219）
 kernel/        與硬體無關的核心：main.c、panic、memory（pmm、heap）、block（區塊裝置、ramdisk）、fs（apm、hfs 唯讀、volume；見 docs/hfs.md）、display（含 fb_scale、fbcon 圖形模式文字終端）、console、terminal（含 mirror、ANSI 解析器 ansi）、keyboard（keycode、state、keychar、keyseq 按鍵序列）、input、shell、log、printf、lib、m68k（guest RAM 與示範）、mac（在 kernel 裡執行 Mac；見 docs/mac.md）、user（ELF 載入器、系統呼叫、console；見 docs/userland.md）、vfs（ramfs、tarfs、hfsfs、devfs 的 console；見 docs/userland.md）、net（packet 純函式、tcp、net 堆疊；見 docs/net.md）、usb（控制器註冊表；見 docs/usb.md）、sound（見 docs/sound.md）、pci（名稱表；見 docs/pci.md）、test
 emu/m68k/      68k 虛擬機：Musashi 的封裝層（vm：含可選的 bus 與逐指令 hook）、A-line trap 分派（trap）、Musashi 設定（m68kconf.h）；freestanding/ 是 kernel 建置用的 libc 替身
-emu/mac/       Mac IIci 機器模型（M-P3，見 docs/mac.md）：記憶體配置與模擬 opcode（mac.c）、ROM 修補（rom_patch.c）、VIA（via.c）、RBV/DAC/視訊（video.c）、IWM、SCSI、.Disk 驅動（disk.c、stub.s）；與硬體無關，檔案由使用者提供，不在 repo
-third_party/   第三方原始碼，不修改：musashi（68k CPU 核心，MIT）；downloads/ 是下載的 musl、Lua、TinyCC、Haiku（gitignore）
+emu/mac/       Mac IIci 機器模型（M-P3，見 docs/mac.md）：記憶體配置與模擬 opcode（mac.c）、ROM 修補（rom_patch.c）、VIA（via.c）、RBV/DAC/視訊（video.c）、虛擬 NuBus 顯示卡（nubus_video.c、nubus_driver.s；docs/nubus_video.md）、IWM、SCSI、.Disk 驅動（disk.c、stub.s）；與硬體無關，檔案由使用者提供，不在 repo
+third_party/   第三方原始碼，不修改：musashi（68k CPU 核心，MIT）、x86emu（X.org 的真實模式 x86 模擬器，MIT/X11 類；platform/pc/video/vbe.c 用）；downloads/ 是下載的 musl、Lua、TinyCC、Haiku（gitignore）
 sdk/           C SDK 的執行期輔助（rt/divdi3.c：32 位元的 64 位元除法，因為 host 沒有 32 位元 libgcc）
 userland/      範例使用者程式（C，用 tools/68khal-cc 編譯）、data/（程式讀的檔案）、expected/（預期輸出）
 tests/host/    host 單元測試
@@ -150,6 +152,7 @@ Claude 依照上方工作規則直接實作。
 
 - `emu/mac`：Mac IIci 機器模型與 `kernel/mac`（P3，見 `docs/mac.md`）。同樣是由自動排程一次做完的，沒有走協作模式的逐步確認，使用者尚未審核；之後修改時請先帶使用者過一遍 `docs/mac.md`
 
+- P9（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：Mac 的虛擬 NuBus 顯示卡（slot `$C`、640x480–3840x2160、1–32 位元、Monitors 切換；`docs/nubus_video.md`）、kernel 端的髒列輸出與 0.5 倍步進 HiDPI、開機時 2560x1440（kernel-gfx1440.elf）、VBE 執行期切換（x86emu；`docs/gpu.md` 第 6–8 節）。P9 的規劃與紀錄在 `P9_PLAN.md`（不進 git）。
 - P8（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：x86-64 kernel（`docs/x86_64.md`）、PCI 全 bus 掃描與 4 GiB 以上 BAR、PAT write-combining 的 framebuffer 與 Mac 的效能數據、Mac 執行時 fbcon 暫停、Mac 的空 slot 與 GDevice 數量（`docs/mac.md` 第 4 節）、UEFI 的 1920x1080 解析度（`docs/p520.md`）。P8 的規劃與紀錄在 `P8_PLAN.md`（不進 git）。
 - P7（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：Multiboot2 與 UEFI 開機（`docs/hal.md`）、行程與排程與訊號與管線（`docs/process.md`）、APIC 與 MSI（`docs/apic.md`）、xHCI 與 USB 鍵盤滑鼠（`docs/usb.md`）、NVMe（`docs/storage.md`）、實機的顯示（`docs/gpu.md` 4.5）、e1000e（`docs/net.md`）。P7 的規劃與紀錄在 `P7_PLAN.md`（不進 git）。
 - P6（自動排程一次做完，**使用者尚未審核**；之後修改前請先帶使用者過一遍對應的文件）：CPU（`docs/cpu.md`）、使用者模式與 C SDK 與 VFS（`docs/userland.md`）、PCI 與驅動框架（`docs/pci.md`）、網路（`docs/net.md`）、聲音（`docs/sound.md`）、顯示（`docs/gpu.md`）、Mac 的聲音／時鐘／磁碟寫入（`docs/mac.md` 第 11、12 節）。P6 的規劃與紀錄在 `P6_PLAN.md`（不進 git）。
@@ -159,7 +162,8 @@ Claude 依照上方工作規則直接實作。
 ## 已知問題（尚未修正）
 
 - 鍵盤：US 配置；已有 Ctrl（Ctrl-字母 = 控制字元，Ctrl-D = EOF）、Alt、Caps Lock、方向鍵、F1–F12、導覽鍵（`0xE0` 擴充碼），但沒有數字鍵台（keypad）、其他配置、鍵盤 LED、按住重複。
-- `emu/mac`：鍵盤與滑鼠以封包注入（Ctrl = Control、Alt = Command、Win/AltGr = Option）、聲音只有 ASC 的 FIFO 模式、沒有序列埠與網路；只支援 ROM `368CADFE`（Mac IIci）；其餘見 `docs/mac.md` 第 10 節。
+- `emu/mac`：鍵盤與滑鼠以封包注入（Ctrl = Control、Alt = Command、Win/AltGr = Option）、聲音只有 ASC 的 FIFO 模式、沒有序列埠與網路；只支援 ROM `368CADFE`（Mac IIci）；NuBus 顯示卡開機時一律 1 位元（PRAMInitData 沒有生效）、3840x2160 只到 16 位元；其餘見 `docs/mac.md` 第 10 節與 `docs/nubus_video.md` 第 7 節。
+- 更新率只有韌體設定的模式（通常 60 Hz）；UEFI 開機後不能換實體解析度（沒有 video BIOS）；兩者都需要原生 NVIDIA 驅動（`docs/gpu.md` 第 8 節）。
 - 滑鼠事件（`INPUT_EVENT_MOUSE`）進入 input buffer 但主迴圈忽略。
 - HFS 名稱比較只對 ASCII 不分大小寫，查詢是線性掃描（見 `docs/hfs.md`）。
 - ATA 驅動只支援 primary master、LBA28、輪詢（可讀寫，寫入後 FLUSH CACHE）。

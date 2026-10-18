@@ -20,7 +20,7 @@
 | `s4_welcome_to_macintosh.png` | System 7.5.3 從映像開機，"Welcome to Macintosh." |
 | `s6_finder_desktop.png` | Finder 桌面 |
 
-還沒有的東西（見第 10 節）：聲音、序列埠/網路、彩色與其他解析度。鍵盤與滑鼠可以用（第 5 節的「輸入」）。
+還沒有的東西（見第 10 節）：序列埠/網路。鍵盤、滑鼠、聲音可以用；**P9 起畫面是一張虛擬 NuBus 顯示卡**（slot `$C`，640x480 到 3840x2160、1 到 32 位元，見 `docs/nubus_video.md`），IIci 的內建視訊預設關閉。
 
 ## 2. 比喻：我們替 ROM 蓋了一棟「假的機房」
 
@@ -47,8 +47,11 @@ Mac 的 ROM 是一本很長的開機劇本，劇本裡不斷地「去敲某個�
             │ IWM        0x50F16000  │    軟碟控制器（最小替身）
             │ DAC        0x50F24000  │    調色盤
             │ RBV        0x50F26000  │    VIA2 的替代品，含視訊暫存器
+ 0xC0000000 ├────────────────────────┤
+            │ NuBus 卡的 VRAM 32 MiB  │  slot $C 的 super slot 空間（docs/nubus_video.md）
  0xFBB08000 ├────────────────────────┤
-            │ 視訊 RAM 512 KiB        │  地址來自 ROM 的 UniversalInfo 表
+            │ 視訊 RAM 512 KiB        │  內建視訊；地址來自 ROM 的 UniversalInfo 表
+ 0xFCFFFBxx │ NuBus 卡的 declaration ROM │ slot $C 的頂端
  0xFE000000 │ slot $E：ROM 尾端        │  內建視訊的 declaration ROM 就是 ROM 的最後一段
             └────────────────────────┘
 ```
@@ -78,7 +81,7 @@ Mac 的 ROM 是一本很長的開機劇本，劇本裡不斷地「去敲某個�
 | `0x7860` | 等目標回應 BSY（逾時要幾分鐘） | `moveq #2,D0; rts` | 立刻逾時 |
 | `0xA3DC` | `_ADBOp` | `jmp` 到 stub | 每個 ADB 命令立刻回「沒有資料」 |
 | `0xA8E6` | 等 ADB 重新初始化的狀態機 | NOP | 沒有 ADB 硬體 |
-| `0x5E8A` | Slot Manager 探測每個 slot 的 `move.b (A1),D0`（空 slot 會 bus error，handler 回到 A2） | `SLOT_PROBE` 模擬 opcode：永遠跳到 A2 | 見下「GDevice 太多」 |
+| `0x5E8A` | Slot Manager 探測每個 slot 的 `move.b (A1),D0`（空 slot 會 bus error，handler 回到 A2） | `SLOT_PROBE` 模擬 opcode：跳到 A2；P9 起 slot `$C`（NuBus 顯示卡）真的讀一個位元組 | 見下「GDevice 太多」 |
 | `0x36D0`、`0x3710` | UniversalInfo 的 FPU 旗標（bit 28） | 清除 | 否則 System 會執行 FNOP 偵測而炸掉 |
 
 **GDevice 太多（P8 S8 第 5 項，Monitors 卡死）**：我們的 bus 讀不存在的位址不會 bus error，所以 Slot Manager 的探測把 slot $1–$E 全當成有卡，最後內建視訊的 declaration ROM（ROM 尾端，映射在 slot $E）變成第二份視訊 sResource 來源：視訊的 primary init（ROM 尾端的程式，複製到 RAM `0x4178`）依螢幕偵測值刪掉不用的模式，但它是用 slot 0（= 內建視訊）刪的，slot $E 那 15 個模式沒被刪到。System 為每個模式開驅動，建了 16 個 GDevice；System 7.5.3 的 Monitors 控制台把螢幕收集進 16 格的陣列，第 16 格寫過界蓋到自己的 frame（`unlk` 得到壞的 A6、`rtd` 跳掉），停在 `movea.l ($38,A1),A1` 的串列搜尋迴圈裡。修正：探測永遠回報「沒有卡」，開機後只有一個 GDevice（`make test-rom` 檢查 `-G` 列出的 GDevice 數 = 1）。重現與分析用的工具：`-G`（列 GDevice）、`-T A06E`（記錄 A-line trap 與 Slot Manager 的 SpBlock）、`-L @addr`（在某 PC 記暫存器與記憶體）、`-V addr`（某個 long 改變時印出是哪個指令改的）、`-D addr,n`（反組譯 ROM）。
@@ -93,10 +96,10 @@ Mac 的 ROM 是一本很長的開機劇本，劇本裡不斷地「去敲某個�
 
 | 偏移 | 作用 |
 |---|---|
-| `0x02` | slot 中斷旗標，**低電位有效**；bit 6 = 內建視訊垂直消隱（驅動輪詢它：1→0 就是消隱開始） |
+| `0x02` | slot 中斷旗標，**低電位有效**；bit 6 = 內建視訊垂直消隱（驅動輪詢它：1→0 就是消隱開始）；bit 3 = slot `$C` 的卡（NuBus 顯示卡的 VBL） |
 | `0x03` | 中斷旗標：bit 1 = 有 slot 中斷、bit 4 = 聲音晶片；寫入無作用（旗標跟著來源） |
-| `0x10` | bit 0–2 深度、bit 3–5 螢幕感測線（13" RGB = 6，640x480） |
-| `0x12` | slot 中斷遮罩（bit 7 設定/清除，bit 6 = 內建視訊）；再寫 bit 6 就重新武裝視訊中斷 |
+| `0x10` | bit 0–2 深度、bit 3–5 螢幕感測線（13" RGB = 6，640x480；有 NuBus 卡時 = 7「沒有螢幕」，內建視訊因此關閉） |
+| `0x12` | slot 中斷遮罩（bit 7 設定/清除，bit 0–5 = slot `$9`–`$E`，bit 6 = 內建視訊）；再寫 bit 6 就重新武裝視訊中斷。有卡時 reset 就打開 slot 位元（本來是 InitHW 的工作） |
 | `0x13` | 中斷遮罩 |
 
 **踩過的坑**：一開始把垂直消隱當成一般的 IFR 旗標，ROM 的 level-2 處理程式看 SIFR&SIER=0 就返回，卻沒有人清掉旗標，結果 level-2 一直被重新取用，Level 1（Ticks）永遠輪不到，系統停在「等 Ticks」的迴圈。現在的做法：垂直消隱先「鎖存」，只在遮罩都打開時變成中斷，視訊 ISR 寫 `0x12` 重新武裝時清掉。
@@ -162,12 +165,13 @@ Mac 的 ROM 是一本很長的開機劇本，劇本裡不斷地「去敲某個�
  shell 指令 mac ──► mac_machine_run()
                       ├─ ROM 複本（模組唯讀）→ mac_rom_patch
                       ├─ Mac RAM 8 MiB：重用 kernel/m68k/guest（PMM frame 映射在 0x10000000）
-                      ├─ 視訊 RAM、畫面緩衝：kmalloc
+                      ├─ NuBus 卡的 VRAM 32 MiB、畫面緩衝：kmalloc
                       ├─ 磁碟：模組唯讀 + 64 KiB 為單位的寫入覆蓋層（最多 4 MiB 的變更）
-                      └─ 每幀 416000 個 CPU 週期（約 1/60 s Mac 時間）；每幀把有變動的列畫到 framebuffer（60 Hz）
+                      └─ 每幀 416000 個 CPU 週期（約 1/60 s Mac 時間）；每幀只轉換並畫出 VRAM 有被寫過的列
 ```
 
-- 需要圖形模式（640x480x32 framebuffer）才看得到畫面；沒有 framebuffer 時照樣執行，只是沒畫面。按 ` 鍵停止。
+- 需要圖形模式（32 bpp framebuffer）才看得到畫面；沒有 framebuffer 時照樣執行，只是沒畫面。按 ` 鍵停止。
+- P9：`mac [scale=1|1.5|2|…|auto] [res=WxH] [builtin]`，Ctrl+Alt+PgUp/PgDn/Home 調整放大（`docs/nubus_video.md` 第 8 節）。`make test-rom-qemu` 的 kernel 用卡的 640x480（黃金 CRC `fa963b30`，host 與 kernel 相同）。
 - 磁碟寫入只存在覆蓋層（記憶體），不會改到模組，關機就沒了。Finder 啟動時要建 Desktop 檔案，所以覆蓋層是必要的：唯讀時會跳出「the desktop folder on the startup disk could not be created. Try unlocking the disk.」。
 - 模組以「名稱的最後一個字」辨識（QEMU 傳 `"<檔案> <參數>"`）：`-initrd "rom.bin mac_rom,disk.img mac_disk"`。
 - **決定性**：同樣的 ROM、磁碟、幀數，host 與 kernel 畫出一模一樣的畫面，所以 `make test-rom-qemu` 比較兩邊的畫面 CRC-32（預設 600 幀；KVM 約幾秒，TCG 會慢很多）。
@@ -196,7 +200,7 @@ menuentry "mac" {
 - **輸入**：ADB 命令（Talk/Listen/Flush）全部回「沒有資料」，所以不能改鍵盤 LED、不能 Listen 設定；按鍵與滑鼠只靠上面的封包注入。沒有 Command/Option/Control 鍵（PS/2 只有 Shift 有對應）、沒有滑鼠右鍵。
 - **聲音只有 ASC 的 FIFO 模式**（System beep 與一般取樣聲音夠用）；沒有 wave table 模式、沒有立體聲分離、音量暫存器被忽略；取樣率暫存器 1–3 的數值是推測。見第 11 節。
 - **沒有序列埠與網路**：序列驅動（SERD）不載入；LocalTalk 靠一個閒置的 SCC 蒙混過去。AppleTalk 不能用。
-- **只有 13" RGB 感測（640x480）**，ROM 預設 1 bpp 時桌面是黑白；其他深度與顯示器沒測。
+- 內建視訊只有 13" RGB 感測（640x480，`mac builtin`）。NuBus 卡：開機時一律 1 位元（用 Monitors 換）、3840x2160 只到 16 位元，見 `docs/nubus_video.md` 第 7 節。
 - **只支援 ROM `368CADFE`**（Mac IIci）；其他機型的偏移量不同。
 - **Time Manager** 用的是 ROM 原本的程式，靠 VIA 計時器；目前能開機到桌面，長時間執行與計時器密集的程式沒測。
 - **速度**：host 約 20M 指令/秒，Finder 桌面約需 5 億條指令（25 秒）；kernel 在 QEMU/KVM 內差不多，TCG 會慢 5–10 倍；沒有實時節流，Mac 的時鐘跑得比牆上時間快。

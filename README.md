@@ -28,7 +28,7 @@ The long-term vision is simple:
 - Interrupt handling (IDT / PIC)
 - Basic keyboard input
 - Modular HAL architecture
-- 68k virtual machine (Musashi) and a Macintosh IIci machine model that boots a user-supplied ROM and System 7.5.3 disk image to the Finder desktop, with keyboard, mouse, sound (Apple Sound Chip), a real-time clock, an optionally 2x enlarged screen and writes to an ATA disk (experimental, see [docs/mac.md](docs/mac.md))
+- 68k virtual machine (Musashi) and a Macintosh IIci machine model that boots a user-supplied ROM and System 7.5.3 disk image to the Finder desktop, with keyboard, mouse, sound (Apple Sound Chip), a real-time clock, a virtual NuBus video card (640x480 to 3840x2160, up to millions of colors, switched in the Monitors control panel) shown enlarged in half steps (HiDPI), and writes to an ATA disk (experimental, see [docs/mac.md](docs/mac.md) and [docs/nubus_video.md](docs/nubus_video.md))
 - CPU: CPUID, x87/SSE, TSC nanosecond clock, ACPI tables, starting the other processors ([docs/cpu.md](docs/cpu.md))
 - Ring 3 user mode running static Linux i386 programs, with a C SDK (musl) so that C programs can be ported; Lua, SQLite, the Kilo editor, the Tiny C Compiler, dash and GNU make already run, and the OS can compile C itself; there is a terminal (ANSI, termios), a toolbox of shell commands with pipes and redirection, `/proc`, `/dev/fb0` and Linux input events ([docs/userland.md](docs/userland.md)). The text console also works in graphics mode
 - Virtual file tree (initrd, RAM disk `/tmp`, `/dev`, the Mac disk's HFS volume at `/hfs`)
@@ -37,7 +37,7 @@ The long-term vision is simple:
 - Storage: ATA (read/write), AHCI/SATA and NVMe drivers ([docs/storage.md](docs/storage.md))
 - USB: xHCI host controller with HID keyboards and mice, hot plug ([docs/usb.md](docs/usb.md)); the other controllers are listed
 - Multitasking: processes with their own address spaces, `fork`/`execve`/`wait`, pipes, signals, scheduling (cooperative in the kernel, preemptive for user code) ([docs/process.md](docs/process.md))
-- Interrupts through the local APIC and I/O APIC, PCI MSI ([docs/apic.md](docs/apic.md)); Multiboot2 and UEFI boot; big-screen console
+- Interrupts through the local APIC and I/O APIC, PCI MSI ([docs/apic.md](docs/apic.md)); Multiboot2 and UEFI boot (2560x1440 requested at boot); screen modes through the video BIOS's VBE run in an emulated CPU (x86emu) on BIOS boots ([docs/gpu.md](docs/gpu.md)); big-screen console
 - Real hardware: a USB image for the Lenovo ThinkStation P520 with safe mode and diagnostics ([docs/p520.md](docs/p520.md))
 - Audio: Intel HD Audio driver and a streaming sound interface ([docs/sound.md](docs/sound.md))
 - Graphics: Bochs/QEMU VGA mode setting at any resolution ([docs/gpu.md](docs/gpu.md))
@@ -117,10 +117,15 @@ make test-rom MAC_ROM=...        # boots the ROM on the host (skipped without a 
 make test-rom-qemu MAC_ROM=... MAC_DISK=...   # kernel and host must draw the same screen
 ```
 
-`mac 2` (instead of `mac`) shows the Mac enlarged to 1280x960. Details, the
-list of ROM patches and the known limits (no serial or network yet) are in
+The Mac's screen is a virtual NuBus video card: `mac` picks a resolution that
+fills your screen (2560x1440: 1280x720 enlarged 2x); `mac res=1024x768
+scale=1.5` chooses yourself, Ctrl+Alt+PgUp/PgDn/Home change the enlargement
+while it runs, and the Monitors control panel switches depth and resolution
+([docs/nubus_video.md](docs/nubus_video.md)). Details, the list of ROM
+patches and the known limits (no serial or network yet) are in
 [docs/mac.md](docs/mac.md). More local tests: `make test-mac-sound`,
-`make test-mac-clock`, `make test-mac-persist`.
+`make test-mac-clock`, `make test-mac-persist`, `make test-mac-perf`,
+`make mac-uefi-shot`.
 
 ### Porting a C program
 
