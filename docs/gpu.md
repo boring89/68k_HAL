@@ -165,7 +165,7 @@ CSM（傳統 BIOS）：顯示卡的 VBIOS 提供 VBE 模式，GRUB 用 Multiboot
 
 - UEFI 的 GOP 只提供「解析度清單」，沒有更新率可選，而且**只能在開機服務（boot services）期間**呼叫；GRUB 把控制交給 kernel 後就不能再用。GOP 選的時序幾乎都是 60 Hz（EDID 的第一個 detailed timing 或標準模式）。
 - VBE 3.0 的 `4F02h` 可以帶 CRTC 資訊區塊指定時序（refresh rate control），但很多 VBIOS 不支援，而且只到 BIOS／CSM 開機才有。
-- GTX 1070 要 144 Hz、或 UEFI 開機後換解析度，就需要原生 NVIDIA 模式設定（PLL、display engine、HDMI/DP 連結訓練），沒有公開文件、Nouveau 是 GPL-2.0-only，不在範圍內（使用者已同意）。
+- GTX 1070 要 144 Hz、或 UEFI 開機後換解析度，就需要原生 NVIDIA 模式設定（PLL、display engine、VBIOS 腳本、HDMI 2.0 scrambling 或 DP link training），目前不在範圍內。NVIDIA 沒有 Pascal 的顯示暫存器手冊，但 nouveau 需要的檔案是 MIT（逐檔查證見 `docs/nvidia_research.md`）。
 - Mac 自己的時間軸是 60.15 Hz（VIA 的 Ticks），所以 Mac 的畫面更新本來就是 60 次／秒；kernel 每個 Mac frame 畫一次有變動的列。
 
 ## 5. 不做的事
