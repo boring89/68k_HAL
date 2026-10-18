@@ -118,19 +118,26 @@ static void test_damage(void)
     if (dev == NULL)
         return;
 
-    /* A flipped byte in the entry array breaks its CRC. */
+    /* A flipped byte in the primary entry array: the backup table is used. */
     image[2 * 512 + 56] ^= 0x01;
+    TEST_ASSERT_EQ_INT(5, gpt_read(dev, p, GPT_MAX_PARTITIONS));
+    TEST_ASSERT_EQ_STR("68k_HAL Boot", p[0].name);
+
+    /* The backup damaged too: no table. */
+    image[(IMAGE_BLOCKS - 1) * 512 + 40] ^= 0x01;
     TEST_ASSERT_EQ_INT(-1, gpt_read(dev, p, GPT_MAX_PARTITIONS));
     image[2 * 512 + 56] ^= 0x01;
     TEST_ASSERT_EQ_INT(5, gpt_read(dev, p, GPT_MAX_PARTITIONS));
+    image[(IMAGE_BLOCKS - 1) * 512 + 40] ^= 0x01;
 
-    /* A flipped byte in the header breaks the header CRC. */
+    /* A flipped byte in the primary header: the backup again. */
     image[512 + 40] ^= 0x01;
-    TEST_ASSERT_EQ_INT(-1, gpt_read(dev, p, GPT_MAX_PARTITIONS));
+    TEST_ASSERT_EQ_INT(5, gpt_read(dev, p, GPT_MAX_PARTITIONS));
     image[512 + 40] ^= 0x01;
 
-    /* No signature: not an error, just no GPT. */
+    /* No signature in either: not an error, just no GPT. */
     image[512] = 'X';
+    image[(IMAGE_BLOCKS - 1) * 512] = 'X';
     TEST_ASSERT_EQ_INT(0, gpt_read(dev, p, GPT_MAX_PARTITIONS));
 }
 

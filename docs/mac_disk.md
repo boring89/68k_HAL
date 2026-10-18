@@ -33,7 +33,7 @@ sda（GPT，512 位元組的區塊）
 
 - 分割區類型 GUID：ESP `C12A7328-F81F-11D2-BA4B-00A0C93EC93B`；System 與 Applications 用 Apple HFS `48465300-0000-11AA-AA11-00306543ECAC`；疊加層用我們自己定義的 `68AC0001-4F56-4C59-8D1E-68A1D5C0DE01`。kernel 以**分割區名稱**找（`kernel/fs/gpt.h` 的 `GPT_NAME_*`）。
 - 系統映像本身沒有分割表（開頭是 `LK` 開機區塊，HFS 在 1024，見 `docs/mac.md` 第 6 節）；放進 1 GiB 的分割區後，Mac 看到的磁碟大小是 1 GiB，但 HFS 卷宗仍是映像原本的大小（25 MB）。要更大的系統卷宗需要另做一個大的映像。
-- GPT 的解析：`kernel/fs/gpt.c`（UEFI Specification 2.10 第 5.3 節：LBA 1 的標頭、標頭與 entry array 的 CRC-32 都檢查）；`gpt_view_register` 把一個分割區變成一個區塊裝置。
+- GPT 的解析：`kernel/fs/gpt.c`（UEFI Specification 2.10 第 5.3 節：LBA 1 的標頭、標頭與 entry array 的 CRC-32 都檢查；主要的表壞了就用最後一個區塊的備份表——寫入 sda 後 `sgdisk -e` 把它放在那裡）；`gpt_view_register` 把一個分割區變成一個區塊裝置。
 - `kernel/fs/macdisk.c` 在開機時找第一顆有 `68k_HAL System A` 與 `68k_HAL Overlay` 的 GPT 磁碟，建立區塊裝置 `boot`、`sys_a`、`sys_b`、`ovl_store`、`apps`，並開啟疊加層，得到區塊裝置 **`system`**（Mac 的系統碟）。只有這顆磁碟會被寫入，其他磁碟不碰。
 
 ## 3. 疊加層（`kernel/block/overlay.c`）
@@ -135,6 +135,8 @@ kernel：開機成功（設定、磁碟都好了，進入 Mac 或 shell 之前�
 - 新 kernel 當掉或卡住：使用者按 reset，下次開機 trial 已經是空的 → 用舊的 boot_slot。
 - 新 kernel 根本載入不了：GRUB 自己 fallback 到確認過的槽（`Falling back to '68k_HAL (Mac) - the confirmed kernel slot'`）。
 - 選單的「the other kernel slot」只試一次，不會變成確認過的槽。
+- 萬一 GRUB 沒能清掉 trial（`save_env` 失敗），kernel 確認時也會把它清空。
+- 所有寫入都等磁碟確認：ATA 寫完送 FLUSH CACHE（0xE7）、AHCI 送 FLUSH CACHE EXT（0xEA）、NVMe 送 Flush——`block.h` 的「回傳時已在媒體上」，疊加層的斷電安全與 write-through 快取都靠它（P10 D12 檢查過三個驅動都有）。
 - kernel 寫 grubenv 的方法：`kernel/fs/fat.c` 在 FAT32 裡找到 `68k_hal/grubenv` 的磁區，`kernel/fs/grubenv.c` 改內容後**原地覆寫那兩個磁區**（檔案大小固定 1024 位元組，不配置新的叢集，所以不需要完整的 FAT32 寫入）。GRUB 自己的 `save_env` 也是這樣寫。
 - `macsys status` 顯示這次的 kernel 槽、確認過的槽與待試的槽。
 

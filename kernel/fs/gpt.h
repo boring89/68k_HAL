@@ -60,7 +60,8 @@ int gpt_guid_is_zero(const gpt_guid_t *guid);
 
 /*
  * Read the used entries of device's GPT into partitions (room for max).
- * The header signature, header CRC32 and entry array CRC32 are checked.
+ * The header signature, header CRC32 and entry array CRC32 are checked; if
+ * the primary table (LBA 1) is damaged, the backup at the last block is used.
  * Returns the number of used entries (0 if the disk has no GPT), or -1 on
  * an I/O error or a damaged table. More than max used entries are cut.
  */

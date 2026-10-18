@@ -452,12 +452,34 @@ int overlay_rebind(overlay_t *o, block_device_t *base, uint32_t slot)
     uint32_t map_blocks;
     uint32_t data_blocks;
 
-    if (o == NULL || base == NULL || base->block_count > o->base->block_count ||
-        geometry(o->store, base, &map_blocks, &data_blocks) != 0 ||
-        overlay_format(o->store, base, slot) != 0 || overlay_identity(base, slot, &o->id) != 0)
+    if (o == NULL || base == NULL || geometry(o->store, base, &map_blocks, &data_blocks) != 0)
         return -1;
 
-    k_memset(o->map, 0, (size_t)o->base->block_count * 4);
+    /* A bigger base needs a bigger map (allocated before anything on the disk changes). */
+    uint32_t *map = o->map;
+
+    if (base->block_count > o->base->block_count)
+    {
+        map = kmalloc((size_t)base->block_count * 4);
+
+        if (map == NULL)
+            return -1;
+    }
+
+    if (overlay_format(o->store, base, slot) != 0 || overlay_identity(base, slot, &o->id) != 0)
+    {
+        if (map != o->map)
+            kfree(map);
+        return -1;
+    }
+
+    if (map != o->map)
+    {
+        kfree(o->map);
+        o->map = map;
+    }
+
+    k_memset(o->map, 0, (size_t)base->block_count * 4);
     o->base = base;
     o->map_blocks = map_blocks;
     o->data_blocks = data_blocks;

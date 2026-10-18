@@ -101,21 +101,17 @@ int gpt_guid_is_zero(const gpt_guid_t *guid)
     return 1;
 }
 
-int gpt_read(block_device_t *device, gpt_partition_t *partitions, int max)
+/* The table whose header is at header_lba: the number of used entries, -1 if damaged, -2 if there is no header. */
+static int read_table(block_device_t *device, uint64_t header_lba, gpt_partition_t *partitions, int max)
 {
     uint8_t block[GPT_MAX_BLOCK];
     static uint8_t entries[GPT_MAX_ENTRY_BYTES + GPT_MAX_BLOCK];
 
-    if (device == NULL || partitions == NULL || max <= 0 ||
-        device->block_size < 512 || device->block_size > GPT_MAX_BLOCK ||
-        device->block_count < 3)
-        return -1;
-
-    if (block_read(device, 1, 1, block) != 0)
+    if (block_read(device, header_lba, 1, block) != 0)
         return -1;
 
     if (le32(block) != GPT_SIGNATURE_LO || le32(block + 4) != GPT_SIGNATURE_HI)
-        return 0;   /* no GPT */
+        return -2;
 
     uint32_t size = le32(block + HDR_OFFSET_SIZE);
 
@@ -193,6 +189,27 @@ int gpt_read(block_device_t *device, gpt_partition_t *partitions, int max)
     }
 
     return used;
+}
+
+int gpt_read(block_device_t *device, gpt_partition_t *partitions, int max)
+{
+    if (device == NULL || partitions == NULL || max <= 0 ||
+        device->block_size < 512 || device->block_size > GPT_MAX_BLOCK ||
+        device->block_count < 3)
+        return -1;
+
+    /* The primary table, else the backup at the last block (where sgdisk -e puts it). */
+    int primary = read_table(device, 1, partitions, max);
+
+    if (primary >= 0)
+        return primary;
+
+    int backup = read_table(device, device->block_count - 1, partitions, max);
+
+    if (backup >= 0)
+        return backup;
+
+    return primary == -2 && backup == -2 ? 0 : -1;
 }
 
 int gpt_find_by_name(block_device_t *device, const char *name,

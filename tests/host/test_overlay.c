@@ -354,6 +354,38 @@ static void test_rebind(void)
     TEST_ASSERT_EQ_INT(0, base_writes);
 }
 
+/* Rebinding to a bigger base: the map grows with it. */
+static void test_rebind_bigger(void)
+{
+    static uint8_t big_mem[80 * 512];
+    block_device_t big = {"big", 512, 80, &base_ops, big_mem};
+    static uint8_t big_store[40 * 512];
+    block_device_t store = {"store2", 512, 40, &store_ops, big_store};
+    uint8_t data[512];
+    uint8_t back[512];
+
+    setup();
+    memset(big_mem, 0x3C, sizeof big_mem);
+    memset(big_store, 0, sizeof big_store);
+    TEST_ASSERT_EQ_INT(0, overlay_format(&store, &base_dev, 0));
+    block_reset();
+    TEST_ASSERT_EQ_INT(OVERLAY_OK, overlay_open(&ov, "ovl", &base_dev, &store, 0));
+    TEST_ASSERT_EQ_INT(0, overlay_rebind(&ov, &big, 1));
+    TEST_ASSERT_EQ_INT(80, block_device_find("ovl")->block_count);
+
+    pattern(data, 1, 9);
+    TEST_ASSERT_EQ_INT(0, block_write(block_device_find("ovl"), 79, 1, data));
+    TEST_ASSERT_EQ_INT(0, block_read(block_device_find("ovl"), 79, 1, back));
+    TEST_ASSERT(memcmp(back, data, 512) == 0);
+    TEST_ASSERT_EQ_INT(0, block_read(block_device_find("ovl"), 70, 1, back));
+    TEST_ASSERT_EQ_INT(0x3C, back[0]);
+
+    block_reset();
+    TEST_ASSERT_EQ_INT(OVERLAY_OK, overlay_open(&ov, "ovl", &big, &store, 1));
+    TEST_ASSERT_EQ_INT(0, block_read(block_device_find("ovl"), 79, 1, back));
+    TEST_ASSERT(memcmp(back, data, 512) == 0);
+}
+
 int main(void)
 {
     TEST_RUN(test_empty_store);
@@ -365,6 +397,7 @@ int main(void)
     TEST_RUN(test_power_fail);
     TEST_RUN(test_reset_interrupted);
     TEST_RUN(test_rebind);
+    TEST_RUN(test_rebind_bigger);
 
     return TEST_REPORT("overlay");
 }

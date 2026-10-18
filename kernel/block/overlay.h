@@ -101,9 +101,9 @@ int overlay_reset(overlay_t *overlay);
 /*
  * Bind an open overlay to another base (another System slot): the store is
  * formatted for it (whatever the overlay held is gone) and the merged device
- * reads as the new base from now on. The new base must not have more blocks
- * than the old one had (the map is reused). Returns 0, or -1 (the overlay
- * keeps its old base if the store could not be formatted).
+ * reads as the new base from now on (a bigger base gets a bigger map).
+ * Returns 0, or -1 (the overlay keeps its old base if the store could not be
+ * formatted or the map not allocated).
  */
 int overlay_rebind(overlay_t *overlay, block_device_t *base, uint32_t slot);
 

@@ -225,11 +225,14 @@ int macdisk_confirm_kernel_slot(const char *kernel_slot, int confirm)
         return -1;
 
     const char *now = grubenv_get(&env, "boot_slot");
+    const char *trial = grubenv_get(&env, "trial");
 
-    if (now != NULL && k_strcmp(now, kernel_slot) == 0)
+    /* GRUB clears trial itself before booting it; if its save_env failed, clear it here. */
+    if (now != NULL && k_strcmp(now, kernel_slot) == 0 && (trial == NULL || trial[0] == '\0'))
         return 0;
 
-    if (grubenv_set(&env, "boot_slot", kernel_slot) != 0 || macdisk_env_write(&env) != 0)
+    if (grubenv_set(&env, "boot_slot", kernel_slot) != 0 || grubenv_set(&env, "trial", "") != 0 ||
+        macdisk_env_write(&env) != 0)
         return -1;
 
     return 1;

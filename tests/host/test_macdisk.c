@@ -233,6 +233,14 @@ static void test_env_and_confirm(void)
     TEST_ASSERT_EQ_INT(0, macdisk_env_read(&env));
     TEST_ASSERT_EQ_STR("b", grubenv_get(&env, "boot_slot"));
     TEST_ASSERT_EQ_STR("a", grubenv_get(&env, "system_slot"));
+
+    /* GRUB could not clear trial: the confirmation clears it. */
+    TEST_ASSERT_EQ_INT(0, grubenv_set(&env, "trial", "b"));
+    TEST_ASSERT_EQ_INT(0, macdisk_env_write(&env));
+    TEST_ASSERT_EQ_INT(1, macdisk_confirm_kernel_slot("b", 1));
+    TEST_ASSERT_EQ_INT(0, macdisk_env_read(&env));
+    TEST_ASSERT_EQ_STR("", grubenv_get(&env, "trial"));
+    TEST_ASSERT_EQ_STR("b", grubenv_get(&env, "boot_slot"));
 }
 
 static void test_switch_and_promote(void)
