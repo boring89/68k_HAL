@@ -64,6 +64,14 @@ int mac_machine_set_depth(uint32_t bits);
 /* Forget the mode of the last run: the next run starts as the first one did. */
 void mac_machine_forget_mode(void);
 
+/*
+ * The Mac's RAM in MB, from MAC_MACHINE_RAM_MIN_MB to the guest RAM's limit (1024 in the 64-bit kernel,
+ * 256 in the 32-bit one); 0 = the default (128). Takes effect at the next run. Returns -1 for other sizes.
+ */
+#define MAC_MACHINE_RAM_MIN_MB 8u
+int mac_machine_set_ram_mb(uint32_t mb);
+uint32_t mac_machine_ram_mb(void);
+
 /* The number of NuBus video cards: 1 (default) or 2 (a second screen in slot $D, beside the first as the
  * Mac arranges them; 32 MiB more memory). Returns -1 for other numbers. */
 int mac_machine_set_cards(uint32_t cards);

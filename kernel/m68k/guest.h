@@ -21,8 +21,13 @@
 #define M68K_GUEST_RAM_BASE 0x10000000u /* kernel virtual address */
 #endif
 #define M68K_GUEST_RAM_DEFAULT_SIZE (8u * 1024 * 1024)
+#ifdef HAL_PHYS_BASE
+/* 1 GiB: up to the vmap window at 0xFFFFC00080000000 (docs/x86_64.md). */
+#define M68K_GUEST_RAM_MAX_SIZE (1024u * 1024 * 1024)
+#else
 /* 256 MiB: the range 0x10000000-0x1FFFFFFF is reserved for the guest RAM. */
 #define M68K_GUEST_RAM_MAX_SIZE (256u * 1024 * 1024)
+#endif
 
 /*
  * Set the guest RAM size in bytes: a multiple of 4 KiB, at most

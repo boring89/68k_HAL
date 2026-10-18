@@ -234,7 +234,7 @@ static shell_command_entry_t commands[] =
          cmd_cat},
         {COMMAND_MAC,
          "mac",
-         "Run the Macintosh IIci on boot modules mac_rom and mac_disk (` stops): mac [scale=1|1.5|2|auto] [res=WxH] [depth=32] [cards=2] [builtin]",
+         "Run the Macintosh IIci on boot modules mac_rom and mac_disk (` stops): mac [scale=1|1.5|2|auto] [res=WxH] [depth=32] [cards=2] [builtin] [ram=MB]",
          cmd_mac},
         {COMMAND_CPUINFO,
          "cpuinfo",
@@ -1277,11 +1277,23 @@ static void cmd_mac(
     bool builtin = false;
     int bits = 0;
 
+    size_t ram_mb = 0;
+
     mac_machine_set_depth(0);
     mac_machine_set_cards(1);
+
+    /* The memory: ram=MB, else mac_ram of the settings, else the default. */
+    if (config_get("mac_ram") == NULL || parse_size(config_get("mac_ram"), &ram_mb) != 0 ||
+        mac_machine_set_ram_mb((uint32_t)ram_mb) != 0)
+        mac_machine_set_ram_mb(0);
+
     for (int i = 1; i < argc; i++)
     {
         const char *arg = argv[i];
+
+        if (k_strncmp(arg, "ram=", 4) == 0 && parse_size(arg + 4, &ram_mb) == 0 && ram_mb <= 4096 &&
+            mac_machine_set_ram_mb((uint32_t)ram_mb) == 0)
+            continue;
 
         if (k_strncmp(arg, "scale=", 6) == 0)
             arg += 6;
@@ -1306,7 +1318,8 @@ static void cmd_mac(
             halves = (uint32_t)(arg[0] - '0') * 2 + (arg[1] == '.' ? 1 : 0);
         else
         {
-            terminal_write_line("usage: mac [scale=0.5|1|1.5|2|2.5|3|4|auto] [res=WxH|auto] [depth=1|2|4|8|16|32] [cards=1|2] [builtin]");
+            terminal_write_line("usage: mac [scale=0.5|1|1.5|2|2.5|3|4|auto] [res=WxH|auto] [depth=1|2|4|8|16|32] [cards=1|2] [builtin] [ram=MB]");
+            terminal_write_line("  ram: the Mac's memory, 8 to 1024 MB (default 128, or mac_ram of 68k_hal.cfg)");
             terminal_write_line("  res: 640x480 800x600 1024x768 1152x870 1280x720 1280x960 1280x1024 1440x900");
             terminal_write_line("       1600x1200 1920x1080 1920x1200 2560x1440 3840x2160 (default: as the last run ended,");
             terminal_write_line("       the first time the one that fills the screen; res=auto forgets the last one)");

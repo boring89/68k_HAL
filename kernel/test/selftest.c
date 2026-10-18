@@ -18,6 +18,7 @@
 #include "kernel/lib/k_memory.h"
 #include "kernel/lib/k_string.h"
 #include "kernel/m68k/guest.h"
+#include "kernel/mac/machine.h"
 #include "kernel/net/net.h"
 #include "kernel/printf/printf.h"
 #include "kernel/display/text_display.h"
@@ -1012,6 +1013,26 @@ void selftest_abort(void)
     selftest_platform_exit(0);
 }
 
+/* The Mac's memory setting (P10 D4b): 8 MB up to the guest RAM's limit, which can really be mapped. */
+static void test_mac_ram_size(void)
+{
+    SELFTEST_ASSERT(mac_machine_set_ram_mb(4) == -1);
+    SELFTEST_ASSERT(mac_machine_set_ram_mb(M68K_GUEST_RAM_MAX_SIZE / (1024 * 1024) + 1) == -1);
+    SELFTEST_ASSERT(mac_machine_set_ram_mb(M68K_GUEST_RAM_MAX_SIZE / (1024 * 1024)) == 0);
+    SELFTEST_ASSERT(mac_machine_set_ram_mb(8) == 0);
+    SELFTEST_ASSERT(mac_machine_ram_mb() == 8);
+    SELFTEST_ASSERT(mac_machine_set_ram_mb(0) == 0);
+    SELFTEST_ASSERT(mac_machine_ram_mb() == 128);
+
+    /* The largest guest RAM: its last longword is reachable through the VM. */
+    SELFTEST_ASSERT(m68k_guest_set_size(M68K_GUEST_RAM_MAX_SIZE) == 0);
+    SELFTEST_ASSERT(m68k_guest_init() == 0);
+    m68k_vm_write32(M68K_GUEST_RAM_MAX_SIZE - 4, 0x68000030u);
+    SELFTEST_ASSERT(m68k_vm_read32(M68K_GUEST_RAM_MAX_SIZE - 4) == 0x68000030u);
+    SELFTEST_ASSERT(m68k_guest_set_size(M68K_GUEST_RAM_DEFAULT_SIZE) == 0);
+    SELFTEST_ASSERT(m68k_guest_init() == 0);
+}
+
 void selftest_run(void)
 {
     kernel_printf("[TEST] selftest start\n");
@@ -1034,6 +1055,7 @@ void selftest_run(void)
     SELFTEST_RUN(test_usb_storage_disk);
     SELFTEST_RUN(test_usb_hosts);
     SELFTEST_RUN(test_m68k_guest_ram_size);
+    SELFTEST_RUN(test_mac_ram_size);
     SELFTEST_RUN(test_m68k_guest_program);
     SELFTEST_RUN(test_m68k_guest_divide_64);
     SELFTEST_RUN(test_m68k_guest_fline_exception);

@@ -429,6 +429,7 @@ int main(int argc, char **argv)
     const char *disk_path = NULL;
     const char *extra_paths[MAC_MAX_DISKS - 1];
     int nextra = 0;
+    uint32_t ram_size = RAM_SIZE;
     bool disk_read_only = false;
     uint32_t dump[8];
     int ndump = 0;
@@ -455,6 +456,10 @@ int main(int argc, char **argv)
         else if (argv[i][0] == '-' && argv[i][1] == 'm' && i + 1 < argc && ndump < 8)
         {
             dump[ndump++] = strtoul(argv[++i], NULL, 16);
+        }
+        else if (argv[i][0] == '-' && argv[i][1] == 'Z' && i + 1 < argc)
+        {
+            ram_size = (uint32_t)strtoul(argv[++i], NULL, 0) * 1024u * 1024u; /* -Z MB: the Mac's RAM */
         }
         else if (argv[i][0] == '-' && argv[i][1] == 'E' && i + 1 < argc && nextra < MAC_MAX_DISKS - 1)
         {
@@ -663,8 +668,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "unsupported ROM (need Mac IIci 368CADFE)\n");
         return 1;
     }
-    ram = calloc(1, RAM_SIZE);
-    if (ram == NULL || mac_init(&mac, ram, RAM_SIZE, rom, rom_size) != 0)
+    ram = calloc(1, ram_size);
+    if (ram == NULL || mac_init(&mac, ram, ram_size, rom, rom_size) != 0)
     {
         fprintf(stderr, "mac_init failed (ROM size %u)\n", rom_size);
         return 1;

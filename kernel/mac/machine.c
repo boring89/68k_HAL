@@ -36,7 +36,12 @@
 #define ROM_SIZE 0x80000u
 #define VRAM_SIZE 0x80000u
 #define VRAM_BASE 0xFBB08000u       /* where the ROM's tables put the video RAM */
-#define RAM_SIZE (8u * 1024 * 1024)
+#define RAM_FALLBACK_MB 8u        /* used when the memory asked for cannot be had */
+#ifdef KERNEL_MAC_TEST
+#define RAM_DEFAULT_MB 8u           /* the screen CRCs of the tests are taken with 8 MiB, like tools/mac_run */
+#else
+#define RAM_DEFAULT_MB 128u         /* the interactive default (P10 D4b: 8 to 1024 MB all boot) */
+#endif
 #define RTC_START 0xD0000000u       /* a fixed date: seconds since 1904 */
 /*
  * Frames between two redraws: every frame, so the screen follows the Mac at
@@ -169,6 +174,25 @@ static uint32_t want_halves = 0;
 static int want_resolution = -1;
 static bool want_builtin = false;
 static uint32_t want_cards = 1;
+
+static uint32_t want_ram_mb = RAM_DEFAULT_MB;
+
+int mac_machine_set_ram_mb(uint32_t mb)
+{
+    if (mb == 0)
+        mb = RAM_DEFAULT_MB;
+
+    if (mb < MAC_MACHINE_RAM_MIN_MB || (uint64_t)mb * 1024 * 1024 > M68K_GUEST_RAM_MAX_SIZE)
+        return -1;
+
+    want_ram_mb = mb;
+    return 0;
+}
+
+uint32_t mac_machine_ram_mb(void)
+{
+    return want_ram_mb;
+}
 
 int mac_machine_set_cards(uint32_t cards)
 {
@@ -841,12 +865,22 @@ int mac_machine_run(uint32_t frames)
         k_memset(ov->slot, 0, (size_t)ov->blocks * sizeof(uint16_t));
     }
 
-    if (m68k_guest_set_size(RAM_SIZE) != 0 || m68k_guest_init() != 0)
+    uint32_t ram_size = want_ram_mb * 1024u * 1024u;
+
+    /* The memory asked for, or else the minimum: a machine with little RAM still starts the Mac. */
+    if (m68k_guest_set_size(ram_size) != 0 || m68k_guest_init() != 0)
     {
-        kernel_printf("%s\n", "mac: cannot allocate the Mac's RAM");
-        goto out;
+        kernel_printf("mac: cannot allocate %u MB for the Mac's RAM, trying %u MB\n", (unsigned int)want_ram_mb,
+                      (unsigned int)RAM_FALLBACK_MB);
+        ram_size = RAM_FALLBACK_MB * 1024u * 1024u;
+
+        if (m68k_guest_set_size(ram_size) != 0 || m68k_guest_init() != 0)
+        {
+            kernel_printf("%s\n", "mac: cannot allocate the Mac's RAM");
+            goto out;
+        }
     }
-    if (mac_init(mac, (uint8_t *)M68K_GUEST_RAM_BASE, RAM_SIZE, rom,
+    if (mac_init(mac, (uint8_t *)M68K_GUEST_RAM_BASE, ram_size, rom,
                  ROM_SIZE) != 0)
     {
         kernel_printf("%s\n", "mac: cannot start the machine");
