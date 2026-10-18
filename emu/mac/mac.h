@@ -102,7 +102,7 @@ typedef struct
     uint8_t rier;               /* interrupt enable (register 0x13) */
     uint8_t depth;              /* bits 0-2 of register 0x10: 0=1 bpp .. 3=8 bpp */
     uint8_t sense;              /* monitor sense lines reported in bits 3-5 of 0x10 */
-    uint8_t slot_irq;           /* NuBus slot interrupts pending: bit 0 = slot $9 .. bit 5 = $E */
+    uint8_t slot_irq;           /* NuBus slot interrupts pending: bit 0 = slot $9 .. bit 5 = $E (only $C-$E exist on a IIci) */
     uint8_t other[0x20];        /* registers without special behavior */
 } mac_rbv_t;
 
@@ -141,15 +141,18 @@ typedef struct
 
 
 /*
- * The virtual NuBus video card in slot $9 (see nubus_video.c and
+ * The virtual NuBus video card in slot $C (see nubus_video.c and
  * docs/nubus_video.md): its declaration ROM sits at the top of the slot's
- * standard space (0xF9xxxxxx), its video RAM in the slot's super space
- * (0x90000000).
+ * standard space (0xFCxxxxxx), its video RAM in the slot's super space
+ * (0xC0000000). $C is the first of the IIci's three NuBus slots ($C-$E):
+ * the Slot Manager keeps parameter RAM only for those (slot $9 gets
+ * smSlotOOBErr from sPutPRAMRec, ROM 0x40806230).
  */
-#define MAC_CARD_SLOT 9
-#define MAC_CARD_VRAM_BASE 0x90000000u
+#define MAC_CARD_SLOT 0xC
+#define MAC_CARD_VRAM_BASE ((uint32_t)MAC_CARD_SLOT << 28)
 #define MAC_CARD_VRAM_SIZE 0x2000000u          /* 32 MiB: 3840x2160 at 32 bits fits */
-#define MAC_CARD_ROM_END 0xFA000000u            /* the last ROM byte is at 0xF9FFFFFF */
+#define MAC_CARD_ROM_END (0xF1000000u + ((uint32_t)MAC_CARD_SLOT << 24))   /* last ROM byte at 0xFCFFFFFF */
+#define MAC_CARD_SLOT_IRQ (1u << (MAC_CARD_SLOT - 9))   /* the slot's bit in the RBV's slot interrupt flags */
 #define MAC_CARD_ROM_MAX 4096u
 #define MAC_CARD_DIRTY_SHIFT 10                 /* video RAM changes are tracked per KiB */
 #define MAC_CARD_DIRTY_WORDS (MAC_CARD_VRAM_SIZE >> MAC_CARD_DIRTY_SHIFT >> 5)
@@ -371,13 +374,14 @@ uint32_t mac_iwm_access(mac_iwm_t *iwm, uint32_t offset, bool write,
 int mac_sysbeep(mac_t *mac);
 
 /*
- * Plug the NuBus video card into slot $9 (after mac_init, before mac_reset):
+ * Plug the NuBus video card into slot $C (after mac_init, before mac_reset):
  * 'vram' is MAC_CARD_VRAM_SIZE bytes; 'res' indexes mac_card_resolutions and
- * is the resolution the card starts in. With the card the built-in video
+ * is the resolution the card starts in, 'depth' (0-5 = 1, 2, 4, 8, 16, 32
+ * bits) the depth the Mac starts in. With the card the built-in video
  * reports "no monitor" and stays off, so the card is the only screen.
  * Returns 0, or -1 for bad arguments.
  */
-int mac_card_attach(mac_t *mac, uint8_t *vram, uint32_t res);
+int mac_card_attach(mac_t *mac, uint8_t *vram, uint32_t res, uint32_t depth);
 
 /* Native parts of the card's driver (nubus_video.c). */
 void mac_card_open(mac_t *mac);

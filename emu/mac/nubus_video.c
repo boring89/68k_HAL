@@ -12,7 +12,7 @@
 #include "kernel/lib/k_memory.h"
 
 /*
- * A video card for NuBus slot $9 that exists only in software (see
+ * A video card for NuBus slot $C that exists only in software (see
  * docs/nubus_video.md).
  *
  * The Mac learns about a card from its declaration ROM: a list of
@@ -56,6 +56,7 @@ static const uint8_t depth_bits[MAC_CARD_DEPTHS] = {1, 2, 4, 8, 16, 32};
 #define E_BOARD_ID 32
 #define E_VENDOR_INFO 36
 #define E_GAMMA_DIR 64
+#define E_PRAM_INIT 33        /* PRAMInitData: the slot's parameter RAM when it is new (ROM 0x40806202) */
 #define E_VENDOR_ID 1
 #define E_REV_LEVEL 3
 #define E_PART_NUM 4
@@ -248,7 +249,7 @@ static uint32_t build_rom(mac_card_t *card)
 {
     writer_t w = {card->rom, 0};
     uint32_t board_type, board_name, vendor_id, rev_level, part_num, date;
-    uint32_t vendor_info, board, video_type, video_name, driver, driver_dir;
+    uint32_t vendor_info, pram_init, board, video_type, video_name, driver, driver_dir;
     uint32_t gamma, gamma_dir, modes[MAC_CARD_DEPTHS], video, directory;
     uint32_t major_base, major_length;
 
@@ -276,10 +277,23 @@ static uint32_t build_rom(mac_card_t *card)
     entry_offset(&w, E_DATE, date);
     end_of_list(&w);
 
+    /*
+     * The slot's parameter RAM starts from this block (length, two reserved bytes, vendorUse1-6). The
+     * ROM's boot code takes vendorUse1 as the video mode to start in (ROM 0x40800DE0, sReadPRAMRec), so
+     * the card starts in the depth the host chose.
+     */
+    pram_init = w.p;
+    w32(&w, 12);
+    w16(&w, 0);
+    w8(&w, MAC_CARD_MODE_1BIT + card->depth);
+    for (uint32_t i = 0; i < 5; i++)
+        w8(&w, 0);
+
     board = w.p;
     entry_offset(&w, E_TYPE, board_type);
     entry_offset(&w, E_NAME, board_name);
     entry(&w, E_BOARD_ID, BOARD_ID);
+    entry_offset(&w, E_PRAM_INIT, pram_init);
     entry_offset(&w, E_VENDOR_INFO, vendor_info);
     end_of_list(&w);
 
@@ -409,17 +423,17 @@ int mac_card_find_resolution(uint32_t width, uint32_t height)
 }
 
 
-int mac_card_attach(mac_t *mac, uint8_t *vram, uint32_t res)
+int mac_card_attach(mac_t *mac, uint8_t *vram, uint32_t res, uint32_t depth)
 {
     mac_card_t *card = &mac->card;
 
-    if (vram == NULL || res >= mac_card_resolution_count)
+    if (vram == NULL || res >= mac_card_resolution_count || depth > max_depth(res))
         return -1;
 
     k_memset(card, 0, sizeof *card);
     card->vram = vram;
     card->res = card->preferred_res = res;
-    card->depth = card->preferred_depth = 0;
+    card->depth = card->preferred_depth = depth;
     card->rom_size = build_rom(card);
     if (card->rom_size > MAC_CARD_ROM_MAX)
         return -1;
@@ -702,7 +716,7 @@ static int control(mac_t *mac, uint32_t code, uint32_t param, uint32_t dce)
         if (!card->irq_enabled)
         {
             card->irq_pending = false;
-            mac->rbv.slot_irq &= (uint8_t)~(1u << (MAC_CARD_SLOT - 9));
+            mac->rbv.slot_irq &= (uint8_t)~MAC_CARD_SLOT_IRQ;
         }
         return NO_ERR;
     case CSC_SET_DEFAULT_MODE:
@@ -908,7 +922,7 @@ void mac_card_close(mac_t *mac)
 {
     mac->card.irq_enabled = false;
     mac->card.irq_pending = false;
-    mac->rbv.slot_irq &= (uint8_t)~(1u << (MAC_CARD_SLOT - 9));
+    mac->rbv.slot_irq &= (uint8_t)~MAC_CARD_SLOT_IRQ;
 }
 
 
@@ -941,7 +955,7 @@ void mac_card_vblank(mac_t *mac)
     if (mac->card.present && mac->card.irq_enabled)
     {
         mac->card.irq_pending = true;
-        mac->rbv.slot_irq |= (uint8_t)(1u << (MAC_CARD_SLOT - 9));
+        mac->rbv.slot_irq |= (uint8_t)MAC_CARD_SLOT_IRQ;
     }
 }
 
@@ -949,7 +963,7 @@ void mac_card_vblank(mac_t *mac)
 void mac_card_irq_ack(mac_t *mac)
 {
     mac->card.irq_pending = false;
-    mac->rbv.slot_irq &= (uint8_t)~(1u << (MAC_CARD_SLOT - 9));
+    mac->rbv.slot_irq &= (uint8_t)~MAC_CARD_SLOT_IRQ;
 }
 
 

@@ -129,8 +129,11 @@ void kernel_main(void)
 
 #ifdef KERNEL_MAC_TEST
     /* make test-rom-qemu: run the Mac for a fixed time and report the screen. */
+#ifdef KERNEL_MAC_TEST_VIDEO_W
+    hal_framebuffer_set_mode(KERNEL_MAC_TEST_VIDEO_W, KERNEL_MAC_TEST_VIDEO_H);
+#endif
 #ifdef KERNEL_MAC_TEST_SCALE
-    mac_machine_set_scale_halves(KERNEL_MAC_TEST_SCALE);
+    mac_machine_set_scale_halves(KERNEL_MAC_TEST_SCALE * 2);
 #endif
 #ifdef KERNEL_MAC_TEST_WIDTH
     mac_machine_set_resolution(KERNEL_MAC_TEST_WIDTH, KERNEL_MAC_TEST_HEIGHT);

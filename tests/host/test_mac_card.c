@@ -43,7 +43,7 @@ static void setup(uint32_t res)
         vram = calloc(1, MAC_CARD_VRAM_SIZE);
     memset(rom, 0, sizeof rom);
     TEST_ASSERT_EQ_INT(0, mac_init(&mac, ram, RAM_SIZE, rom, ROM_SIZE));
-    TEST_ASSERT_EQ_INT(0, mac_card_attach(&mac, vram, res));
+    TEST_ASSERT_EQ_INT(0, mac_card_attach(&mac, vram, res, 0));
     mac_reset(&mac);
     mac.overlay = false;    /* RAM at 0, for the parameter blocks */
 }
@@ -89,21 +89,21 @@ static void test_declaration_rom(void)
 {
     setup(0);
 
-    /* The format block at the very top of slot $9: byte lanes, test pattern, revision and format. */
-    TEST_ASSERT_EQ_INT(0x0F, rd(0xF9FFFFFFu, 1));
-    TEST_ASSERT_EQ_INT(0, rd(0xF9FFFFFEu, 1));
-    TEST_ASSERT_EQ_INT((int)0x5A932BC7u, (int)rd(0xF9FFFFFAu, 4));
-    TEST_ASSERT_EQ_INT(1, rd(0xF9FFFFF9u, 1));
-    TEST_ASSERT_EQ_INT(1, rd(0xF9FFFFF8u, 1));
+    /* The format block at the very top of slot $C: byte lanes, test pattern, revision and format. */
+    TEST_ASSERT_EQ_INT(0x0F, rd(0xFCFFFFFFu, 1));
+    TEST_ASSERT_EQ_INT(0, rd(0xFCFFFFFEu, 1));
+    TEST_ASSERT_EQ_INT((int)0x5A932BC7u, (int)rd(0xFCFFFFFAu, 4));
+    TEST_ASSERT_EQ_INT(1, rd(0xFCFFFFF9u, 1));
+    TEST_ASSERT_EQ_INT(1, rd(0xFCFFFFF8u, 1));
 
-    uint32_t length = rd(0xF9FFFFF0u, 4);
-    uint32_t base = 0xFA000000u - length;
+    uint32_t length = rd(0xFCFFFFF0u, 4);
+    uint32_t base = 0xFD000000u - length;
 
     TEST_ASSERT(length > 100 && length <= MAC_CARD_ROM_MAX);
-    TEST_ASSERT_EQ_INT((int)crc_of(base, length), (int)rd(0xF9FFFFF4u, 4));
+    TEST_ASSERT_EQ_INT((int)crc_of(base, length), (int)rd(0xFCFFFFF4u, 4));
 
     /* The directory: the board sResource (1), then the video sResource (0x80), then the end. */
-    uint32_t dir = entry_target(0xF9FFFFECu);
+    uint32_t dir = entry_target(0xFCFFFFECu);
 
     TEST_ASSERT_EQ_INT(0x01, rd(dir, 1));
     TEST_ASSERT_EQ_INT(0x80, rd(dir + 4, 1));
@@ -130,14 +130,15 @@ static void test_declaration_rom(void)
         TEST_ASSERT_EQ_INT(mac_nubus_driver_code[i], rd(driver + 4 + i, 1));
 
     /* The ROM is read-only; other slots stay empty. */
-    wr(0xF9FFFFFFu, 1, 0);
-    TEST_ASSERT_EQ_INT(0x0F, rd(0xF9FFFFFFu, 1));
-    TEST_ASSERT_EQ_INT(0, rd(0xFAFFFFFFu, 1));
+    wr(0xFCFFFFFFu, 1, 0);
+    TEST_ASSERT_EQ_INT(0x0F, rd(0xFCFFFFFFu, 1));
+    TEST_ASSERT_EQ_INT(0, rd(0xFBFFFFFFu, 1));
 
     /* Without the card the built-in video sees its 13" monitor; with it, none. */
     TEST_ASSERT_EQ_INT(RBV_SENSE_NONE, (int)((rd(0x50F26010u, 1) >> 3) & 7));
 
-    TEST_ASSERT_EQ_INT(-1, mac_card_attach(&mac, vram, mac_card_resolution_count));
+    TEST_ASSERT_EQ_INT(-1, mac_card_attach(&mac, vram, mac_card_resolution_count, 0));
+    TEST_ASSERT_EQ_INT(-1, mac_card_attach(&mac, vram, 12, 5));     /* 3840x2160 has no 32 bits */
     TEST_ASSERT_EQ_INT(4, mac_card_find_resolution(1280, 720));
     TEST_ASSERT_EQ_INT(-1, mac_card_find_resolution(1280, 721));
 }
@@ -244,9 +245,9 @@ static void test_resolutions(void)
     TEST_ASSERT_EQ_INT((int)MAC_CARD_VRAM_BASE, (int)rd(DCE + 42, 4));
     TEST_ASSERT_EQ_INT((int)(MAC_CARD_RES_ID_BASE + 11), (int)rd(PARAM + 2, 4));
 
-    uint32_t length = rd(0xF9FFFFF0u, 4);
+    uint32_t length = rd(0xFCFFFFF0u, 4);
 
-    TEST_ASSERT_EQ_INT((int)crc_of(0xFA000000u - length, length), (int)rd(0xF9FFFFF4u, 4));
+    TEST_ASSERT_EQ_INT((int)crc_of(0xFD000000u - length, length), (int)rd(0xFCFFFFF4u, 4));
 
     /* cscGetCurMode reports it; an unknown resolution id is refused. */
     TEST_ASSERT_EQ_INT(0, call(false, 10));
@@ -278,20 +279,20 @@ static void test_vblank_interrupt(void)
 {
     setup(0);
 
-    /* Off until the driver opens; then every frame raises slot $9's interrupt (RBV, active low). */
+    /* Off until the driver opens; then every frame raises slot $C's interrupt (RBV, active low). */
     mac_card_vblank(&mac);
-    TEST_ASSERT_EQ_INT(0x01, rd(0x50F26002u, 1) & 0x01);
+    TEST_ASSERT_EQ_INT(0x08, rd(0x50F26002u, 1) & 0x08);
 
     m68k_vm_set_reg(M68K_VM_REG_A0 + 1, DCE);
     mac_card_open(&mac);
     wr(0x50F26013u, 1, 0x80 | 0x02);        /* RBV: enable slot interrupts */
     mac_card_vblank(&mac);
-    TEST_ASSERT_EQ_INT(0x00, rd(0x50F26002u, 1) & 0x01);
+    TEST_ASSERT_EQ_INT(0x00, rd(0x50F26002u, 1) & 0x08);
     TEST_ASSERT(mac_rbv_irq(&mac.rbv));
 
     /* The handler's acknowledge clears it. */
     mac_card_irq_ack(&mac);
-    TEST_ASSERT_EQ_INT(0x01, rd(0x50F26002u, 1) & 0x01);
+    TEST_ASSERT_EQ_INT(0x08, rd(0x50F26002u, 1) & 0x08);
     TEST_ASSERT(!mac_rbv_irq(&mac.rbv));
 
     /* cscSetInterrupt with csMode 1 turns them off. */

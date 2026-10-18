@@ -55,7 +55,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: test-pci-roots test-power usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: test-mac-perf test-pci-roots test-power usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -382,6 +382,21 @@ test-rom-qemu: $(BUILD)/host/mac_run_fast
 	got=$$(sed -n 's/.*mac: screen crc \([0-9A-Fa-f]*\) .*/\1/p' $$out | head -1 | tr 'A-F' 'a-f'); \
 	echo "test-rom-qemu: host crc $$want, kernel crc $$got"; \
 	[ -n "$$want" ] && [ "$$want" = "$$got" ]
+
+# Performance of the Mac on a large screen (local only): QEMU's VGA set to 2560x1440, the NuBus card at
+# 1280x720 enlarged 2x, switched to Millions of colors with the Monitors control panel (frame 3100), 4000
+# frames run flat out. Prints the kernel's figures (frames/s, ms per frame, rows drawn) and leaves a
+# screenshot in build/mac/perf.ppm (tools/mac_perf.py).
+MAC_PERF_FRAMES ?= 4000
+test-mac-perf:
+	@if [ ! -f "$(MAC_ROM)" ] || [ ! -f "$(MAC_DISK)" ]; then \
+		echo "test-mac-perf: SKIP (no ROM or disk; set MAC_ROM and MAC_DISK)"; exit 0; fi; \
+	mkdir -p $(BUILD)/mac; \
+	$(MAKE) --no-print-directory BUILD=$(BUILD)/mac/kernel-perf \
+		EXTRA_CFLAGS="-DKERNEL_MAC_TEST -DKERNEL_MAC_TEST_FRAMES=$(MAC_PERF_FRAMES) -DKERNEL_MAC_TEST_MILLIONS -DKERNEL_MAC_TEST_VIDEO_W=2560 -DKERNEL_MAC_TEST_VIDEO_H=1440 -DKERNEL_MAC_TEST_WIDTH=1280 -DKERNEL_MAC_TEST_HEIGHT=720" \
+		$(BUILD)/mac/kernel-perf/kernel.elf || exit 1; \
+	cp "$(MAC_ROM)" $(BUILD)/mac/rom.bin; cp "$(MAC_DISK)" $(BUILD)/mac/disk.img; \
+	python3 -I tools/mac_perf.py $(BUILD)/mac/kernel-perf/kernel.elf $(BUILD)/mac/rom.bin $(BUILD)/mac/disk.img $(BUILD)/mac/perf.ppm
 
 # The Mac's sound: the system beeps (mac_sysbeep, injected at frame 1200) in the
 # kernel under QEMU with an HDA sound card whose output is recorded; the
