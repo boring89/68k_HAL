@@ -1,6 +1,6 @@
 # eHFS：68k_HAL 的檔案系統
 
-> **狀態（P11 K4，進行中）**：核心已實作（`kernel/fs/ehfs/`）：名稱的比較形式（NFC + 大小寫折疊）、metadata 日誌、bitmap、mkfs、fsck、B-tree、catalog、檔案內容（fork、extent）、延伸屬性；Linux 工具 `mkfs.ehfs`、`fsck.ehfs`、`ehfs-cp`（`make ehfs-tools`）；kernel 掛在檔案樹的 `/ehfs`（11.5 節）。Mac 端（`docs/fsm.md`）接著做。使用者 2026-10-19 決定了第 9 節的 E1–E9，並同意 P11 自動實作、事後審核。第 3–5 節是設計；實作的細節與和設計不同的地方在第 11 節。
+> **狀態（P11 K4，進行中）**：核心已實作（`kernel/fs/ehfs/`）：名稱的比較形式（NFC + 大小寫折疊）、metadata 日誌、bitmap、mkfs、fsck、B-tree、catalog、檔案內容（fork、extent）、延伸屬性；Linux 工具 `mkfs.ehfs`、`fsck.ehfs`、`ehfs-cp`（`make ehfs-tools`）；kernel 掛在檔案樹的 `/ehfs`（11.5 節）；Mac 桌面上的可讀寫卷宗「Data」（P11 K5，`docs/fsm.md` 第 7 節）；68k_HAL 磁碟的資料分割區（`docs/mac_disk.md` 8.5 節）。使用者 2026-10-19 決定了第 9 節的 E1–E9，並同意 P11 自動實作、事後審核。第 3–5 節是設計；實作的細節與和設計不同的地方在第 11 節。
 
 ## 1. 要解決什麼
 
@@ -112,6 +112,7 @@ fork 描述（144 位元組）
 - System 7.5 的 File System Manager（FSM）讓外部的檔案系統以 HFS 呼叫（`PBGetCatInfo`、`PBHOpen`……）的形式出現在 Finder 裡。
 - Mac 的 dirID／fileID 是 32 位元：外掛直接用 CNID 的低 32 位元；CNID 依序配置，40 億個以內不會衝突（超過時的處理見第 9 節）。
 - 卷宗的資料在 HAL 端讀寫（kernel 裡的 eHFS 程式碼），Mac 端的外掛只是轉接：一個模擬 opcode 把參數區塊交給 HAL（和 `.Disk` 驅動相同的手法，`docs/mac.md` 第 6 節）。
+- 實作（P11 K5）：`kernel/mac/fs_ehfs.c`，見 `docs/fsm.md` 第 7 節。第 6 節的名字轉換目前只有 ASCII（Mac Roman 的對照表待決定）：Mac 端看到的非 ASCII 字元是 `_`，`#` 後面是十進位的 CNID（和 HAL 卷宗相同），Mac 給的名字只能是 ASCII。
 
 ## 8. 工具與程式碼的組織
 

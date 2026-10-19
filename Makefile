@@ -55,7 +55,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: ehfs-tools test-ehfs-tools test-ehfs-qemu test-ehfs-unicode test-mac-fsm mac-hidpi-measure mac-esp mac-disk test-macdisk test-mac-disk test-mac-update test-update-script test-mac-remember test-mac-hotkeys test-vbe mac-uefi-shot test-mac-perf test-pci-roots test-power usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: ehfs-tools test-ehfs-tools test-ehfs-qemu test-data-partition test-ehfs-unicode test-mac-fsm mac-hidpi-measure mac-esp mac-disk test-macdisk test-mac-disk test-mac-update test-update-script test-mac-remember test-mac-hotkeys test-vbe mac-uefi-shot test-mac-perf test-pci-roots test-power usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -262,6 +262,7 @@ HOST_LIB_SOURCES := \
 	kernel/keyboard/keychar.c \
 	kernel/keyboard/keyseq.c \
 	kernel/mac/adbkeys.c \
+	kernel/mac/fs_ehfs.c \
 	kernel/mac/pram.c \
 	kernel/mac/rsrc.c \
 	kernel/mac/sysvm.c \
@@ -361,7 +362,8 @@ $(BUILD)/host/mac_run: tools/mac_run.c $(HOST_LIB_OBJECTS) $(BUILD)/host/obj/$(M
 # The same runner without the sanitizers and with optimization, about 10x
 # faster; for long runs of the real ROM.
 MAC_FAST_SOURCES := tools/mac_run.c tools/mac_measure.c $(wildcard emu/mac/*.c) emu/m68k/vm.c kernel/lib/k_string.c \
-	emu/m68k/trap.c kernel/lib/k_memory.c
+	emu/m68k/trap.c kernel/lib/k_memory.c kernel/mac/fs_ehfs.c $(wildcard kernel/fs/ehfs/*.c) kernel/lib/k_crc32c.c \
+	kernel/block/block.c kernel/block/cache.c kernel/memory/heap.c
 $(BUILD)/host/mac_run_fast: $(MAC_FAST_SOURCES) tools/mac_measure.h tools/mac_traps.h $(wildcard emu/mac/*.h) $(wildcard emu/m68k/*.h) $(MUSASHI_GEN)/m68kops.c \
 		$(MUSASHI)/m68kcpu.c $(MUSASHI)/m68kdasm.c $(MUSASHI)/softfloat/softfloat.c
 	mkdir -p $(dir $@)
@@ -697,9 +699,10 @@ mac-disk: mac-esp tools/make_mac_disk.py
 
 # The external file system (docs/fsm.md; local only): a host folder as the Mac's read-only HAL volume in the
 # host runner; the Finder mounts and opens it, a file is copied onto the system disk, SimpleText opens one.
-test-mac-fsm: $(BUILD)/host/mac_run_fast
+# Then an eHFS image as the volume "Data" that the Finder and SimpleText change (checked with the eHFS tools).
+test-mac-fsm: $(BUILD)/host/mac_run_fast $(EHFS_TOOLS)
 	@if [ ! -f "$(MAC_ROM)" ] || [ ! -f "$(MAC_DISK)" ]; then echo "test-mac-fsm: SKIP (no MAC_ROM or MAC_DISK)"; exit 0; fi; \
-	python3 -I tools/mac_fsm_check.py $(BUILD)/host/mac_run_fast "$(MAC_ROM)" "$(MAC_DISK)" $(BUILD)/mac/fsm_test
+	python3 -I tools/mac_fsm_check.py $(BUILD)/host/mac_run_fast "$(MAC_ROM)" "$(MAC_DISK)" $(BUILD)/mac/fsm_test $(EHFS_TOOL_DIR)
 
 # HiDPI measurements (docs/hidpi.md; local only): the host runner plays a typical session
 # (tools/mac_hidpi_session.py) on a 640x480 Millions screen and reports which traps run, which video RAM
@@ -720,20 +723,24 @@ mac-hidpi-measure: $(BUILD)/host/mac_run_fast
 # same image: the parameter RAM of the first boot is kept; the HAL volume opens (H, A, L, Command-O;
 # test_disk_hal.ppm); both folders are there (the HAL's HFS reader,
 # after ` stops the Mac); macsys reset drops the one on the system disk and keeps the one in Applications.
+# The data partition (eHFS) is the Mac's volume "Data": a folder made there in the first boot (D, A,
+# Command-O, Command-N, Command-W) is in /ehfs in the second and in the image (fsck.ehfs, ehfs-cp).
 # A small image (the same layout, smaller partitions).
 MAC_TEST_DISK := $(BUILD)/mac/test_disk.img
 MAC_VM_SYSTEM := $(BUILD)/mac/system_vm_on.img
-test-mac-disk: mac-esp $(BUILD)/host/mac_run_fast
+test-mac-disk: mac-esp $(BUILD)/host/mac_run_fast $(EHFS_TOOLS)
 	@if [ ! -f "$(MAC_DISK)" ]; then echo "test-mac-disk: SKIP (no MAC_DISK)"; exit 0; fi; \
 	$(BUILD)/host/mac_run_fast -F 3000 -t 0 $$(tools/mac_memory_vm.sh) -d "$(MAC_DISK)" -O $(MAC_VM_SYSTEM) \
 		"$(MAC_ROM)" | grep -q "power off" || { echo "test-mac-disk: FAIL: turning virtual memory on"; exit 1; }; \
 	python3 -I tools/make_mac_disk.py --out $(MAC_TEST_DISK) --system $(MAC_VM_SYSTEM) --esp-dir $(MAC_ESP) \
-		--boot-mib 64 --system-mib 64 --overlay-mib 256 --apps-mib 64 || exit 1; \
+		--boot-mib 64 --system-mib 64 --overlay-mib 256 --apps-mib 64 --data-mib 64 --ehfs-tools $(EHFS_TOOL_DIR) || exit 1; \
 	python3 -I tools/mac_disk_check.py --uefi --no-reboot --disk $(MAC_TEST_DISK) --serial-out $(BUILD)/mac/test_disk_1.log \
 		--run "wait:75" "key:a" "wait:2" "key:alt-o" "wait:6" "key:alt-n" "wait:6" "key:alt-w" "wait:4" \
+		"key:d" "key:a" "wait:2" "key:alt-o" "wait:6" "key:alt-n" "wait:6" "key:alt-w" "wait:4" \
 		"key:alt-n" "wait:6" "shot:$(BUILD)/mac/test_disk_1.ppm" "monitor:system_powerdown" "wait:5" "key:ret" "quit" \
 		"expect:autostart: mac" "expect:the Mac OS shut down" "expect:parameter RAM: empty" \
-		"expect:virtual memory was on in the System file" "expect:the HAL volume is mounted" || exit 1; \
+		"expect:virtual memory was on in the System file" "expect:the HAL volume is mounted" \
+		"expect:eHFS: \"Data\" at /ehfs" "expect:the Data volume is mounted" || exit 1; \
 	python3 -I tools/mac_disk_check.py --uefi --no-reboot --disk $(MAC_TEST_DISK) --serial-out $(BUILD)/mac/test_disk_2.log \
 		--run "mark" "wait:75" "shot:$(BUILD)/mac/test_disk_2.ppm" \
 		"key:h" "key:a" "key:l" "wait:1" "key:alt-o" "wait:8" "shot:$(BUILD)/mac/test_disk_hal.ppm" \
@@ -743,7 +750,12 @@ test-mac-disk: mac-esp $(BUILD)/host/mac_run_fast
 		"mark" "shell:mount apps" "shell:ls" "wait:2" "expect-new:untitled folder" \
 		"shell:macsys reset" "wait:3" "expect-new:system overlay is empty" \
 		"mark" "shell:mount system" "shell:ls Desktop Folder" "wait:2" "reject-new:untitled folder" \
-		"mark" "shell:mount apps" "shell:ls" "wait:2" "expect-new:untitled folder" || exit 1; \
+		"mark" "shell:mount apps" "shell:ls" "wait:2" "expect-new:untitled folder" \
+		"mark" "shell:box ls /ehfs" "wait:3" "expect-new:untitled folder" || exit 1; \
+	data=$$(sgdisk -i 6 $(MAC_TEST_DISK) | sed -n 's/^First sector: \([0-9]*\).*/\1/p'); \
+	$(EHFS_TOOL_DIR)/fsck.ehfs --offset $$data $(MAC_TEST_DISK) || exit 1; \
+	$(EHFS_TOOL_DIR)/ehfs-cp --offset $$data $(MAC_TEST_DISK) ls / | grep -q "untitled folder" || \
+		{ echo "test-mac-disk: FAIL: no folder on the data partition"; exit 1; }; \
 	echo "test-mac-disk: PASS"
 
 # Updates without losing anything (docs/mac_disk.md section 8; local only, about 10 minutes):
@@ -794,6 +806,11 @@ test-mac-update: mac-esp
 # grub-editenv and hfsutils. In make test.
 test-update-script: $(BUILD)/images/hfs.img
 	python3 -I tools/update_script_check.py $(BUILD)/update_test $(BUILD)/images/hfs.img
+
+# tools/add_data_partition.sh (the eHFS data partition of a 68k_HAL disk) against small synthetic IMAGES:
+# dry run, the partition added, everything else unchanged, refusals (tools/data_partition_check.py).
+test-data-partition: $(BUILD)/images/hfs.img $(EHFS_TOOLS)
+	python3 -I tools/data_partition_check.py $(BUILD)/data_partition_test $(BUILD)/images/hfs.img $(EHFS_TOOL_DIR)
 
 # Disk images for the host tests, generated by our own scripts.
 $(BUILD)/images/apm.img: tools/make_apm_image.py
@@ -1207,4 +1224,4 @@ test-boundary:
 	done
 	@echo "boundary check: PASS"
 
-test: test-boundary test-host test-ehfs-tools test-qemu test-noapic test-q35 test-usb test-e1000e test-shell test-ehfs-qemu test-macdisk test-update-script test-video test-vbe test-fb test-net test-virtio-net test-pci-roots
+test: test-boundary test-host test-ehfs-tools test-qemu test-noapic test-q35 test-usb test-e1000e test-shell test-ehfs-qemu test-macdisk test-update-script test-data-partition test-video test-vbe test-fb test-net test-virtio-net test-pci-roots

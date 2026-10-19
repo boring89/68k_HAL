@@ -1,6 +1,6 @@
 # File System Manager 外部檔案系統外掛
 
-> **狀態（P11 K3）**：已實作唯讀的版本：HAL 的檔案樹在 Mac 桌面上是一顆唯讀的「HAL」卷宗。第 1–3 節是 P10 的研究筆記（原理），第 4 節起是實作。K5 會接上 eHFS（`docs/ehfs.md`）並加入寫入。
+> **狀態（P11 K3、K5）**：HAL 的檔案樹在 Mac 桌面上是一顆唯讀的「HAL」卷宗（K3）；eHFS 的資料分割區（`docs/ehfs.md`）是可讀寫的「Data」卷宗（K5，第 7 節）。第 1–3 節是 P10 的研究筆記（原理），第 4 節起是實作。
 
 ## 1. 要解決什麼
 
@@ -46,7 +46,7 @@ Basilisk II（`BasiliskII/src/extfs.cpp`）把主機的資料夾變成 Mac 上�
 
 Basilisk II 是 **GPL 第 2 版「或（依你的選擇）任何更新的版本」**（`extfs.cpp` 的標頭；Debian 的 copyright 檔也是 GPL-2+）。和本專案的 GPL-3.0-or-later 相容，可以參考，必要時也可以移植（保留原授權聲明）。但它的資料結構偏向「主機的檔案系統」，eHFS 有自己的 CNID 與 B-tree，**建議只參考流程，自己照 FSM 文件寫**（第 6 節 F1）。
 
-## 4. 本專案的實作（P11 K3）
+## 4. 本專案的實作（P11 K3；寫入見第 7 節）
 
 ```
 Mac（模擬的 68k）                          HAL（x86-64 或 host）
@@ -54,14 +54,15 @@ Mac（模擬的 68k）                          HAL（x86-64 或 host）
     └─ FSM ─► emu/mac/fsm.s 的 hfs／comm 程序（stub 視窗 0x4F000800）
                  │ 模擬 opcode $713B／$713C／$713D／$713E
                  ▼
-              emu/mac/fsm.c：參數區塊 ↔ C、FCB、VCB、路徑解析
-                 │ mac_fs_ops_t（以 ID 為主：get、lookup、child、read）
-                 ▼
-              emu/mac/fs_paths.c：路徑 ↔ ID 的對照（宿主的名字、Mac 的名字）
-                 │ mac_fs_host_t（以路徑為主：entry、stat、read）
-         ┌───────┴────────┐
- kernel/mac/fs_hal.c   tools/mac_run.c -A <資料夾>
-   HAL 的 VFS             host 的一個資料夾
+              emu/mac/fsm.c：參數區塊 ↔ C、FCB、VCB、路徑解析；最多 2 顆卷宗
+                 │ mac_fs_ops_t（以 ID 為主：get、lookup、child、read；
+                 │               volume 與寫入：create、remove、move、set_info、write、set_length）
+         ┌───────┴──────────────────────────────┐
+ emu/mac/fs_paths.c：路徑 ↔ ID（唯讀）      kernel/mac/fs_ehfs.c：eHFS（讀寫，K5）
+         │ mac_fs_host_t（entry、stat、read）       │ kernel/fs/ehfs（ID = CNID）
+ ┌───────┴────────┐                        ┌────────┴─────────┐
+ kernel/mac/fs_hal.c  mac_run -A <資料夾>    kernel：/ehfs 的卷宗   mac_run -e <映像>
+   HAL 的 VFS          host 的一個資料夾
 ```
 
 ### 4.1 登記（`install`）
@@ -70,9 +71,9 @@ Finder 開始執行以後，模型在一個安全的時間點（supervisor、沒
 
 1. Gestalt `'fs  '` 的 bit 2（有 FSM）、`'fsm '` ≥ 1.2。
 2. NewPtrSysClear：外掛的堆疊（16 KiB）與資料區（FSDRec、假磁碟的 DrvSts、VolumeMountInfoHeader、參數區塊、每層呼叫的暫存區）。
-3. AddDrive：一台假的固定磁碟（drive number = 佇列裡最大的再加一，驅動程式是 .Disk，`dsQFSID` = 我們的 FSID `'HH'`）。
+3. AddDrive：每顆卷宗一台假的固定磁碟（drive number = 佇列裡最大的再加一起依序，驅動程式是 .Disk，`dsQFSID` = 我們的 FSID `'HH'`）。
 4. FSMDispatch 0 = InstallFS；設定 HFS component 的 mask（啟用、資源已載入、處理 HFS 呼叫）後 FSMDispatch 5 = SetFSInfo。
-5. HFSDispatch `$41` = PBVolumeMount（media type `'68KH'`）：FSM 先問我們的通訊程序「這是你的嗎」，再呼叫我們的 VolumeMount：UTAllocateVCB → 填 VCB（簽名 `'BD'`、硬體鎖定 `vaHardLock`）→ UTAddNewVCB → PostEvent(diskEvt)，Finder 就在桌面上顯示這顆卷宗。
+5. 每顆卷宗一次 HFSDispatch `$41` = PBVolumeMount（media type `'68KH'`，VolumeMountInfoHeader 後面放卷宗的編號）：FSM 先問我們的通訊程序「這是你的嗎」，再呼叫我們的 VolumeMount：UTAllocateVCB → 填 VCB（簽名 `'BD'`；唯讀的卷宗是硬體鎖定 `vaHardLock`）→ UTAddNewVCB → PostEvent(diskEvt)，Finder 就在桌面上顯示這顆卷宗。之後每個請求依它的 VCB 找到是哪一顆。
 
 **踩過的坑**：注入時如果正好打斷一個進行中的 File Manager 請求，我們的同步呼叫（PBVolumeMount）會排在它後面等它完成，而它永遠不會完成（它在我們底下被暫停了）：Mac 停在手錶游標。所以注入前要確認檔案系統佇列是空的（host 上用 128 MB 加一顆額外磁碟重現、修正；這個檢查也保護 P10 D3 的磁碟掛載）。
 
@@ -99,7 +100,7 @@ C 的處理程式每次 step 都**從頭執行**：已經做過的呼叫直接�
 | GetCatInfo、GetFileInfo（H 與非 H） | 依 ioFDirIndex：< 0 依 ID、0 依名稱、> 0 第幾個（GetFileInfo 只數檔案）。名稱只在依索引或 ID 查時寫回 |
 | Open、OpenDF、OpenRF | 只給讀取：要求寫入的權限回 **permErr**（-54）。實測 SimpleText 收到 permErr 會改用唯讀重開；收到 wPrErr、vLckdErr、wrPermErr 就放棄。UTAllocateFCB 後填 FCB（`fcbFlNm` = 檔案 ID，資料或資源 fork，鎖定） |
 | Read、GetEOF、GetFPos、SetFPos、Close、GetFCBInfo | 位置的四種模式、換行模式（ioPosMode bit 7）、讀到結尾回 eofErr；UTResolveFCB、UTIndexFCB、UTReleaseFCB |
-| Write、Create、Delete、Rename、SetFileInfo、SetCatInfo、DirCreate、CatMove、SetVolInfo、鎖定 | wPrErr（卷宗是鎖定的） |
+| Write、Create、Delete、Rename、SetFileInfo、SetCatInfo、DirCreate、CatMove、SetVolInfo、鎖定 | 唯讀的卷宗：wPrErr（卷宗是鎖定的）；可寫的：第 7 節 |
 | 其他 | paramErr（FSMakeFSSpec 等由 File Manager 自己用上面的呼叫完成） |
 
 路徑解析由 C 自己做：UTDetermineVol 告訴我們卷宗是怎麼指定的（完整路徑、vRefNum、working directory、預設卷宗），得到起點的資料夾；之後 `a:b:c`、`:a`、`::`（上一層）、結尾的 `:`（資料夾本身）照 Inside Macintosh: Files 的規則走。
@@ -109,7 +110,7 @@ C 的處理程式每次 step 都**從頭執行**：已經做過的呼叫直接�
 - 每個 Mac 看過的項目有固定的 ID（從 16 開始，`fsUsrCNID`），表格最多 2048 個；根目錄是 2。
 - 名字：ASCII 照用，`:` 換成 `/`，其他字元換成 `_`；換過字或超過 31 字元的名字以 `#<ID>` 結尾（保持唯一）。`.` 開頭的名字不顯示。完整的 UTF-8 ↔ Mac Roman 在 K4（eHFS）。
 - 檔案類型依副檔名：`.txt`、`.c`、`.h`、`.md`、`.lua` 等是 `TEXT`／`ttxt`（SimpleText 文件），其他是 `????`。宿主的檔案沒有資源 fork（長度 0）。
-- kernel：HAL 的 VFS 整棵樹，頂層的 `dev` 與 `proc` 不給 Mac；`68k_hal.cfg` 的 `mac_hal_volume = off` 關掉。host：`mac_run -A <資料夾>`。
+- kernel：HAL 的 VFS 整棵樹，頂層的 `dev` 與 `proc` 不給 Mac（Data 卷宗給了 Mac 時 `ehfs` 也不給：同一顆卷宗不出現兩次）；`68k_hal.cfg` 的 `mac_hal_volume = off` 關掉。host：`mac_run -A <資料夾>`。
 
 ### 4.5 Desktop Manager（F3）
 
@@ -124,8 +125,8 @@ C 的處理程式每次 step 都**從頭執行**：已經做過的呼叫直接�
 
 ### 4.7 限制
 
-- 唯讀（K5 加寫入）。宿主的檔案沒有資源 fork 與 Finder 資訊（圖示位置由 Finder 決定）。
-- 名字只有 ASCII（K4 之後改成 Mac Roman）。
+- HAL 卷宗唯讀；宿主的檔案沒有資源 fork 與 Finder 資訊（圖示位置由 Finder 決定）。
+- 名字只有 ASCII（Mac Roman 的對照表待決定，`P11_PLAN.md`）。
 - ID 表格最多 2048 個項目，超過的看不到。
 - 一個資料夾的項目每次都從宿主重新列出（大資料夾較慢）。
 
@@ -146,6 +147,49 @@ C 的處理程式每次 step 都**從頭執行**：已經做過的呼叫直接�
 | F2 | FSM 的正式文件 | 沒有 SDK：依 Apple 的 Technote、Q&A 與 Basilisk II 的用法 |
 | F3 | Desktop Manager | 先不支援（第 4.5 節：Finder 照常運作） |
 | F4 | HAL 與 Mac 同時寫同一顆卷宗 | Mac 執行時 HAL 只讀（K5） |
+
+## 7. 可寫的卷宗：eHFS 的「Data」（P11 K5）
+
+### 7.1 後端 `kernel/mac/fs_ehfs.c`
+
+- Mac 的 ID 就是 eHFS 的 CNID（根目錄都是 2；E5 讓 CNID 不超過 2^32）。
+- 名字：eHFS 的 UTF-8 名稱照 4.4 節的規則給 Mac（ASCII 照用、`:` 顯示成 `/`、其他換成 `_`、改過或超過 31 字元的加 `#<CNID>`）。查詢：先把 Mac 的名字換回 eHFS 的名字（`/` → `:`）查，再試結尾的 `#<CNID>`。Mac 建立或改名時給的名字**只接受 ASCII**（其他回 bdNamErr），等 Mac Roman 的對照表決定。
+- Finder 資訊：eHFS catalog 記錄的 32 位元組（FInfo+FXInfo 或 DInfo+DXInfo）；日期：eHFS 的奈秒 ↔ Mac 的 1904 年起的秒（和 Mac 的時鐘一樣用 UTC）；鎖定：記錄的旗標 bit 0。
+- 卷宗的名稱取自 superblock（非 ASCII 換成 `_`，最多 27 字元）；大小與剩餘空間：System 7.5 最多認 2 GB，較大的卷宗顯示成 2 GB（配置區塊從 512 開始加倍，讓區塊數不超過 65535）。
+- 錯誤對照：沒空間 dskFulErr、已存在 dupFNErr、找不到資料夾 dirNFErr、資料夾不是空的 fBsyErr、名字不行 bdNamErr、搬進自己 badMovErr、鎖定 fLckdErr。
+
+### 7.2 fsm.c 的寫入請求
+
+| 請求 | 做法 |
+|---|---|
+| Open／OpenDF／OpenRF | fsCurPerm（0）能寫就給寫；fsWrPerm／fsRdWrPerm（2、3）只能有一個寫的人，第二個得到 opWrErr 與第一個的 refNum；fsRdWrShPerm（4）可以多個共用。唯讀卷宗或鎖定的檔案要求寫入 → permErr。FCB 的 `fcbFlags`：寫入 0x01、資源 fork 0x02、共用寫入 0x10、鎖定 0x20、改過 0x80（Files.h 的 kioFCB…Bit 對應 GetFCBInfo 的 ioFCBFlags 高位元組） |
+| Write | 依 ioPosMode 定位置（從開頭／結尾／目前），每次最多 64 KiB 交給後端；檔案變長時，同一個 fork 所有開著的 FCB 一起更新 EOF；沒有寫入權限 wrPermErr，超過 2 GB dskFulErr |
+| SetEOF、Allocate | SetEOF 改長度並更新所有開著的 FCB；Allocate 直接答應（寫入時才配置） |
+| Create、DirCreate | 路徑的最後一段是新名字，前面的部分照 4.3 節走到資料夾；DirCreate 在 ioDirID 回傳新資料夾的 ID |
+| Delete | 開著的檔案或不是空的資料夾 fBsyErr；鎖定 fLckdErr |
+| Rename、CatMove | 換名字或資料夾，ID 不變；開著的 FCB 的名字／父資料夾一起改。卷宗本身不能改名（GetVolParms 有 kNoVNEdit）。CatMove 的目標是 ioNewName 相對於 ioNewDirID |
+| SetCatInfo、SetFileInfo、SetFilLock／RstFilLock | Finder 資訊、三個日期、鎖定 |
+| SetVolInfo、FlushVol、FlushFile、LockRange／UnlockRange | 答應但不做事（卷宗的日期與 Finder 資訊不保存；寫入是同步的；只有一個使用者） |
+
+- **重播的規則**（4.2 節）在寫入時更重要：對 eHFS 的修改一定放在處理程式**最後一個 trap 呼叫之後**，所以只在最後一次執行時做一次。開著的 FCB 直接從 FCB 緩衝區找（`FCBSPtr` $34E、`FSFCBLen` $3F6，Inside Macintosh: Files 的 File Control Blocks），不必呼叫 trap。
+- **根目錄的父親**：HFS 允許用「父 ID 1 ＋ 卷宗名稱」指根目錄（Finder 的 SetCatInfo 這樣做），4.3 節的路徑解析也處理這種寫法。
+- Finder 在沒有 Desktop Manager 的可寫卷宗上建一個資源檔 `Desktop`（FNDR/ERIK）放圖示等資料，第一次丟垃圾桶時建 `Trash` 資料夾；兩者在 Linux 端看得到。
+
+### 7.3 F4：同時寫入
+
+Mac 執行時，kernel 呼叫 `ehfsfs_set_mac_running(true)`：檔案樹的 `/ehfs` 只能讀（寫入、建立、刪除回 EROFS），Mac 結束後恢復。同一個 `ehfs_t` 由 Mac（經過 FSM）與檔案樹共用；kernel 內不搶佔，兩邊不會同時進到 eHFS 的程式。
+
+### 7.4 測試
+
+- host：`tests/host/test_fs_ehfs.c`（後端：建立、名字的對照與 `#<CNID>`、內容與兩個 fork、Finder 資訊與日期與鎖定、搬移與改名與錯誤、唯讀）。
+- `make test-mac-fsm`（本機，host 上的真 ROM 與 System）：`mac_run -e` 的 eHFS 映像：Command-N 建資料夾並打字改名、Command-D 複製檔案再拖進資料夾、資料夾丟進垃圾桶並清空、SimpleText 打開文字檔、改字、存檔、結束；每一段之後用 `fsck.ehfs`、`ehfs-cp` 檢查映像。
+- `make test-mac-disk`（本機，QEMU + OVMF）：68k_HAL 磁碟帶資料分割區，Mac 在「Data」建資料夾、Shut Down，第二次開機 shell 的 `box ls /ehfs` 看得到，最後 host 的 `fsck.ehfs` 乾淨。
+
+### 7.5 限制
+
+- Mac 給的名字只有 ASCII；卷宗最大顯示 2 GB；檔案最大 2 GB（Mac 的限制）。
+- 卷宗的 Finder 資訊（桌面視窗的位置）不保存（SetVolInfo 不做事）；檔案 ID 參照（ResolveFileIDRef 等）與 CatSearch、ExchangeFiles 不支援（paramErr）。
+- 一個資料夾的項目每次依索引列出時都從頭走（大資料夾較慢）。
 
 ## 參考
 

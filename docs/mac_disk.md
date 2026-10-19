@@ -28,11 +28,12 @@ sda（GPT，512 位元組的區塊）
 ├─ 2. 68k_HAL System A  Apple HFS 類型，1 GiB：Mac 系統映像（使用者的 System7_5_3.img 原樣放在開頭），永遠不修改
 ├─ 3. 68k_HAL System B  Apple HFS 類型，1 GiB：另一個系統槽（一開始是 A 的複本）
 ├─ 4. 68k_HAL Overlay   我們的類型，4 GiB：Mac 對系統碟的寫入
-├─ 5. Applications      Apple HFS 類型，2 GiB：一顆空的 HFS（暫時的；第二階段由 eHFS 取代）
-└─ 剩餘空間             不建立分割區，預留給第二階段的 eHFS
+├─ 5. Applications      Apple HFS 類型，2 GiB：一顆空的 HFS（暫時的；之後可搬進 eHFS）
+└─ 6. 68k_HAL Data      我們的類型，剩下的空間：eHFS（`docs/ehfs.md`；P11）。不在 `make mac-disk` 的映像裡：
+                        寫入磁碟後由 `tools/add_data_partition.sh` 在剩餘空間建立（第 8.5 節）
 ```
 
-- 分割區類型 GUID：ESP `C12A7328-F81F-11D2-BA4B-00A0C93EC93B`；System 與 Applications 用 Apple HFS `48465300-0000-11AA-AA11-00306543ECAC`；疊加層用我們自己定義的 `68AC0001-4F56-4C59-8D1E-68A1D5C0DE01`。kernel 以**分割區名稱**找（`kernel/fs/gpt.h` 的 `GPT_NAME_*`）。
+- 分割區類型 GUID：ESP `C12A7328-F81F-11D2-BA4B-00A0C93EC93B`；System 與 Applications 用 Apple HFS `48465300-0000-11AA-AA11-00306543ECAC`；疊加層用我們自己定義的 `68AC0001-4F56-4C59-8D1E-68A1D5C0DE01`（`4F56 4C59` = "OVLY"），資料分割區 `68AC0002-4441-5441-8D1E-68A1D5C0DE01`（`4441 5441` = "DATA"）。kernel 以**分割區名稱**找（`kernel/fs/gpt.h` 的 `GPT_NAME_*`）。
 - 系統映像本身沒有分割表（開頭是 `LK` 開機區塊，HFS 在 1024，見 `docs/mac.md` 第 6 節）；放進 1 GiB 的分割區後，Mac 看到的磁碟大小是 1 GiB，但 HFS 卷宗仍是映像原本的大小（25 MB）。要更大的系統卷宗需要另做一個大的映像。
 - GPT 的解析：`kernel/fs/gpt.c`（UEFI Specification 2.10 第 5.3 節：LBA 1 的標頭、標頭與 entry array 的 CRC-32 都檢查；主要的表壞了就用最後一個區塊的備份表——寫入 sda 後 `sgdisk -e` 把它放在那裡）；`gpt_view_register` 把一個分割區變成一個區塊裝置。
 - `kernel/fs/macdisk.c` 在開機時找第一顆有 `68k_HAL System A` 與 `68k_HAL Overlay` 的 GPT 磁碟，建立區塊裝置 `boot`、`sys_a`、`sys_b`、`ovl_store`、`apps`，並開啟疊加層，得到區塊裝置 **`system`**（Mac 的系統碟）。只有這顆磁碟會被寫入，其他磁碟不碰。
@@ -97,6 +98,7 @@ kernel ── 設定（第 5 節）── macdisk：GPT → 分割區 → 疊加
 | `mac_video` | `card`、`builtin` | `card` | `builtin` = IIci 內建顯示（640x480） |
 | `mac_ram` | MB，8–1024 | 128 | Mac 的記憶體（32 位元 kernel 最多 256） |
 | `mac_hal_volume` | `on`、`off` | `on` | 把 HAL 的檔案樹當成唯讀的「HAL」卷宗給 Mac（`docs/fsm.md`） |
+| `mac_data_volume` | `on`、`off` | `on` | 把資料分割區（eHFS，shell 的 `/ehfs`）當成可讀寫的卷宗給 Mac；Mac 執行時 `/ehfs` 對 shell 的程式唯讀（`docs/fsm.md` 第 7 節） |
 | `mac_pram` | `on`、`off` | `on` | 保存 Mac 的參數 RAM（第 6.1 節）；`off` = 每次都是新的（P11 以前的行為） |
 | `mac_disk` | `auto`、區塊裝置名稱 | `auto` | `auto` = 68k_HAL 磁碟的 System + Applications；裝置名稱（`disks` 列出）= 整顆當成唯一的磁碟 |
 | `disk_cache` | MB、`auto`、0 | `auto` | 磁碟快取的上限（第 11 節）；`auto` = 可用記憶體的 1/4，最多 8 GiB（32 位元 kernel 32 MB）；0 = 關閉 |
@@ -183,15 +185,27 @@ sudo tools/update_68khal.sh --no-kernel --system new_system.img /dev/sda   # 新
 | 套用 Apple 的更新程式 | 在 Mac 裡執行（寫進疊加層），滿意後 `macsys promote` | 更新在疊加層裡；promote 後在新槽 | 保留 | promote 前：`macsys reset`；promote 後：switch 回舊槽 |
 | 重置系統 | `macsys reset` | 丟棄 | 保留 | — |
 
-參數 RAM（第 6.1 節）在上面的所有情境都保留（它在 Boot 分割區，更新腳本不覆寫它）；只有 `macsys pram reset` 會清掉。
+參數 RAM（第 6.1 節）在上面的所有情境都保留（它在 Boot 分割區，更新腳本不覆寫它）；只有 `macsys pram reset` 會清掉。資料分割區（第 8.5 節）在所有情境都不動。
 
 測試：`make test-mac-update`（本機，約 8 分鐘）：腳本更新 kernel 槽 b → 試開成功並確認、建兩個資料夾 → 腳本放壞的 kernel 到槽 a → GRUB fallback 到 b、資料夾都在 → `macsys promote` → 用 System B 開機、資料夾在 → `macsys switch a`（拒絕）、`switch a force` → System A 開得起來（沒有那個資料夾：它從來沒被寫過）。
 
-## 9. 與第二階段（eHFS）的關係
+### 8.5 資料分割區 `tools/add_data_partition.sh`（P11）
 
-- 剩餘空間不分割：之後加 eHFS 分割區時，在 GPT 加一個 entry 就好，不必移動現有的分割區。
-- 磁碟層（`block_device_t`、`gpt_view_register`）與 .Disk 驅動（4 台磁碟機）都能再加磁碟。
-- Applications 是暫時的 HFS；eHFS 透過 File System Manager 的外部檔案系統外掛給 Mac 用之後，Applications 可以保留當保險或搬過去。
+```bash
+make ehfs-tools                                          # mkfs.ehfs、fsck.ehfs、ehfs-cp（build/host/ehfs/）
+sudo tools/add_data_partition.sh --dry-run /dev/sda      # 先看：分割區的範圍與大小
+sudo tools/add_data_partition.sh /dev/sda                # 剩下的空間全部給它（--size MIB 指定大小，--name 卷宗名稱）
+```
+
+- 在 GPT 的剩餘空間（最大的一段，通常是磁碟的其餘部分）加一個分割區 `68k_HAL Data`（類型 `68AC0002-…`），用 `mkfs.ehfs --device` 做一顆空的 eHFS（卷宗名稱預設 `Data`），再用 `fsck.ehfs` 檢查。**只寫分割表（主要與備份）與新分割區**，其他分割區與位元組不動。
+- 拒絕：不是 68k_HAL 磁碟（沒有 Boot、System A／B）、已經有資料分割區、區塊不是 512 位元組、剩餘空間不到 64 MiB、磁碟上有東西被掛載；寫入真的磁碟需要 root。另寫一支腳本（而不是 `update_68khal.sh` 的子命令），因為它會改分割表，而更新腳本保證絕不改。
+- kernel：開機時找到 eHFS 卷宗就掛在 `/ehfs`（`docs/ehfs.md` 11.5 節，認 superblock，不認名字），Mac 執行時給 Mac 當「Data」卷宗（`docs/fsm.md` 第 7 節）。Ubuntu 端：`fsck.ehfs --device --offset <起始磁區> /dev/sda` 檢查，`ehfs-cp --device --offset …` 複製進出（起始磁區看 `sgdisk -p`）。
+- 測試：`make test-data-partition`（`make test` 裡，只對映像檔）：dry run 不寫、建立後名稱與類型 GUID 正確、eHFS 乾淨、其他位元組不變、`--size`、拒絕的情況。`make test-mac-disk`（本機）的映像用 `make_mac_disk.py --data-mib 64` 直接帶一個資料分割區。
+
+## 9. 與 eHFS 的關係
+
+- 資料分割區在剩餘空間（第 8.5 節），不必移動現有的分割區。
+- Applications 仍是 HFS；eHFS 的「Data」卷宗與它並存。要不要把 Applications 搬進 eHFS（以及疊加層變成 eHFS 檔案，E8）是之後的事。
 
 ## 10. 產生映像與測試
 
@@ -200,10 +214,11 @@ make mac-disk     # build/68k_HAL_mac.img（約 9 GiB 稀疏檔，實際約 63 M
 make test-mac-disk   # 本機：小一號的同樣配置，在 QEMU（q35 + OVMF）跑兩次開機（第 7 節的流程），約 4 分鐘
 make test-mac-update # 本機：更新、試開、退回、promote、switch（第 8 節），約 8 分鐘
 make test-update-script # make test 裡：update_68khal.sh 對合成的小映像（不需要 Mac 的檔案）
+make test-data-partition # make test 裡：add_data_partition.sh 對合成的小映像
 make test-macdisk    # make test 裡：合成的小 GPT 映像（沒有 Mac 系統）接 AHCI，檢查分割區與疊加層
 ```
 
-- `tools/make_mac_disk.py`：用 `sgdisk` 對**映像檔**建 GPT、`mformat`／`mcopy` 做 FAT32、`hformat` 做 Applications；拒絕寫入不是一般檔案的目標（例如 `/dev/sda`）。分割區大小可改：`make mac-disk MAC_DISK_SIZES="--overlay-mib 8192"`。
+- `tools/make_mac_disk.py`：用 `sgdisk` 對**映像檔**建 GPT、`mformat`／`mcopy` 做 FAT32、`hformat` 做 Applications；拒絕寫入不是一般檔案的目標（例如 `/dev/sda`）。分割區大小可改：`make mac-disk MAC_DISK_SIZES="--overlay-mib 8192"`；`--data-mib N` 另加 N MiB 的資料分割區（測試用；預設沒有）。
 - `tools/mac_disk_check.py`：在 QEMU 裡開機、打字、按電源鍵、截圖的腳本工具。
 - 寫入 `sda` 的步驟：`docs/p520.md` 第 7 節。
 
@@ -228,5 +243,4 @@ make test-macdisk    # make test 裡：合成的小 GPT 映像（沒有 Mac 系�
 - 疊加層的資料區不回收：同一個區塊改多次只佔一塊，但「改過的區塊」越來越多時只能 `macsys reset` 或 `macsys promote`。4 GiB 的疊加層對 1 GiB 的系統槽綽綽有餘。
 - Applications 在桌面上的圖示是一般的文件圖示（.Disk 驅動沒有提供磁碟圖示；只影響外觀）。
 - 多顆磁碟都有 68k_HAL 配置時（例如另外插著寫了同一個映像的隨身碟），用的是第一顆找到的。
-- Mac 的 PRAM（控制台的部分設定）每次執行都是新的（`docs/mac.md` 第 14.4 節）。
 - 主機電源鍵：第一次檢查時 kernel 把機器切到 ACPI 模式並使用 SCI 中斷（沒有 AML 直譯器；不明來源的 SCI 連續 64 次就停用中斷、改成輪詢）。只在 QEMU 驗證過。

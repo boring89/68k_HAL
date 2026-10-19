@@ -10,15 +10,19 @@
 #   68k_HAL System B  a copy of System A (the other slot)
 #   68k_HAL Overlay   the Mac's writes to the system disk (empty: the kernel formats it)
 #   Applications      an HFS volume
+#   68k_HAL Data      an eHFS volume (only with --data-mib; on a real disk tools/add_data_partition.sh
+#                     adds it in the free space)
 #
 # Only ever writes the image FILE it is given; refuses block devices.
 #
 # Usage: make_mac_disk.py --out IMAGE --system SYSTEM_IMAGE
 #            [--esp-dir DIR] [--boot-mib N] [--system-mib N] [--overlay-mib N]
-#            [--apps-mib N]
+#            [--apps-mib N] [--data-mib N] [--ehfs-tools DIR]
 #
 # --esp-dir: files copied into the FAT32 partition (mcopy -s). Needs mtools
 # and hfsutils (hformat). The partition table is written with sgdisk.
+# --data-mib: the data partition's size (default 0: none); its volume is made
+# with mkfs.ehfs from --ehfs-tools (default build/host/ehfs).
 
 import argparse
 import os
@@ -35,6 +39,7 @@ ALIGN = MIB
 ESP = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
 APPLE_HFS = "48465300-0000-11AA-AA11-00306543ECAC"
 OVERLAY = "68AC0001-4F56-4C59-8D1E-68A1D5C0DE01"
+DATA = "68AC0002-4441-5441-8D1E-68A1D5C0DE01"
 
 # Fixed partition GUIDs, so the same inputs give the same image.
 UNIQUE = {
@@ -43,6 +48,7 @@ UNIQUE = {
     "sysb": "68AC1001-0000-4000-8000-000000000003",
     "ovl": "68AC1001-0000-4000-8000-000000000004",
     "apps": "68AC1001-0000-4000-8000-000000000005",
+    "data": "68AC1001-0000-4000-8000-000000000006",
 }
 DISK_GUID = "68AC1001-0000-4000-8000-000000000000"
 
@@ -97,6 +103,8 @@ def main():
     ap.add_argument("--system-mib", type=int, default=1024)
     ap.add_argument("--overlay-mib", type=int, default=4096)
     ap.add_argument("--apps-mib", type=int, default=2048)
+    ap.add_argument("--data-mib", type=int, default=0)
+    ap.add_argument("--ehfs-tools", default="build/host/ehfs")
     args = ap.parse_args()
 
     if os.path.exists(args.out) and not stat.S_ISREG(os.stat(args.out).st_mode):
@@ -109,6 +117,8 @@ def main():
         ("ovl", "68k_HAL Overlay", OVERLAY, args.overlay_mib * MIB),
         ("apps", "Applications", APPLE_HFS, args.apps_mib * MIB),
     ]
+    if args.data_mib > 0:
+        parts.append(("data", "68k_HAL Data", DATA, args.data_mib * MIB))
 
     offset = ALIGN
     layout = []
@@ -143,6 +153,11 @@ def main():
             else:
                 continue
             copy_sparse(part, img, off, size)
+
+    for key, name, ptype, off, size in layout:
+        if key == "data":
+            run([os.path.join(args.ehfs_tools, "mkfs.ehfs"), "-L", "Data", "--offset", str(off // SECTOR),
+                 "--sectors", str(size // SECTOR), args.out], stdout=subprocess.DEVNULL)
 
 
 main()

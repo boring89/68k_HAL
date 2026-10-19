@@ -14,6 +14,6 @@
  * emu/mac/fs_paths.c. /dev and /proc are left out. NULL if there is no
  * memory for it.
  */
-const mac_fs_ops_t *mac_fs_hal(void);
+const mac_fs_ops_t *mac_fs_hal(bool leave_out_ehfs);
 
 #endif

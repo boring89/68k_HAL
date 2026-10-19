@@ -23,6 +23,8 @@
  *        calls into QuickDraw, fonts; tools/mac_measure.c, docs/hidpi.md) and write the report there
  *   -A   folder: show this host folder to the Mac as a read-only volume "HAL" (the external file
  *        system, emu/mac/fsm.c, as the kernel shows its own files; mounted once the Finder runs)
+ *   -e   image[@sector]: show the eHFS volume of this image file (at that sector) to the Mac as a
+ *        volume it reads and writes (kernel/mac/fs_ehfs.c; after -A's volume when both are given)
  *   -X   file: the parameter RAM (256 bytes): read from the file at the start if it exists, written at the end
  *        (like 68k_hal/pram on a 68k_HAL disk, kernel/mac/pram.h)
  *   -p   write the screen as a PPM image at the end
@@ -66,6 +68,7 @@
 #include "emu/m68k/vm.h"
 #include "emu/mac/fs_paths.h"
 #include "emu/mac/mac.h"
+#include "kernel/mac/fs_ehfs.h"
 #include "mac_measure.h"
 #include "third_party/musashi/m68k.h"
 
@@ -261,6 +264,61 @@ static bool want_log;
 static const char *measure_path;    /* -H */
 static const char *host_folder;     /* -A */
 static mac_fs_paths_t host_volume;
+static const char *ehfs_image;      /* -e */
+static int ehfs_fd = -1;
+static ehfs_t ehfs_volume;
+static mac_fs_ehfs_t ehfs_mac;
+
+/* -e: the image file as a device of 512-byte sectors */
+static int image_read(block_device_t *d, uint64_t lba, uint32_t count, void *buffer)
+{
+    (void)d;
+    return pread(ehfs_fd, buffer, (size_t)count * 512, (off_t)(lba * 512)) == (ssize_t)count * 512 ? 0 : -1;
+}
+
+static int image_write(block_device_t *d, uint64_t lba, uint32_t count, const void *buffer)
+{
+    (void)d;
+    return pwrite(ehfs_fd, buffer, (size_t)count * 512, (off_t)(lba * 512)) == (ssize_t)count * 512 ? 0 : -1;
+}
+
+static const block_ops_t image_ops = {image_read, image_write};
+static block_device_t image_device = {"image", 512, 0, &image_ops, NULL};
+
+static uint64_t ehfs_clock(void)
+{
+    return (uint64_t)(0xD0000000u - 2082844800u) * 1000000000u;     /* the Mac's fixed date (rtc_seconds) */
+}
+
+/* Open and mount the -e volume; 0, or -1 after saying why. */
+static int ehfs_attach(mac_t *mac)
+{
+    char path[1024];
+    uint64_t sector = 0;
+    const char *at = strrchr(ehfs_image, '@');
+
+    snprintf(path, sizeof path, "%.*s", at != NULL ? (int)(at - ehfs_image) : (int)strlen(ehfs_image), ehfs_image);
+    if (at != NULL)
+        sector = strtoull(at + 1, NULL, 0);
+    ehfs_fd = open(path, O_RDWR);
+    if (ehfs_fd < 0)
+    {
+        printf("mac: cannot open the eHFS image %s\n", path);
+        return -1;
+    }
+    image_device.block_count = (uint64_t)lseek(ehfs_fd, 0, SEEK_END) / 512;
+
+    int r = ehfs_mount(&ehfs_volume, &image_device, sector, false);
+
+    if (r != EHFS_OK)
+    {
+        printf("mac: the eHFS volume of %s cannot be mounted (%d)\n", path, r);
+        return -1;
+    }
+    mac_fs_ehfs_init(&ehfs_mac, &ehfs_volume, ehfs_clock);
+    mac_fsm_attach(mac, &ehfs_mac.ops);
+    return 0;
+}
 
 /* -A: the host folder for emu/mac/fs_paths.c */
 static void host_path(char *out, size_t size, const char *path)
@@ -711,6 +769,10 @@ int main(int argc, char **argv)
         {
             host_folder = argv[++i];
         }
+        else if (argv[i][0] == '-' && argv[i][1] == 'e' && i + 1 < argc)
+        {
+            ehfs_image = argv[++i];
+        }
         else if (argv[i][0] == '-' && argv[i][1] == 'X' && i + 1 < argc)
         {
             xpram_path = argv[++i];
@@ -876,6 +938,8 @@ int main(int argc, char **argv)
         mac_fs_paths_init(&host_volume, &host_ops, "HAL");
         mac_fsm_attach(&mac, &host_volume.ops);
     }
+    if (ehfs_image != NULL && ehfs_attach(&mac) != 0)
+        return 1;
     if (xpram_path != NULL)
     {
         FILE *xf = fopen(xpram_path, "rb");
@@ -961,10 +1025,19 @@ int main(int argc, char **argv)
                 break;
             }
         }
-        if (host_folder != NULL)
+        for (uint32_t v = 0; v < mac.fsm.volumes; v++)
+            printf("mac: volume \"%s\": install result %d, %s, drive %d\n", mac.fsm.volume[v].ops->volume_name,
+                   mac.fsm.volume[v].mount_error != 0 ? mac.fsm.volume[v].mount_error : mac.fsm.install_error,
+                   mac.fsm.volume[v].mounted ? "mounted" : "not mounted", mac.fsm.volume[v].drive);
+        if (ehfs_image != NULL)
         {
-            printf("mac: host volume: install result %d, %s, drive %d, %u requests\n", mac.fsm.install_error,
-                   mac.fsm.mounted ? "mounted" : "not mounted", mac.fsm.drive, mac.fsm.requests);
+            ehfs_unmount(&ehfs_volume);
+            fsync(ehfs_fd);
+            close(ehfs_fd);
+        }
+        if (mac.fsm.volumes > 0)
+        {
+            printf("mac: %u file system requests\n", mac.fsm.requests);
             if (show_xpram)     /* -r: also the last requests */
             {
                 uint32_t n = mac.fsm.requests < 64 ? mac.fsm.requests : 64;

@@ -51,9 +51,11 @@
 #define BLOCK 512u                  /* reported allocation block size */
 
 #define PENDING 0x7FFF              /* not an OSErr: the handler waits for a trap call */
+#define COPY_CHUNK 65536u           /* bytes of a Read or Write passed to the host at a time */
 
 /* Errors (Inside Macintosh: Files) */
 #define NO_ERR 0
+#define DSK_FUL_ERR (-34)
 #define NSV_ERR (-35)
 #define BD_NAM_ERR (-37)
 #define FN_OPN_ERR (-38)
@@ -61,20 +63,25 @@
 #define POS_ERR (-40)
 #define FNF_ERR (-43)
 #define WPR_ERR (-44)
+#define FLCKD_ERR (-45)
+#define FBSY_ERR (-47)
+#define OP_WR_ERR (-49)
 #define PARAM_ERR (-50)
 #define PERM_ERR (-54)
 #define RF_NUM_ERR (-51)
 #define EXT_FS_ERR (-58)
+#define WR_PERM_ERR (-61)
 #define DIR_NF_ERR (-120)
+#define BAD_MOV_ERR (-122)
 #define FSM_UNKNOWN_MESSAGE (-438)
 #define AFP_ITEM_NOT_FOUND (-5012)
 
 /* The plug-in's block in the system heap. */
 #define DATA_FSD 0u                 /* FSDRec, 196 bytes */
-#define DATA_DRIVE 200u             /* DrvSts, 30 bytes; the drive queue element starts at +6 */
-#define DATA_VMI 232u               /* VolumeMountInfoHeader, 8 bytes */
-#define DATA_PB 240u                /* the parameter block of PBVolumeMount */
-#define DATA_SCRATCH 384u           /* per frame: MAC_FSM_CALLS slots of SLOT bytes for the calls' outputs */
+#define DATA_DRIVE 200u             /* per volume, 32 apart: DrvSts, 30 bytes; the drive queue element starts at +6 */
+#define DATA_VMI (DATA_DRIVE + MAC_FSM_VOLUMES * 32u)   /* per volume: VolumeMountInfoHeader, then our index (8 bytes) */
+#define DATA_PB (DATA_VMI + MAC_FSM_VOLUMES * 8u)       /* the parameter block of PBVolumeMount, 144 bytes */
+#define DATA_SCRATCH (DATA_PB + 144u)   /* per frame: MAC_FSM_CALLS slots of SLOT bytes for the calls' outputs */
 #define SLOT 64u
 #define DATA_ARGS (DATA_SCRATCH + MAC_FSM_FRAMES * MAC_FSM_CALLS * SLOT)
 #define ARGS_MAX 32u
@@ -139,6 +146,8 @@
 #define IO_FL_XFNDR_INFO 84
 #define IO_FL_PAR_ID 100
 #define IO_FL_CLP_SIZ 104
+#define IO_NEW_NAME 28              /* CatMove */
+#define IO_NEW_DIR_ID 36
 #define IO_WD_INDEX 26
 #define IO_WD_PROC_ID 28
 #define IO_WD_VREFNUM 32
@@ -182,8 +191,18 @@
 #define FCB_DIR_ID 58
 #define FCB_CNAME 62
 #define FCB_SIZE 94
+/* fcbFlags (the high byte of GetFCBInfo's ioFCBFlags: kioFCBWriteBit 8 ... kioFCBModifiedBit 15 in Files.h) */
+#define FCB_WRITE 0x01
 #define FCB_RESOURCE 0x02
+#define FCB_SHARED_WRITE 0x10
 #define FCB_FILE_LOCKED 0x20
+#define FCB_MODIFIED 0x80
+
+/* The FCB buffer: FCBSPtr points to it, its first word is its length, the FCBs follow (a file's
+ * reference number is its FCB's offset in the buffer); FSFCBLen is the length of one (Inside
+ * Macintosh: Files, "File Control Blocks"; the FCBSPtr and FSFCBLen addresses: SysEqu.a). */
+#define LM_FCBS_PTR 0x34Eu
+#define LM_FCB_LEN 0x3F6u
 
 /* VCB */
 #define VCB_SIG_WORD 8
@@ -252,6 +271,8 @@
 #define SEL_GET_EOF 0xA011
 #define SEL_SET_EOF 0xA012
 #define SEL_FLUSH_VOL 0xA013
+#define SEL_LOCK_RANGE 0x0010
+#define SEL_UNLOCK_RANGE 0x0011
 #define SEL_GET_VOL 0xA014
 #define SEL_SET_VOL 0xA015
 #define SEL_EJECT 0xA017
@@ -308,6 +329,7 @@ typedef struct
     mac_fsm_t *fs;
     mac_fsm_frame_t *f;
     uint32_t depth;
+    mac_fsm_volume_t *v;        /* the request's volume */
 } ctx_t;
 
 /* ---- Mac memory ---- */
@@ -554,7 +576,7 @@ static int ut_simple32(ctx_t *x, uint32_t selector, uint32_t value)
 
 static int get_item(ctx_t *x, uint32_t id, mac_fs_item_t *item)
 {
-    const mac_fs_ops_t *ops = x->fs->ops;
+    const mac_fs_ops_t *ops = x->v->ops;
 
     return ops->get(ops->ctx, id, item);
 }
@@ -623,7 +645,7 @@ static int start_dir(ctx_t *x, uint32_t pb, uint32_t dir_id, bool hide_name, uin
  */
 static int walk(ctx_t *x, uint32_t dir, const uint8_t *name, uint32_t length, mac_fs_item_t *item)
 {
-    const mac_fs_ops_t *ops = x->fs->ops;
+    const mac_fs_ops_t *ops = x->v->ops;
     uint32_t i = 0;
     bool has_colon = false;
     mac_fs_item_t cur;
@@ -642,6 +664,32 @@ static int walk(ctx_t *x, uint32_t dir, const uint8_t *name, uint32_t length, ma
     else if (length > 0 && name[0] == ':')
     {
         i = 1;
+    }
+    if (dir == MAC_FS_ROOT_PARENT)
+    {
+        /* The root's parent (fsRtParID) holds one item: the root, called by the volume's name. */
+        uint32_t j = i;
+
+        while (j < length && name[j] != ':')
+            j++;
+        if (get_item(x, MAC_FS_ROOT_ID, &cur) != 0)
+            return DIR_NF_ERR;
+        if (j - i != cur.name[0])
+            return j < length ? DIR_NF_ERR : FNF_ERR;
+        for (uint32_t k = 0; k < j - i; k++)
+        {
+            uint8_t a = name[i + k], b = cur.name[1 + k];
+
+            if ((a >= 'a' && a <= 'z' ? a - 32 : a) != (b >= 'a' && b <= 'z' ? b - 32 : b))
+                return j < length ? DIR_NF_ERR : FNF_ERR;
+        }
+        if (j >= length - 1)
+        {
+            *item = cur;
+            return NO_ERR;
+        }
+        i = j + 1;
+        dir = MAC_FS_ROOT_ID;
     }
     if (get_item(x, dir, &cur) != 0 || !cur.is_dir)
         return DIR_NF_ERR;
@@ -716,7 +764,7 @@ static void fill_info(ctx_t *x, uint32_t pb, const mac_fs_item_t *it, bool write
     if (write_name && ptr != 0)
         wr_pstring(x, ptr, it->name, 32);
     wr16(x, pb + IO_REFNUM, 0);
-    wr8(x, pb + IO_FL_ATTRIB, it->is_dir ? 0x10 : 0);
+    wr8(x, pb + IO_FL_ATTRIB, it->is_dir ? 0x10 : (it->locked ? 0x01 : 0));     /* ioFlAttrib: bit 4 folder, bit 0 locked */
     wr8(x, pb + IO_ACUSER, 0);
     wr_bytes(x, pb + IO_FL_FNDR_INFO, it->finfo, 16);
     wr32(x, pb + IO_DIR_ID, it->id);
@@ -744,11 +792,109 @@ static void fill_info(ctx_t *x, uint32_t pb, const mac_fs_item_t *it, bool write
         wr32(x, pb + IO_FL_CLP_SIZ, 0);
 }
 
+/* ---- The volume ---- */
+
+/* What the Mac is told about a volume's size and contents. */
+typedef struct
+{
+    uint32_t block_size;        /* allocation blocks: at most 65535 of them cover the volume (up to 2 GB) */
+    uint32_t blocks, free_blocks;
+    uint32_t files, folders;
+    bool locked;
+} geometry_t;
+
+static void geometry(ctx_t *x, geometry_t *g)
+{
+    const mac_fs_ops_t *ops = x->v->ops;
+    mac_fs_volume_t info;
+    mac_fs_item_t it;
+
+    if (ops->volume == NULL || ops->volume(ops->ctx, &info) != 0)
+    {
+        /* Counted from the root folder: a read-only volume of unknown size. */
+        g->block_size = BLOCK;
+        g->blocks = 0xFFFF;
+        g->free_blocks = 0;
+        g->files = g->folders = 0;
+        for (uint32_t i = 1; ops->child(ops->ctx, MAC_FS_ROOT_ID, i, &it) == 0; i++)
+            (*(it.is_dir ? &g->folders : &g->files))++;
+        g->locked = true;
+        return;
+    }
+
+    /* System 7.5 knows volumes of up to 2 GB: a larger one is shown as 2 GB. */
+    uint64_t total = info.total_bytes < 0x80000000u ? info.total_bytes : 0x80000000u;
+    uint64_t free = info.free_bytes < total ? info.free_bytes : total;
+
+    g->block_size = BLOCK;
+    while (total / g->block_size > 0xFFFF)
+        g->block_size *= 2;
+    g->blocks = (uint32_t)(total / g->block_size);
+    g->free_blocks = (uint32_t)(free / g->block_size);
+    g->files = info.files;
+    g->folders = info.folders;
+    g->locked = info.read_only || ops->create == NULL;
+}
+
+/* After a change: the free space and counts in the VCB, which some code reads directly. */
+static void refresh_vcb(ctx_t *x)
+{
+    geometry_t g;
+
+    geometry(x, &g);
+    wr16(x, x->v->vcb + VCB_FREE_BKS, g.free_blocks);
+    wr32(x, x->v->vcb + VCB_FIL_CNT, g.files);
+    wr32(x, x->v->vcb + VCB_DIR_CNT, g.folders);
+}
+
+static bool writable(ctx_t *x)
+{
+    geometry_t g;
+
+    geometry(x, &g);
+    return !g.locked;
+}
+
+/*
+ * The next FCB of ours after fcb (0: the first) that is open on file id: its
+ * data fork (fork 0), resource fork (1) or either (-1). 0 when there is none.
+ */
+static uint32_t next_fcb(ctx_t *x, uint32_t fcb, uint32_t id, int fork)
+{
+    uint32_t base = rd32(x, LM_FCBS_PTR), length = rd16(x, LM_FCB_LEN);
+
+    if (base == 0 || length == 0)
+        return 0;
+
+    uint32_t end = base + rd16(x, base);
+
+    for (fcb = fcb == 0 ? base + 2 : fcb + length; fcb + length <= end; fcb += length)
+    {
+        if (rd32(x, fcb + FCB_FL_NM) != id || rd32(x, fcb + FCB_VPTR) != x->v->vcb)
+            continue;
+        if (fork < 0 || ((rd8(x, fcb + FCB_FLAGS) & FCB_RESOURCE) != 0) == (fork == 1))
+            return fcb;
+    }
+    return 0;
+}
+
+/* Every open FCB of a fork gets its new length (marks past it move back to it). */
+static void set_fcb_eofs(ctx_t *x, uint32_t id, int fork, uint32_t eof)
+{
+    for (uint32_t fcb = next_fcb(x, 0, id, fork); fcb != 0; fcb = next_fcb(x, fcb, id, fork))
+    {
+        wr32(x, fcb + FCB_EOF, eof);
+        wr32(x, fcb + FCB_PLEN, physical(eof));
+        if (rd32(x, fcb + FCB_CRPS) > eof)
+            wr32(x, fcb + FCB_CRPS, eof);
+    }
+}
+
 /* ---- The HFS component's requests ---- */
 
 static int do_get_cat_info(ctx_t *x, uint32_t pb)
 {
-    const mac_fs_ops_t *ops = x->fs->ops;
+    const mac_fs_ops_t *ops = x->v->ops;
     int16_t index = (int16_t)rd16(x, pb + IO_FDIR_INDEX);
     mac_fs_item_t it;
     int r;
@@ -780,7 +926,7 @@ static int do_get_cat_info(ctx_t *x, uint32_t pb)
 
 static int do_get_file_info(ctx_t *x, uint32_t pb, bool hfs)
 {
-    const mac_fs_ops_t *ops = x->fs->ops;
+    const mac_fs_ops_t *ops = x->v->ops;
     int16_t index = (int16_t)rd16(x, pb + IO_FDIR_INDEX);
     uint32_t dir_id = hfs ? rd32(x, pb + IO_DIR_ID) : 0;
     mac_fs_item_t it;
@@ -824,13 +970,36 @@ static int do_open(ctx_t *x, uint32_t pb, uint32_t vcb, bool hfs, bool resource_
         return r;
     if (it.is_dir)
         return FNF_ERR;
+
     /*
-     * Read-only: fsCurPerm (0) and fsRdPerm (1) only. A request to write gets permErr, as for a file
+     * Permissions: fsCurPerm 0 (write if possible), fsRdPerm 1, fsWrPerm 2, fsRdWrPerm 3, fsRdWrShPerm
+     * 4 (shared). On a read-only volume or a locked file a request to write gets permErr, as for a file
      * the user may not change: SimpleText then opens it again for reading (it gives up after wPrErr,
-     * vLckdErr or wrPermErr; tried on System 7.5.3).
+     * vLckdErr or wrPermErr; tried on System 7.5.3). One writer at a time (unless all share): another
+     * gets opWrErr and the writer's reference number.
      */
-    if (rd8(x, pb + IO_PERMSSN) > 1)
+    uint32_t permission = rd8(x, pb + IO_PERMSSN);
+    bool can_write = writable(x) && !it.locked;
+    bool write = permission >= 2 || (permission == 0 && can_write);
+    bool shared = permission == 4;
+
+    if (write && !can_write)
         return PERM_ERR;
+    for (uint32_t other = next_fcb(x, 0, it.id, resource_fork ? 1 : 0); write && other != 0;
+         other = next_fcb(x, other, it.id, resource_fork ? 1 : 0))
+    {
+        uint32_t flags = rd8(x, other + FCB_FLAGS);
+
+        if (!(flags & FCB_WRITE) || (shared && (flags & FCB_SHARED_WRITE)))
+            continue;
+        if (permission == 0)
+        {
+            write = false;      /* fsCurPerm: read only, then */
+            break;
+        }
+        wr16(x, pb + IO_REFNUM, other - rd32(x, LM_FCBS_PTR));
+        return OP_WR_ERR;
+    }
 
     uint32_t s = slot(x), d0;
     trap_call_t c = ut(UT_ALLOCATE_FCB);
@@ -846,7 +1015,8 @@ static int do_open(ctx_t *x, uint32_t pb, uint32_t vcb, bool hfs, bool resource_
 
     wr_zero(x, fcb, FCB_SIZE);
     wr32(x, fcb + FCB_FL_NM, it.id);
-    wr8(x, fcb + FCB_FLAGS, (resource_fork ? FCB_RESOURCE : 0) | FCB_FILE_LOCKED);
+    wr8(x, fcb + FCB_FLAGS, (resource_fork ? FCB_RESOURCE : 0) | (write ? FCB_WRITE : 0) |
+                                (write && shared ? FCB_SHARED_WRITE : 0) | (can_write ? 0 : FCB_FILE_LOCKED));
     wr32(x, fcb + FCB_EOF, length);
     wr32(x, fcb + FCB_PLEN, physical(length));
     wr32(x, fcb + FCB_CRPS, 0);
@@ -898,7 +1068,7 @@ static int64_t position(ctx_t *x, uint32_t pb, uint32_t fcb)
 
 static int do_read(ctx_t *x, uint32_t pb)
 {
-    const mac_fs_ops_t *ops = x->fs->ops;
+    const mac_fs_ops_t *ops = x->v->ops;
     uint32_t fcb;
     int r = open_fcb(x, pb, &fcb);
 
@@ -1035,25 +1205,15 @@ static int do_get_fcb_info(ctx_t *x, uint32_t pb, uint32_t vcb)
     return NO_ERR;
 }
 
-static void volume_counts(ctx_t *x, uint32_t *files, uint32_t *folders)
-{
-    const mac_fs_ops_t *ops = x->fs->ops;
-    mac_fs_item_t it;
-
-    *files = *folders = 0;
-    for (uint32_t i = 1; ops->child(ops->ctx, MAC_FS_ROOT_ID, i, &it) == 0; i++)
-        (*(it.is_dir ? folders : files))++;
-}
-
 static int do_get_vol_info(ctx_t *x, uint32_t pb, uint32_t vcb, bool hfs)
 {
     mac_fs_item_t root;
-    uint32_t files, folders;
+    geometry_t g;
     uint32_t ptr = rd32(x, pb + IO_NAME_PTR);
 
     if (get_item(x, MAC_FS_ROOT_ID, &root) != 0)
         return NSV_ERR;
-    volume_counts(x, &files, &folders);
+    geometry(x, &g);
     if (ptr != 0)
     {
         for (uint32_t i = 0; i < 28; i++)
@@ -1062,27 +1222,27 @@ static int do_get_vol_info(ctx_t *x, uint32_t pb, uint32_t vcb, bool hfs)
     wr16(x, pb + IO_VREFNUM, rd16(x, vcb + VCB_VREFNUM));
     wr32(x, pb + IO_VCR_DATE, root.created);
     wr32(x, pb + IO_VLS_MOD, root.modified);
-    wr16(x, pb + IO_VATRB, VA_HARD_LOCK);
-    wr16(x, pb + IO_VNM_FLS, files);
+    wr16(x, pb + IO_VATRB, g.locked ? VA_HARD_LOCK : 0);
+    wr16(x, pb + IO_VNM_FLS, rd16(x, vcb + VCB_NM_FLS));
     wr16(x, pb + 42, 0);        /* ioVBitMap */
     wr16(x, pb + 44, 0);        /* ioAllocPtr */
-    wr16(x, pb + IO_VNM_AL_BLKS, 0xFFFF);
-    wr32(x, pb + IO_VAL_BLK_SIZ, BLOCK);
-    wr32(x, pb + IO_VCLP_SIZ, BLOCK);
+    wr16(x, pb + IO_VNM_AL_BLKS, g.blocks);
+    wr32(x, pb + IO_VAL_BLK_SIZ, g.block_size);
+    wr32(x, pb + IO_VCLP_SIZ, g.block_size);
     wr16(x, pb + 56, 0);        /* ioAlBlSt */
     wr32(x, pb + IO_VNXT_CNID, 0x7FFFFFFF);
-    wr16(x, pb + IO_VFR_BLK, 0);
+    wr16(x, pb + IO_VFR_BLK, g.free_blocks);
     if (hfs)
     {
         wr16(x, pb + IO_VSIG_WORD, 0x4244);
-        wr16(x, pb + IO_VDRV_INFO, (uint16_t)x->fs->drive);
+        wr16(x, pb + IO_VDRV_INFO, (uint16_t)x->v->drive);
         wr16(x, pb + IO_VDREFNUM, (uint16_t)DISK_REFNUM);
         wr16(x, pb + IO_VFSID, FSID);
         wr32(x, pb + 72, 0);    /* ioVBkUp */
         wr16(x, pb + 76, 0);    /* ioVSeqNum */
         wr32(x, pb + 78, 0);    /* ioVWrCnt */
-        wr32(x, pb + IO_VFIL_CNT, files);
-        wr32(x, pb + IO_VDIR_CNT, folders);
+        wr32(x, pb + IO_VFIL_CNT, g.files);
+        wr32(x, pb + IO_VDIR_CNT, g.folders);
         wr_zero(x, pb + IO_VFNDR_INFO, 32);
     }
     return NO_ERR;
@@ -1185,7 +1345,16 @@ static int do_get_wd_info(ctx_t *x, uint32_t pb, uint32_t vcb)
 
 static int do_volume_mount(ctx_t *x, uint32_t pb)
 {
-    mac_fsm_t *fs = x->fs;
+    /* Which of our volumes: the index the install put after the VolumeMountInfoHeader. */
+    uint32_t index = rd16(x, rd32(x, pb + IO_BUFFER) + 6);
+
+    if (index >= x->fs->volumes)
+        return PARAM_ERR;
+
+    mac_fsm_volume_t *v = &x->fs->volume[index];
+
+    x->v = v;
+
     uint32_t s = slot(x), d0;
     trap_call_t c = ut(UT_ALLOCATE_VCB);
 
@@ -1198,36 +1367,38 @@ static int do_volume_mount(ctx_t *x, uint32_t pb)
         return (int16_t)d0;
 
     uint32_t vcb = rd32(x, s + 2);
-    mac_fs_item_t root;
-    uint32_t files, folders;
-    const char *name = fs->ops->volume_name;
-    uint32_t n = 0;
+    mac_fs_item_t root, child;
+    geometry_t g;
+    const char *name = v->ops->volume_name;
+    uint32_t n = 0, root_files = 0;
 
     if (get_item(x, MAC_FS_ROOT_ID, &root) != 0)
         return NSV_ERR;
-    volume_counts(x, &files, &folders);
+    geometry(x, &g);
+    for (uint32_t i = 1; v->ops->child(v->ops->ctx, MAC_FS_ROOT_ID, i, &child) == 0; i++)
+        root_files += child.is_dir ? 0 : 1;
     while (name[n] != '\0' && n < 27)
         n++;
     wr16(x, vcb + VCB_SIG_WORD, 0x4244);
     wr32(x, vcb + VCB_CR_DATE, root.created);
     wr32(x, vcb + VCB_LS_MOD, root.modified);
-    wr16(x, vcb + VCB_ATRB, VA_HARD_LOCK);
-    wr16(x, vcb + VCB_NM_FLS, files);
-    wr16(x, vcb + VCB_NM_AL_BLKS, 0xFFFF);
-    wr32(x, vcb + VCB_AL_BLK_SIZ, BLOCK);
-    wr32(x, vcb + VCB_CLP_SIZ, BLOCK);
+    wr16(x, vcb + VCB_ATRB, g.locked ? VA_HARD_LOCK : 0);
+    wr16(x, vcb + VCB_NM_FLS, root_files > 0xFFFF ? 0xFFFF : root_files);
+    wr16(x, vcb + VCB_NM_AL_BLKS, g.blocks);
+    wr32(x, vcb + VCB_AL_BLK_SIZ, g.block_size);
+    wr32(x, vcb + VCB_CLP_SIZ, g.block_size);
     wr32(x, vcb + VCB_NXT_CNID, 0x7FFFFFFF);
-    wr16(x, vcb + VCB_FREE_BKS, 0);
+    wr16(x, vcb + VCB_FREE_BKS, g.free_blocks);
     wr8(x, vcb + VCB_VN, n);
     wr_bytes(x, vcb + VCB_VN + 1, (const uint8_t *)name, n);
     wr16(x, vcb + VCB_FSID, FSID);
-    wr32(x, vcb + VCB_FIL_CNT, files);
-    wr32(x, vcb + VCB_DIR_CNT, folders);
+    wr32(x, vcb + VCB_FIL_CNT, g.files);
+    wr32(x, vcb + VCB_DIR_CNT, g.folders);
 
     /* UTAddNewVCB(drvNum, &vRefNum, vcb) */
     c = ut(UT_ADD_NEW_VCB);
     s = slot(x);
-    push16(&c, (uint16_t)fs->drive);
+    push16(&c, (uint16_t)v->drive);
     push32(&c, s);
     push32(&c, vcb);
     CALL(x, &c, &d0, NULL);
@@ -1237,13 +1408,332 @@ static int do_volume_mount(ctx_t *x, uint32_t pb)
     /* A disk-inserted event: the Finder shows the volume (PostEvent: A0 = event, D0 = message). */
     c = reg_trap(TRAP_POST_EVENT);
     c.a[0] = 7;
-    c.d[0] = (uint32_t)fs->drive;
+    c.d[0] = (uint32_t)v->drive;
     CALL(x, &c, &d0, NULL);
 
-    fs->vcb = vcb;
-    fs->vrefnum = (int16_t)rd16(x, vcb + VCB_VREFNUM);
-    fs->mounted = true;
-    wr16(x, pb + IO_VREFNUM, (uint16_t)fs->vrefnum);
+    v->vcb = vcb;
+    v->vrefnum = (int16_t)rd16(x, vcb + VCB_VREFNUM);
+    v->mounted = true;
+    wr16(x, pb + IO_VREFNUM, (uint16_t)v->vrefnum);
+    return NO_ERR;
+}
+
+/* ---- Changing the volume ---- */
+
+/* A Pascal string at ptr in Mac memory; its length (0 for no string). */
+static uint32_t rd_pstring(ctx_t *x, uint32_t ptr, uint8_t *out, uint32_t size)
+{
+    uint32_t n = ptr != 0 ? rd8(x, ptr) : 0;
+
+    if (n > size)
+        n = size;
+    for (uint32_t i = 0; i < n; i++)
+        out[i] = (uint8_t)rd8(x, ptr + 1 + i);
+    return n;
+}
+
+/*
+ * The folder a new item goes into and the item's name: the last part of the
+ * request's pathname (ioNamePtr relative to its volume/folder and dir_id).
+ */
+static int resolve_parent(ctx_t *x, uint32_t pb, uint32_t dir_id, uint32_t *parent, uint8_t *leaf, uint32_t *length)
+{
+    uint32_t dir;
+    int r = start_dir(x, pb, dir_id, false, &dir);
+
+    if (r != NO_ERR)
+        return r;
+
+    uint8_t name[256];
+    uint32_t n = rd_pstring(x, rd32(x, pb + IO_NAME_PTR), name, 255);
+    uint32_t cut = n;
+
+    while (cut > 0 && name[cut - 1] != ':')
+        cut--;
+    if (n - cut == 0 || n - cut > MAC_FS_NAME_MAX)
+        return BD_NAM_ERR;
+    *length = n - cut;
+    k_memcpy(leaf, name + cut, *length);
+    if (cut == 0)
+    {
+        *parent = dir;
+        return NO_ERR;
+    }
+
+    mac_fs_item_t folder;
+
+    r = walk(x, dir, name, cut, &folder);
+    if (r == FNF_ERR)
+        r = DIR_NF_ERR;
+    if (r != NO_ERR)
+        return r;
+    if (!folder.is_dir)
+        return DIR_NF_ERR;
+    *parent = folder.id;
+    return NO_ERR;
+}
+
+static int do_create(ctx_t *x, uint32_t pb, bool hfs, bool is_dir)
+{
+    const mac_fs_ops_t *ops = x->v->ops;
+    uint32_t parent, length;
+    uint8_t leaf[MAC_FS_NAME_MAX];
+    mac_fs_item_t it;
+
+    if (!writable(x))
+        return WPR_ERR;
+
+    int r = resolve_parent(x, pb, hfs ? rd32(x, pb + IO_DIR_ID) : 0, &parent, leaf, &length);
+
+    if (r != NO_ERR)
+        return r;
+    r = ops->create(ops->ctx, parent, leaf, length, is_dir, &it);
+    if (r != NO_ERR)
+        return r;
+    if (is_dir)
+        wr32(x, pb + IO_DIR_ID, it.id);
+    refresh_vcb(x);
+    return NO_ERR;
+}
+
+static int do_delete(ctx_t *x, uint32_t pb, bool hfs)
+{
+    const mac_fs_ops_t *ops = x->v->ops;
+    mac_fs_item_t it;
+
+    if (!writable(x))
+        return WPR_ERR;
+
+    int r = resolve(x, pb, hfs ? rd32(x, pb + IO_DIR_ID) : 0, &it);
+
+    if (r != NO_ERR)
+        return r;
+    if (it.id == MAC_FS_ROOT_ID || (it.is_dir && it.valence != 0) || (!it.is_dir && next_fcb(x, 0, it.id, -1) != 0))
+        return FBSY_ERR;
+    if (it.locked)
+        return FLCKD_ERR;
+    r = ops->remove(ops->ctx, it.id);
+    if (r == NO_ERR)
+        refresh_vcb(x);
+    return r;
+}
+
+static int do_rename(ctx_t *x, uint32_t pb, bool hfs)
+{
+    const mac_fs_ops_t *ops = x->v->ops;
+    mac_fs_item_t it;
+    uint8_t name[MAC_FS_NAME_MAX + 1];
+
+    if (!writable(x))
+        return WPR_ERR;
+
+    int r = resolve(x, pb, hfs ? rd32(x, pb + IO_DIR_ID) : 0, &it);
+
+    if (r != NO_ERR)
+        return r;
+    if (it.id == MAC_FS_ROOT_ID)
+        return PARAM_ERR;           /* the volume's name stays (GetVolParms says kNoVNEdit) */
+
+    uint32_t ptr = rd32(x, pb + IO_MISC);
+    uint32_t n = ptr != 0 ? rd8(x, ptr) : 0;
+
+    if (n == 0 || n > MAC_FS_NAME_MAX)
+        return BD_NAM_ERR;
+    rd_pstring(x, ptr, name + 1, MAC_FS_NAME_MAX);
+    name[0] = (uint8_t)n;
+    for (uint32_t i = 1; i <= n; i++)
+        if (name[i] == ':')
+            return BD_NAM_ERR;
+    if (it.locked)
+        return FLCKD_ERR;
+    r = ops->move(ops->ctx, it.id, it.parent, name + 1, n);
+    if (r != NO_ERR)
+        return r;
+    for (uint32_t fcb = next_fcb(x, 0, it.id, -1); fcb != 0; fcb = next_fcb(x, fcb, it.id, -1))
+        wr_pstring(x, fcb + FCB_CNAME, name, 32);
+    return NO_ERR;
+}
+
+static int do_cat_move(ctx_t *x, uint32_t pb)
+{
+    const mac_fs_ops_t *ops = x->v->ops;
+    mac_fs_item_t it, to;
+
+    if (!writable(x))
+        return WPR_ERR;
+
+    int r = resolve(x, pb, rd32(x, pb + IO_DIR_ID), &it);
+
+    if (r != NO_ERR)
+        return r;
+    if (it.id == MAC_FS_ROOT_ID)
+        return BAD_MOV_ERR;
+
+    /* The folder to move into: ioNewName relative to ioNewDirID (the root when it is 0). */
+    uint8_t name[256];
+    uint32_t to_dir = rd32(x, pb + IO_NEW_DIR_ID);
+    uint32_t n = rd_pstring(x, rd32(x, pb + IO_NEW_NAME), name, 255);
+
+    r = walk(x, to_dir != 0 ? to_dir : MAC_FS_ROOT_ID, name, n, &to);
+    if (r != NO_ERR || !to.is_dir)
+        return DIR_NF_ERR;
+    r = ops->move(ops->ctx, it.id, to.id, NULL, 0);
+    if (r != NO_ERR)
+        return r;
+    for (uint32_t fcb = next_fcb(x, 0, it.id, -1); fcb != 0; fcb = next_fcb(x, fcb, it.id, -1))
+        wr32(x, fcb + FCB_DIR_ID, to.id);
+    return NO_ERR;
+}
+
+/* SetCatInfo (all), SetFileInfo (finder info and two dates), SetFilLock/RstFilLock (lock 1/0). */
+enum
+{
+    SET_CAT_INFO,
+    SET_FILE_INFO,
+    SET_LOCK,
+    CLEAR_LOCK
+};
+
+static int do_set_info(ctx_t *x, uint32_t pb, bool hfs, int what)
+{
+    const mac_fs_ops_t *ops = x->v->ops;
+    mac_fs_item_t it;
+
+    if (!writable(x))
+        return WPR_ERR;
+
+    int r = resolve(x, pb, hfs || what == SET_CAT_INFO ? rd32(x, pb + IO_DIR_ID) : 0, &it);
+
+    if (r != NO_ERR)
+        return r;
+    switch (what)
+    {
+    case SET_CAT_INFO:
+        for (uint32_t i = 0; i < 16; i++)
+        {
+            it.finfo[i] = (uint8_t)rd8(x, pb + IO_FL_FNDR_INFO + i);
+            it.fxinfo[i] = (uint8_t)rd8(x, pb + IO_FL_XFNDR_INFO + i);
+        }
+        it.created = rd32(x, pb + IO_FL_CR_DAT);
+        it.modified = rd32(x, pb + IO_FL_MD_DAT);
+        it.backed_up = rd32(x, pb + IO_FL_BK_DAT);
+        break;
+    case SET_FILE_INFO:
+        if (it.is_dir)
+            return FNF_ERR;
+        for (uint32_t i = 0; i < 16; i++)
+            it.finfo[i] = (uint8_t)rd8(x, pb + IO_FL_FNDR_INFO + i);
+        it.created = rd32(x, pb + IO_FL_CR_DAT);
+        it.modified = rd32(x, pb + IO_FL_MD_DAT);
+        break;
+    default:
+        if (it.is_dir)
+            return FNF_ERR;
+        it.locked = what == SET_LOCK;
+        break;
+    }
+    return ops->set_info(ops->ctx, &it);
+}
+
+static int do_write(ctx_t *x, uint32_t pb)
+{
+    static uint8_t chunk[COPY_CHUNK];
+    const mac_fs_ops_t *ops = x->v->ops;
+    uint32_t fcb;
+    int r = open_fcb(x, pb, &fcb);
+
+    if (r != NO_ERR)
+        return r;
+    wr32(x, pb + IO_ACT_COUNT, 0);
+    if (!(rd8(x, fcb + FCB_FLAGS) & FCB_WRITE))
+        return WR_PERM_ERR;
+    if ((int32_t)rd32(x, pb + IO_REQ_COUNT) < 0)
+        return PARAM_ERR;
+
+    int64_t pos = position(x, pb, fcb);
+    uint32_t want = rd32(x, pb + IO_REQ_COUNT);
+
+    if (pos < 0)
+        return POS_ERR;
+    if ((uint64_t)pos + want > 0x7FFFFFFFu)
+        return DSK_FUL_ERR;     /* past the largest file the Mac knows */
+
+    uint32_t buffer = rd32(x, pb + IO_BUFFER);
+    uint32_t id = rd32(x, fcb + FCB_FL_NM);
+    bool rsrc = (rd8(x, fcb + FCB_FLAGS) & FCB_RESOURCE) != 0;
+    uint32_t done = 0;
+
+    r = NO_ERR;
+    while (done < want)
+    {
+        uint32_t n = want - done < COPY_CHUNK ? want - done : COPY_CHUNK;
+
+        for (uint32_t i = 0; i < n; i++)
+            chunk[i] = (uint8_t)rd8(x, buffer + done + i);
+
+        int32_t put = ops->write(ops->ctx, id, rsrc, (uint32_t)pos + done, chunk, n);
+
+        if (put < 0)
+        {
+            r = put;
+            break;
+        }
+        done += (uint32_t)put;
+        if ((uint32_t)put < n)
+        {
+            r = DSK_FUL_ERR;
+            break;
+        }
+    }
+
+    uint32_t end = (uint32_t)pos + done;
+
+    if (end > rd32(x, fcb + FCB_EOF))
+        set_fcb_eofs(x, id, rsrc ? 1 : 0, end);
+    wr8(x, fcb + FCB_FLAGS, rd8(x, fcb + FCB_FLAGS) | FCB_MODIFIED);
+    wr32(x, pb + IO_ACT_COUNT, done);
+    wr32(x, fcb + FCB_CRPS, end);
+    wr32(x, pb + IO_POS_OFFSET, end);
+    refresh_vcb(x);
+    return r;
+}
+
+static int do_set_eof(ctx_t *x, uint32_t pb)
+{
+    const mac_fs_ops_t *ops = x->v->ops;
+    uint32_t fcb;
+    int r = open_fcb(x, pb, &fcb);
+
+    if (r != NO_ERR)
+        return r;
+    if (!(rd8(x, fcb + FCB_FLAGS) & FCB_WRITE))
+        return WR_PERM_ERR;
+
+    uint32_t eof = rd32(x, pb + IO_MISC);
+    uint32_t id = rd32(x, fcb + FCB_FL_NM);
+    bool rsrc = (rd8(x, fcb + FCB_FLAGS) & FCB_RESOURCE) != 0;
+
+    if ((int32_t)eof < 0)
+        return PARAM_ERR;
+    r = ops->set_length(ops->ctx, id, rsrc, eof);
+    if (r != NO_ERR)
+        return r;
+    set_fcb_eofs(x, id, rsrc ? 1 : 0, eof);
+    refresh_vcb(x);
+    return NO_ERR;
+}
+
+/* Allocate: space is taken as it is written, so the request is granted as it is. */
+static int do_allocate(ctx_t *x, uint32_t pb)
+{
+    uint32_t fcb;
+    int r = open_fcb(x, pb, &fcb);
+
+    if (r != NO_ERR)
+        return r;
+    if (!(rd8(x, fcb + FCB_FLAGS) & FCB_WRITE))
+        return WR_PERM_ERR;
+    wr32(x, pb + IO_ACT_COUNT, rd32(x, pb + IO_REQ_COUNT));
     return NO_ERR;
 }
 
@@ -1255,16 +1745,24 @@ static int hfs_request(ctx_t *x)
     uint32_t fcb;
     int r;
 
+    if ((f->select & 0xF0FF) == SEL_VOLUME_MOUNT)
+        return do_volume_mount(x, pb);
+    if ((f->select & 0xF0FF) == SEL_MOUNT_VOL)
+    {
+        for (uint32_t i = 0; i < x->fs->volumes; i++)
+            if ((int16_t)rd16(x, pb + IO_VREFNUM) == x->fs->volume[i].drive)
+                return NO_ERR;
+        return EXT_FS_ERR;
+    }
+    if (x->v == NULL)
+        return NSV_ERR;         /* not one of our volumes */
+
     switch (f->select & 0xF0FF)
     {
-    case SEL_VOLUME_MOUNT:
-        return do_volume_mount(x, pb);
-    case SEL_MOUNT_VOL:
-        return (int16_t)rd16(x, pb + IO_VREFNUM) == x->fs->drive ? NO_ERR : EXT_FS_ERR;
     case SEL_UNMOUNT_VOL:
         r = ut_simple32(x, UT_DISPOSE_VCB, vcb);
         if (r == NO_ERR)
-            x->fs->mounted = false;
+            x->v->mounted = false;
         return r;
     case SEL_EJECT:
     case SEL_OFFLINE:
@@ -1318,20 +1816,36 @@ static int hfs_request(ctx_t *x)
     case SEL_GET_WD_INFO:
         return do_get_wd_info(x, pb, vcb);
     case SEL_WRITE:
+        return do_write(x, pb);
     case SEL_ALLOCATE:
+        return do_allocate(x, pb);
     case SEL_SET_EOF:
+        return do_set_eof(x, pb);
     case SEL_CREATE:
-    case SEL_DELETE:
-    case SEL_RENAME:
-    case SEL_SET_FILE_INFO:
-    case SEL_SET_CAT_INFO:
+        return do_create(x, pb, hfs, false);
     case SEL_DIR_CREATE:
+        return do_create(x, pb, true, true);
+    case SEL_DELETE:
+        return do_delete(x, pb, hfs);
+    case SEL_RENAME:
+        return do_rename(x, pb, hfs);
     case SEL_CAT_MOVE:
-    case SEL_SET_VOL_INFO:
+        return do_cat_move(x, pb);
+    case SEL_SET_FILE_INFO:
+        return do_set_info(x, pb, hfs, SET_FILE_INFO);
+    case SEL_SET_CAT_INFO:
+        return do_set_info(x, pb, true, SET_CAT_INFO);
     case SEL_SET_FIL_LOCK:
+        return do_set_info(x, pb, hfs, SET_LOCK);
     case SEL_RST_FIL_LOCK:
+        return do_set_info(x, pb, hfs, CLEAR_LOCK);
+    case SEL_SET_VOL_INFO:
+        return writable(x) ? NO_ERR : WPR_ERR;  /* the volume's dates and Finder info are not kept */
+    case SEL_LOCK_RANGE:
+    case SEL_UNLOCK_RANGE:
+        return open_fcb(x, pb, &fcb);           /* one user: ranges need no locks */
     case SEL_SET_FIL_TYPE:
-        return WPR_ERR;         /* the volume is locked */
+        return writable(x) ? PARAM_ERR : WPR_ERR;
     default:
         return PARAM_ERR;
     }
@@ -1398,8 +1912,14 @@ static int install(ctx_t *x)
     uint32_t fsd = data + DATA_FSD;
 
     fs->data = data;
-    if (fs->drive == 0)
-        fs->drive = free_drive(x);
+    if (fs->volume[0].drive == 0)
+    {
+        /* Chosen once (the replays see the drives already added). */
+        int16_t drive = free_drive(x);
+
+        for (uint32_t i = 0; i < fs->volumes; i++)
+            fs->volume[i].drive = (int16_t)(drive + i);
+    }
 
     wr16(x, fsd + FSD_LENGTH, FSD_SIZE);
     wr16(x, fsd + FSD_VERSION, 1);
@@ -1413,22 +1933,26 @@ static int install(ctx_t *x)
     wr32(x, fsd + FSD_HFSCI + CI_STACK_SIZE, STACK_SIZE);
     wr32(x, fsd + FSD_HFSCI + CI_ID_SECTOR, 0xFFFFFFFFu);
 
-    wr8(x, data + DATA_DRIVE + DS_DISK_IN_PLACE, 8);       /* a fixed disk */
-    wr8(x, data + DATA_DRIVE + DS_INSTALLED, 1);
-    wr16(x, data + DATA_DRIVE + DS_QTYPE, 1);              /* hard20: the size fields below are valid */
-    wr16(x, data + DATA_DRIVE + DS_DRIVE_SIZE, 0xFFFF);
-    wr16(x, data + DATA_DRIVE + DS_DRIVE_S1, 0);
-    wr16(x, data + DATA_DRIVE + DS_QFSID, FSID);
+    for (uint32_t i = 0; i < fs->volumes; i++)
+    {
+        uint32_t drive = data + DATA_DRIVE + i * 32u, vmi = data + DATA_VMI + i * 8u;
 
-    wr16(x, data + DATA_VMI, 8);
-    wr32(x, data + DATA_VMI + 2, MEDIA_TYPE);
-    wr32(x, data + DATA_PB + IO_BUFFER, data + DATA_VMI);
+        wr8(x, drive + DS_DISK_IN_PLACE, 8);       /* a fixed disk */
+        wr8(x, drive + DS_INSTALLED, 1);
+        wr16(x, drive + DS_QTYPE, 1);              /* hard20: the size fields below are valid */
+        wr16(x, drive + DS_DRIVE_SIZE, 0xFFFF);
+        wr16(x, drive + DS_DRIVE_S1, 0);
+        wr16(x, drive + DS_QFSID, FSID);
+        wr16(x, vmi, 8);
+        wr32(x, vmi + 2, MEDIA_TYPE);
+        wr16(x, vmi + 6, i);                       /* which volume (do_volume_mount) */
 
-    /* AddDrive: D0 = drive number << 16 | driver reference number, A0 = the queue element */
-    c = reg_trap(TRAP_ADD_DRIVE);
-    c.d[0] = ((uint32_t)(uint16_t)fs->drive << 16) | (uint16_t)DISK_REFNUM;
-    c.a[0] = data + DATA_DRIVE + DS_QLINK;
-    CALL(x, &c, &d0, NULL);
+        /* AddDrive: D0 = drive number << 16 | driver reference number, A0 = the queue element */
+        c = reg_trap(TRAP_ADD_DRIVE);
+        c.d[0] = ((uint32_t)(uint16_t)fs->volume[i].drive << 16) | (uint16_t)DISK_REFNUM;
+        c.a[0] = drive + DS_QLINK;
+        CALL(x, &c, &d0, NULL);
+    }
 
     /* FSMDispatch 0 = InstallFS(fsd) */
     c = reg_trap(TRAP_FSM_DISPATCH);
@@ -1448,12 +1972,21 @@ static int install(ctx_t *x)
     if ((int16_t)d0 != NO_ERR)
         return (int16_t)d0;
 
-    /* HFSDispatch $41 = PBVolumeMount: the FSM asks us (comm) and our VolumeMount mounts it. */
-    c = reg_trap(TRAP_HFS_DISPATCH);
-    c.d[0] = 0x41;
-    c.a[0] = data + DATA_PB;
-    CALL(x, &c, &d0, NULL);
-    return (int16_t)d0;
+    /* HFSDispatch $41 = PBVolumeMount, once per volume: the FSM asks us (comm) and our VolumeMount mounts it. */
+    int result = NO_ERR;
+
+    for (uint32_t i = 0; i < fs->volumes; i++)
+    {
+        wr32(x, data + DATA_PB + IO_BUFFER, data + DATA_VMI + i * 8u);
+        c = reg_trap(TRAP_HFS_DISPATCH);
+        c.d[0] = 0x41;
+        c.a[0] = data + DATA_PB;
+        CALL(x, &c, &d0, NULL);
+        fs->volume[i].mount_error = (int16_t)d0;
+        if (result == NO_ERR)
+            result = (int16_t)d0;
+    }
+    return result;
 }
 
 /* ---- The emulated opcodes ---- */
@@ -1461,7 +1994,7 @@ static int install(ctx_t *x)
 static int comm(mac_t *mac)
 {
     mac_fsm_t *fs = &mac->fsm;
-    ctx_t x = {mac, fs, NULL, 0};
+    ctx_t x = {mac, fs, NULL, 0, NULL};
     uint32_t sp = m68k_vm_get_reg(M68K_VM_REG_A0 + 7);
     uint32_t message = mac_bus_read(mac, sp + 12, 2);
     uint32_t pb = mac_bus_read(mac, sp + 8, 4);
@@ -1475,7 +2008,10 @@ static int comm(mac_t *mac)
     case FFS_GET_ICON:
         return AFP_ITEM_NOT_FOUND;      /* the standard disk icon */
     case FFS_ID_DISK:
-        return (int16_t)rd16(&x, pb + IO_VREFNUM) == fs->drive ? NO_ERR : EXT_FS_ERR;
+        for (uint32_t i = 0; i < fs->volumes; i++)
+            if ((int16_t)rd16(&x, pb + IO_VREFNUM) == fs->volume[i].drive)
+                return NO_ERR;
+        return EXT_FS_ERR;
     case FFS_ID_VOL_MOUNT:
         return rd32(&x, rd32(&x, pb + IO_BUFFER) + 2) == MEDIA_TYPE ? NO_ERR : EXT_FS_ERR;
     default:
@@ -1515,7 +2051,7 @@ static void step(mac_t *mac)
     mac_fsm_t *fs = &mac->fsm;
     int result;
 
-    if (fs->overflow || fs->depth == 0 || fs->ops == NULL)
+    if (fs->overflow || fs->depth == 0 || fs->volumes == 0)
     {
         fs->overflow = false;
         result = PARAM_ERR;
@@ -1523,7 +2059,12 @@ static void step(mac_t *mac)
     else
     {
         mac_fsm_frame_t *f = &fs->frame[fs->depth - 1];
-        ctx_t x = {mac, fs, f, fs->depth - 1};
+        ctx_t x = {mac, fs, f, fs->depth - 1, NULL};
+
+        /* The request's volume: the one of its VCB (none yet for VolumeMount and MountVol). */
+        for (uint32_t i = 0; i < fs->volumes; i++)
+            if (fs->volume[i].mounted && fs->volume[i].vcb == f->vcb)
+                x.v = &fs->volume[i];
 
         f->next = 0;
         result = f->kind == KIND_INSTALL ? install(&x) : hfs_request(&x);
@@ -1593,18 +2134,28 @@ void mac_fsm_op(mac_t *mac, uint16_t op)
     }
 }
 
-void mac_fsm_attach(mac_t *mac, const mac_fs_ops_t *ops)
+int mac_fsm_attach(mac_t *mac, const mac_fs_ops_t *ops)
 {
-    mac->fsm.ops = ops;
+    mac_fsm_t *fs = &mac->fsm;
+
+    if (ops == NULL || fs->volumes == MAC_FSM_VOLUMES)
+        return -1;
+    fs->volume[fs->volumes++].ops = ops;
+    return 0;
 }
 
 void mac_fsm_reset(mac_t *mac)
 {
-    const mac_fs_ops_t *ops = mac->fsm.ops;
+    const mac_fs_ops_t *ops[MAC_FSM_VOLUMES];
+    uint32_t volumes = mac->fsm.volumes;
 
+    for (uint32_t i = 0; i < volumes; i++)
+        ops[i] = mac->fsm.volume[i].ops;
     k_memset(&mac->fsm, 0, sizeof mac->fsm);
-    mac->fsm.ops = ops;
-    mac->fsm.install_pending = ops != NULL;
+    for (uint32_t i = 0; i < volumes; i++)
+        mac->fsm.volume[i].ops = ops[i];
+    mac->fsm.volumes = volumes;
+    mac->fsm.install_pending = volumes > 0;
     k_memcpy(mac->stub + MAC_FSM_STUB, mac_fsm_code, sizeof mac_fsm_code);
 }
 

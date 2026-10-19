@@ -343,10 +343,11 @@ int mac_rom_patch(uint8_t *rom, uint32_t size);
 
 /*
  * The external file system (emu/mac/fsm.c, docs/fsm.md). mac_fsm_attach before
- * mac_reset: once the Finder runs, the volume of 'ops' is mounted (NULL: none).
- * The rest is for mac.c.
+ * mac_reset, once per volume (up to MAC_FSM_VOLUMES; -1 when there is no
+ * room): once the Finder runs, the volumes are mounted in that order. The
+ * rest is for mac.c.
  */
-void mac_fsm_attach(mac_t *mac, const mac_fs_ops_t *ops);
+int mac_fsm_attach(mac_t *mac, const mac_fs_ops_t *ops);
 void mac_fsm_reset(mac_t *mac);
 void mac_fsm_op(mac_t *mac, uint16_t op);
 uint32_t mac_fsm_install_code(void);

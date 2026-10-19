@@ -12,6 +12,7 @@
 #include "kernel/vfs/vfs.h"
 
 static mac_fs_paths_t *paths;
+static bool without_ehfs;
 
 /* "/" + path (fs_paths' paths have no leading '/'). */
 static int absolute(const char *path, char *out, uint32_t size)
@@ -25,10 +26,11 @@ static int absolute(const char *path, char *out, uint32_t size)
     return 0;
 }
 
-/* Devices and the kernel's /proc are no files for the Mac. */
+/* Devices and the kernel's /proc are no files for the Mac; nor /ehfs when it is a volume of its own. */
 static bool left_out(const char *dir, const char *name)
 {
-    return dir[0] == '\0' && (k_strcmp(name, "dev") == 0 || k_strcmp(name, "proc") == 0);
+    return dir[0] == '\0' &&
+           (k_strcmp(name, "dev") == 0 || k_strcmp(name, "proc") == 0 || (without_ehfs && k_strcmp(name, "ehfs") == 0));
 }
 
 static int hal_entry(void *ctx, const char *path, uint32_t index, char *name, uint32_t size)
@@ -93,8 +95,9 @@ static int32_t hal_read(void *ctx, const char *path, uint32_t offset, void *buff
 
 static const mac_fs_host_t hal_host = {NULL, hal_entry, hal_stat, hal_read};
 
-const mac_fs_ops_t *mac_fs_hal(void)
+const mac_fs_ops_t *mac_fs_hal(bool leave_out_ehfs)
 {
+    without_ehfs = leave_out_ehfs;
     if (paths == NULL)
     {
         paths = kmalloc(sizeof *paths);

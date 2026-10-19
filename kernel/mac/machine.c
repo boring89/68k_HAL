@@ -6,6 +6,7 @@
 #include "machine.h"
 
 #include "adbkeys.h"
+#include "fs_ehfs.h"
 #include "fs_hal.h"
 #include "pram.h"
 #include "sysvm.h"
@@ -34,6 +35,7 @@
 #include "kernel/memory/heap.h"
 #include "kernel/printf/printf.h"
 #include "kernel/terminal/terminal.h"
+#include "kernel/user/process.h"
 #include "kernel/vfs/ehfsfs.h"
 
 #include <stddef.h>
@@ -770,6 +772,12 @@ static void pram_save(const mac_t *mac)
         kernel_printf("%s\n", "mac: cannot write the parameter RAM to 68k_hal/pram");
 }
 
+/* Whether the Mac gets the eHFS volume (68k_hal.cfg mac_data_volume, on by default). */
+static bool data_volume_wanted(void)
+{
+    return ehfsfs_volume() != NULL && k_strcmp(config_get_or("mac_data_volume", "on"), "off") != 0;
+}
+
 /* Frames the power key stays down: about 1/6 s, like a short press. */
 #define POWER_KEY_FRAMES 10
 
@@ -1033,7 +1041,20 @@ int mac_machine_run(uint32_t frames)
 
     /* The HAL's files as a read-only volume on the Mac's desktop (mounted once the Finder runs; docs/fsm.md). */
     if (k_strcmp(config_get_or("mac_hal_volume", "on"), "off") != 0)
-        mac_fsm_attach(mac, mac_fs_hal());
+        mac_fsm_attach(mac, mac_fs_hal(data_volume_wanted()));
+
+    /* The eHFS volume (/ehfs) as a volume the Mac reads and writes; meanwhile the file tree only reads it (F4). */
+    bool data_attached = false;
+
+    if (data_volume_wanted())
+    {
+        static mac_fs_ehfs_t data_volume;
+
+        mac_fs_ehfs_init(&data_volume, ehfsfs_volume(), user_realtime_ns);
+        data_attached = mac_fsm_attach(mac, &data_volume.ops) == 0;
+        if (data_attached)
+            ehfsfs_set_mac_running(true);
+    }
 
     /* The parameter RAM of the last run (control panel settings), from the Boot partition. */
     bool keep_pram = pram_wanted();
@@ -1066,7 +1087,7 @@ int mac_machine_run(uint32_t frames)
     uint64_t paced_start = hal_timer_ns();
     uint32_t power_key_frames = 0;
     uint32_t pram_wait = 0;
-    bool hal_reported = false;
+    bool volume_reported[MAC_FSM_VOLUMES] = {false};
     bool finder_seen = false;
 
     for (uint32_t frame = 1; frames == 0 || frame <= frames; frame++)
@@ -1110,15 +1131,23 @@ int mac_machine_run(uint32_t frames)
                           (unsigned int)((hal_timer_ns() - paced_start) / 1000000u));
         }
 
-        if (!hal_reported && mac->fsm.mounted)
+        for (uint32_t i = 0; i < mac->fsm.volumes; i++)
         {
-            hal_reported = true;
-            kernel_printf("mac: the HAL volume is mounted (drive %d)\n", mac->fsm.drive);
-        }
-        else if (!hal_reported && mac->fsm.install_error != 0)
-        {
-            hal_reported = true;
-            kernel_printf("mac: the HAL volume could not be mounted (%d)\n", mac->fsm.install_error);
+            const mac_fsm_volume_t *v = &mac->fsm.volume[i];
+
+            if (volume_reported[i])
+                continue;
+            if (v->mounted)
+            {
+                volume_reported[i] = true;
+                kernel_printf("mac: the %s volume is mounted (drive %d)\n", v->ops->volume_name, v->drive);
+            }
+            else if (v->mount_error != 0 || mac->fsm.install_error != 0)
+            {
+                volume_reported[i] = true;
+                kernel_printf("mac: the %s volume could not be mounted (%d)\n", v->ops->volume_name,
+                              v->mount_error != 0 ? v->mount_error : mac->fsm.install_error);
+            }
         }
 
         /* The parameter RAM changed: write it once the Mac OS is done with it. */
@@ -1251,6 +1280,9 @@ out:
     kfree(vram);
     kfree(rom);
     kfree(mac);
+
+    if (data_attached)
+        ehfsfs_set_mac_running(false);
 
     if (power != MAC_POWER_NONE)
         power_follows_mac(power, frames == 0);

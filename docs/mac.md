@@ -320,8 +320,8 @@ Memory 控制台照常顯示這個選項；選了 On 之後，下次開機會變
 
 模型的參數 RAM 是 `mac_t.xpram`（256 位元組，`emul_clknomem` 讀寫）；Mac OS 改了其中的位元組時 `xpram_dirty` 變成 true。kernel 在 68k_HAL 磁碟上把它存進 Boot 分割區的 `68k_hal/pram`，下次啟動時載入（格式、時機與其他設定的關係見 `docs/mac_disk.md` 第 6.1 節）。host 的 `mac_run -X <檔案>` 做同樣的事（256 位元組的原始內容）：`make test-rom` 用 Keyboard 控制台（`tools/mac_keyboard_panel.sh`）改「重複速度」與「重複延遲」，下一次執行打開控制台要看到同樣的設定。
 
-## 16. 外部檔案系統：HAL 卷宗（P11 K3）
+## 16. 外部檔案系統：HAL 卷宗與 Data 卷宗（P11 K3、K5）
 
-Finder 開始執行以後，模型注入一段程式，用 System 7.5 的 File System Manager 登記一個外部檔案系統，把 HAL 的檔案樹掛成唯讀的「HAL」卷宗（`emu/mac/fsm.s`、`fsm.c`、`fs_paths.c`，kernel 的 `kernel/mac/fs_hal.c`；host 的 `mac_run -A <資料夾>`）。模擬 opcode `$713A`–`$713E`；68k 程式在 stub 視窗的 `0x800`。原理、做法與測試見 `docs/fsm.md`。
+Finder 開始執行以後，模型注入一段程式，用 System 7.5 的 File System Manager 登記一個外部檔案系統，把 HAL 的檔案樹掛成唯讀的「HAL」卷宗（`emu/mac/fsm.s`、`fsm.c`、`fs_paths.c`，kernel 的 `kernel/mac/fs_hal.c`；host 的 `mac_run -A <資料夾>`），有 eHFS 卷宗時再掛一顆可讀寫的「Data」（`kernel/mac/fs_ehfs.c`；host 的 `mac_run -e <映像>`；`68k_hal.cfg` 的 `mac_data_volume`）。模擬 opcode `$713A`–`$713E`；68k 程式在 stub 視窗的 `0x800`。原理、做法與測試見 `docs/fsm.md`。
 
 注入的時機多了一個條件（P10 D3 的磁碟掛載也適用）：File Manager 沒有在處理請求（低記憶體 `$360` FSBusy 與 `$362` 佇列頭都是 0），否則注入的同步呼叫會等一個被它打斷的請求，Mac 就停住了。
