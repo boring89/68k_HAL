@@ -41,6 +41,7 @@ typedef struct
     uint16_t free_alloc_blocks;
     uint32_t file_count;
     uint32_t folder_count;
+    uint32_t blessed_folder;            /* the System Folder's ID (drFndrInfo[0]); 0 = none */
     char name[HFS_VOLUME_NAME_MAX + 1];
 
     /* The two B*-trees (catalog and extents overflow), as plain files. */
@@ -102,6 +103,16 @@ int hfs_list(hfs_volume_t *volume, uint32_t folder_id, hfs_list_fn fn,
 int hfs_read(hfs_volume_t *volume, const hfs_entry_t *entry,
              hfs_fork_kind_t fork, uint32_t offset, void *buffer,
              uint32_t length);
+
+/*
+ * Where byte offset of a fork of file entry is on the device: the 512-byte
+ * device block that holds it and the byte within that block. This lets a
+ * caller change bytes of an existing file in place (nothing here writes).
+ * Returns 0, or -1 past the end of the fork or on error.
+ */
+int hfs_fork_locate(hfs_volume_t *volume, const hfs_entry_t *entry,
+                    hfs_fork_kind_t fork, uint32_t offset,
+                    uint64_t *device_block, uint32_t *block_offset);
 
 /* Compare two names the way hfs_lookup does (ASCII letters fold case). */
 bool hfs_names_equal(const char *a, const char *b);

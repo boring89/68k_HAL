@@ -7,7 +7,9 @@
 # goes into the kernel slot that is NOT in use (/68k_hal/slot_a or slot_b on the Boot partition) and is
 # booted once as a trial (grubenv trial=); the kernel makes it the confirmed slot when it starts, and
 # GRUB goes back to the old slot if it does not. Optionally a new Mac system image goes into the System
-# slot that is not in use. The overlay, Applications and the free space are never written.
+# slot that is not in use. The overlay, Applications and the free space are never written. A disk made
+# before the Mac's parameter RAM was kept (P11) gets an empty /68k_hal/pram; an existing one is never
+# overwritten (it holds the Mac's control panel settings).
 #
 # Usage: sudo tools/update_68khal.sh [--dry-run] [--kernel-dir DIR] [--system IMAGE] TARGET
 #
@@ -35,7 +37,7 @@ while [ $# -gt 0 ]; do
     --kernel-dir) kernel_dir=$2; shift ;;
     --no-kernel) update_kernel=0 ;;
     --system) system_image=$2; shift ;;
-    -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
     -*) echo "update_68khal: unknown option $1" >&2; exit 2 ;;
     *) target=$1 ;;
     esac
@@ -122,6 +124,13 @@ fi
 
 [ "$update_kernel" = 1 ] || [ -n "$system_image" ] || die "nothing to do (--no-kernel without --system)"
 
+# The Mac's parameter RAM (kernel/mac/pram.h): created empty when missing, otherwise left alone.
+need_pram=0
+if ! mdir -i "$esp" ::68k_hal/pram > /dev/null 2>&1; then
+    need_pram=1
+    echo "update_68khal: /68k_hal/pram (the Mac's parameter RAM) is missing: an empty one is created"
+fi
+
 if [ "$dry_run" = 1 ]; then
     echo "update_68khal: dry run: nothing written"
     exit 0
@@ -139,6 +148,13 @@ if [ "$update_kernel" = 1 ]; then
     mcopy -n -i "$esp" ::68k_hal/grubenv "$work/check"
     cmp -s "$work/check" "$work/grubenv" || die "grubenv differs after writing"
     echo "update_68khal: kernel slot $kernel_target written and checked; the next boot tries it"
+fi
+
+if [ "$need_pram" = 1 ]; then
+    head -c 512 /dev/zero > "$work/pram"
+    mcopy -D s -i "$esp" "$work/pram" ::68k_hal/pram
+    mcopy -n -i "$esp" ::68k_hal/pram "$work/check"
+    cmp -s "$work/check" "$work/pram" || die "68k_hal/pram differs after writing"
 fi
 
 if [ -n "$system_image" ]; then

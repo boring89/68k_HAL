@@ -365,6 +365,52 @@ static void test_damaged_catalog(void)
     TEST_ASSERT_EQ_INT(-1, hfs_list(&volume, 99999, count_entry, &state));
 }
 
+/* hfs_fork_locate finds the same byte hfs_read returns, also through the overflow tree. */
+static void test_fork_locate(void)
+{
+    hfs_entry_t entry;
+    uint64_t lba;
+    uint32_t inner;
+
+    if (!setup())
+        return;
+
+    const char *files[] = {"Frag", "Big"};
+
+    for (int f = 0; f < 2; f++)
+    {
+        TEST_ASSERT_EQ_INT(0, hfs_lookup(&volume, files[f], &entry));
+
+        for (uint32_t offset = 0; offset < entry.data_length; offset += 509)
+        {
+            uint8_t byte;
+
+            TEST_ASSERT_EQ_INT(1, hfs_read(&volume, &entry, HFS_FORK_DATA,
+                                           offset, &byte, 1));
+            TEST_ASSERT_EQ_INT(0, hfs_fork_locate(&volume, &entry,
+                                                  HFS_FORK_DATA, offset, &lba,
+                                                  &inner));
+            TEST_ASSERT(inner < 512);
+            TEST_ASSERT_EQ_INT(byte, image[lba * 512 + inner]);
+        }
+        TEST_ASSERT_EQ_INT(-1, hfs_fork_locate(&volume, &entry, HFS_FORK_DATA,
+                                               entry.data_length, &lba, &inner));
+    }
+
+    TEST_ASSERT_EQ_INT(0, hfs_lookup(&volume, "WithRsrc", &entry));
+    TEST_ASSERT_EQ_INT(0, hfs_fork_locate(&volume, &entry, HFS_FORK_RESOURCE,
+                                          2999, &lba, &inner));
+    TEST_ASSERT_EQ_INT(pattern_byte(2999, 3), image[lba * 512 + inner]);
+    TEST_ASSERT_EQ_INT(-1, hfs_fork_locate(&volume, &entry, HFS_FORK_RESOURCE,
+                                           3000, &lba, &inner));
+
+    TEST_ASSERT_EQ_INT(0, hfs_lookup(&volume, "Docs", &entry));
+    TEST_ASSERT_EQ_INT(-1, hfs_fork_locate(&volume, &entry, HFS_FORK_DATA, 0,
+                                           &lba, &inner));
+    /* No blessed folder on this volume. */
+    TEST_ASSERT_EQ_INT(0, volume.blessed_folder);
+}
+
 int main(void)
 {
     TEST_RUN(test_mount);
@@ -378,6 +424,7 @@ int main(void)
     TEST_RUN(test_list);
     TEST_RUN(test_names_equal);
     TEST_RUN(test_damaged_catalog);
+    TEST_RUN(test_fork_locate);
 
     return TEST_REPORT("hfs");
 }

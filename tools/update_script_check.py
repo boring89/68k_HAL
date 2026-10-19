@@ -5,7 +5,8 @@
 #
 # make test-update-script: tools/update_68khal.sh against a small synthetic 68k_HAL disk IMAGE (no Mac ROM or
 # System needed; build/images/hfs.img stands in for the System). Checks that a dry run writes nothing, that
-# an update writes the spare kernel slot and sets the trial, that --system writes only the spare System slot,
+# an update writes the spare kernel slot and sets the trial (and creates a missing 68k_hal/pram, but never
+# overwrites one), that --system writes only the spare System slot,
 # that the overlay, Applications, the other slots and the free space stay byte for byte as they were, and
 # that targets which are not 68k_HAL disks are refused. Never touches a device.
 #
@@ -128,6 +129,19 @@ def main():
     for name in before:
         if name != "68k_HAL Boot":
             check(after[name] == before[name], f"{name} unchanged by the kernel update")
+    # A disk from before P11 has no parameter RAM file: an empty one is made.
+    check(esp_file(image, boot, "68k_hal/pram", got) and open(got, "rb").read() == bytes(512),
+          "a missing 68k_hal/pram is created empty")
+
+    # An existing parameter RAM file is never overwritten.
+    saved = os.path.join(work, "pram")
+    with open(saved, "wb") as f:
+        f.write(b"68kHALPR" + bytes(range(256)) + bytes(248))
+    subprocess.run(["mcopy", "-o", "-i", f"{image}@@{boot}", saved, "::68k_hal/pram"], check=True)
+    r = run([script, "--kernel-dir", new_kernel, image])
+    check(r.returncode == 0 and "pram" not in r.stdout, "a second kernel update succeeds")
+    check(esp_file(image, boot, "68k_hal/pram", got) and open(got, "rb").read() == open(saved, "rb").read(),
+          "an existing 68k_hal/pram is kept byte for byte")
 
     # The System update goes to the spare slot B only.
     new_system = os.path.join(work, "new_system.img")

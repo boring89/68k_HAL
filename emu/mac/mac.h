@@ -242,6 +242,7 @@ typedef struct
     uint32_t unimpl_used;       /* distinct entries in unimpl[] */
 
     uint8_t xpram[256];         /* parameter RAM kept by the clock chip */
+    bool xpram_dirty;           /* the Mac OS changed a byte of xpram (the host saves it and clears this) */
     uint32_t clk_log[1024];      /* first clock chip commands: cmd << 8 | data, bit 31 = read */
     uint32_t clk_log_len;
     uint32_t rtc_seconds;       /* seconds since 1 Jan 1904: set by the host at the start, then counted by the model */

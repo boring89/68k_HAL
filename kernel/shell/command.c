@@ -23,6 +23,7 @@
 #include "kernel/block/cache.h"
 #include "kernel/config/config.h"
 #include "kernel/fs/macdisk.h"
+#include "kernel/mac/pram.h"
 #include "kernel/fs/volume.h"
 #include "kernel/user/process.h"
 #include "kernel/vfs/vfs.h"
@@ -318,7 +319,7 @@ static shell_command_entry_t commands[] =
          cmd_irqs},
         {COMMAND_MACSYS,
          "macsys",
-         "The Mac system disk: macsys status | reset (drop the Mac's changes) | promote (keep them in the other System slot) | switch a|b [force]",
+         "The Mac system disk: macsys status | reset (drop the Mac's changes) | promote (keep them in the other System slot) | switch a|b [force] | pram [reset] (the Mac's parameter RAM)",
          cmd_macsys},
         {COMMAND_MOUNT,
          "mount",
@@ -2268,6 +2269,25 @@ static void cmd_macsys(
         return;
     }
 
+    if (argc >= 2 && k_strcmp(argv[1], "pram") == 0)
+    {
+        uint8_t xpram[MAC_PRAM_SIZE];
+
+        if (argc >= 3 && k_strcmp(argv[2], "reset") == 0)
+        {
+            if (mac_pram_clear(macdisk_boot()) == 0)
+                terminal_write_line("macsys: the parameter RAM is empty; the Mac starts with fresh settings");
+            else
+                terminal_write_line("macsys: cannot write 68k_hal/pram on the Boot partition");
+            return;
+        }
+        terminal_write("Parameter RAM: ");
+        terminal_write_line(mac_pram_status_name(mac_pram_load(macdisk_boot(), xpram)));
+        if (k_strcmp(config_get_or("mac_pram", "on"), "off") == 0)
+            terminal_write_line("  not used: mac_pram = off");
+        return;
+    }
+
     if (argc >= 3 && k_strcmp(argv[1], "switch") == 0 &&
         (k_strcmp(argv[2], "a") == 0 || k_strcmp(argv[2], "b") == 0))
     {
@@ -2287,7 +2307,7 @@ static void cmd_macsys(
 
     if (argc >= 2 && k_strcmp(argv[1], "status") != 0)
     {
-        terminal_write_line("usage: macsys status | reset | promote | switch a|b [force]");
+        terminal_write_line("usage: macsys status | reset | promote | switch a|b [force] | pram [reset]");
         return;
     }
 
@@ -2323,6 +2343,11 @@ static void cmd_macsys(
         terminal_write_line("  The overlay belongs to another System image and is not applied.");
         terminal_write_line("  'macsys reset' empties it and binds it to this image.");
     }
+
+    uint8_t xpram[MAC_PRAM_SIZE];
+
+    terminal_write("Parameter RAM: ");
+    terminal_write_line(mac_pram_status_name(mac_pram_load(macdisk_boot(), xpram)));
 
     terminal_write("Kernel slot: ");
     terminal_write(config_get_or("kernel_slot", "?"));

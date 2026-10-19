@@ -21,6 +21,7 @@ sda（GPT，512 位元組的區塊）
 │      68k_hal/grub.cfg        選單（repo 的 grub-mac.cfg）
 │      68k_hal/grubenv         GRUB 的環境區塊（1024 位元組）：boot_slot、system_slot、trial
 │      68k_hal/68k_hal.cfg     設定檔（第 5 節）
+│      68k_hal/pram            Mac 的參數 RAM（512 位元組，第 6.1 節；P11）
 │      68k_hal/mac_rom         使用者的 Mac IIci ROM（複本）
 │      68k_hal/slot_a/         kernel-gfx.elf、kernel-gfx1080.elf、kernel-gfx1440.elf、initrd.tar
 │      68k_hal/slot_b/         同上（更新寫到沒在用的槽；第 8 節）
@@ -95,6 +96,7 @@ kernel ── 設定（第 5 節）── macdisk：GPT → 分割區 → 疊加
 | `mac_cards` | 1、2 | 1 | NuBus 顯示卡數量 |
 | `mac_video` | `card`、`builtin` | `card` | `builtin` = IIci 內建顯示（640x480） |
 | `mac_ram` | MB，8–1024 | 128 | Mac 的記憶體（32 位元 kernel 最多 256） |
+| `mac_pram` | `on`、`off` | `on` | 保存 Mac 的參數 RAM（第 6.1 節）；`off` = 每次都是新的（P11 以前的行為） |
 | `mac_disk` | `auto`、區塊裝置名稱 | `auto` | `auto` = 68k_HAL 磁碟的 System + Applications；裝置名稱（`disks` 列出）= 整顆當成唯一的磁碟 |
 | `disk_cache` | MB、`auto`、0 | `auto` | 磁碟快取的上限（第 11 節）；`auto` = 可用記憶體的 1/4，最多 8 GiB（32 位元 kernel 32 MB）；0 = 關閉 |
 | `system_slot` | `a`、`b` | `a` | 用哪個 System 槽（GRUB 從 grubenv 傳入；第 8 節） |
@@ -106,6 +108,17 @@ kernel ── 設定（第 5 節）── macdisk：GPT → 分割區 → 疊加
 - `macsys status`：目前的 System 槽、疊加層狀態（ok／empty／mismatch／error）、已寫入與剩餘的區塊。
 - `macsys reset`：清空疊加層（Mac 的系統碟回到原始映像），並綁定到目前的槽。Applications 不受影響。在 shell 執行（Mac 沒有在跑的時候）。
 - `mount <裝置>` + `ls`／`cat`：用 HAL 的 HFS 讀取器看 `system`、`apps`、`sys_a` 等的內容。
+- `macsys pram`：參數 RAM 的狀態（kept／empty／damaged／no 68k_hal/pram file）；`macsys pram reset`：清空它（下次 Mac 用全新的參數 RAM，相當於真的 Mac 的「Zap PRAM」）。
+
+### 6.1 參數 RAM（P11）
+
+Mac 的參數 RAM（PRAM，時鐘晶片的 256 位元組：控制台的設定，例如滑鼠與鍵盤的速度、音量、開機磁碟）存在 Boot 分割區的 `68k_hal/pram`（`kernel/mac/pram.c`）。
+
+- **格式**：一個 512 位元組的磁區（寫入一次完成，和疊加層同一個假設）：`68kHALPR`、版本 1、長度 256、CRC-32、參數 RAM。全部是 0 = 空的。magic、版本或 CRC 不對 = damaged：當成新的，下次保存時蓋掉。
+- **什麼時候讀寫**：`mac` 啟動時讀；Mac OS 改了參數 RAM、2 秒內沒有再改時寫（控制台一次會寫好幾個位元組）；Mac 關機或重新開機時、按 `` ` `` 停止時再寫一次。寫法和 grubenv 一樣：只覆寫這個檔案已經有的磁區（`kernel/fs/fat.h`），不配置、不改大小。
+- **檔案從哪裡來**：`make mac-disk` 建立空的檔案；P11 以前做的磁碟沒有它，`tools/update_68khal.sh` 會在檔案不存在時建立（**絕不覆寫已有的**）。沒有這個檔案時不保存，`mac` 啟動時印一行。
+- **和其他設定的關係**（host 上試過）：NuBus 顯示卡的解析度與色深仍以 kernel 選的為準（`mac_res`、`mac_depth`、上次結束時的模式），保存的參數 RAM 不會蓋過它；Startup Disk 選了不能開機的磁碟（或亂碼）時照樣從系統碟開機。
+- **虛擬記憶體**的開關**不在**參數 RAM，而在 System 檔案裡（`docs/mac.md` 第 14 節）；kernel 在每次啟動 Mac 前把它關掉。
 
 ## 7. 電源
 
@@ -168,6 +181,8 @@ sudo tools/update_68khal.sh --no-kernel --system new_system.img /dev/sda   # 新
 | 換新版 Mac 系統 | `update_68khal.sh --system`，再 `macsys switch <新槽> force` | 丟棄（屬於舊系統） | 保留 | `macsys switch <舊槽> force` |
 | 套用 Apple 的更新程式 | 在 Mac 裡執行（寫進疊加層），滿意後 `macsys promote` | 更新在疊加層裡；promote 後在新槽 | 保留 | promote 前：`macsys reset`；promote 後：switch 回舊槽 |
 | 重置系統 | `macsys reset` | 丟棄 | 保留 | — |
+
+參數 RAM（第 6.1 節）在上面的所有情境都保留（它在 Boot 分割區，更新腳本不覆寫它）；只有 `macsys pram reset` 會清掉。
 
 測試：`make test-mac-update`（本機，約 8 分鐘）：腳本更新 kernel 槽 b → 試開成功並確認、建兩個資料夾 → 腳本放壞的 kernel 到槽 a → GRUB fallback 到 b、資料夾都在 → `macsys promote` → 用 System B 開機、資料夾在 → `macsys switch a`（拒絕）、`switch a force` → System A 開得起來（沒有那個資料夾：它從來沒被寫過）。
 

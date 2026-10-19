@@ -299,7 +299,21 @@ PC 鍵盤的 `Ctrl`、`Alt`、`Win`／`AltGr`、`Caps Lock`、方向鍵、F1–F
 3. bus error 例外（format $B）與 `rte` 之後從中斷點續行：Musashi 目前沒有，也不打算補（同上）。
 4. 有了以上，虛擬記憶體的「備份檔」放在 RAM 磁碟上才有意義——但 RAM 本來就能直接給 Mac 用到 1 GiB，所以只剩「讓需要虛擬記憶體的程式（極少）也能跑」的價值。
 
-### 14.4 如果不小心打開了
+### 14.4 如果不小心打開了（P11 K1 更正）
 
-實際上不會卡住：虛擬記憶體的開關存在 **PRAM**（參數 RAM）裡，而模型的 PRAM 每次執行 `mac` 都是新的（沒有保存）。kernel 裡的 Mac 選 Restart 會讓整台電腦重新開機（P10 D5），重新開始的 Mac 的 PRAM 是空的，虛擬記憶體就是關的。驗證：host 上打開虛擬記憶體後把磁碟存起來（`mac_run -O`），用存下的磁碟重新執行，開機正常（只出現「上次沒有正常關機」的對話框，因為第一次沒有關機）。只有在同一次執行裡重新開始（`mac_run -Y`）才會卡住。Memory 控制台裡的選項因此只是「設了不會生效」。留下的 VM Storage 檔在疊加層裡，`macsys reset` 會清掉。是否乾脆讓這個選項不出現（讓 Gestalt 回報沒有 PMMU）列在 `P10_PLAN.md` 的待決定。
+**之前這裡寫錯了**：P10 D10 以為開關存在 PRAM、所以「設了不會生效」。P11 K1 重做實驗（`tools/mac_memory_vm.sh`：打開 Memory 控制台、點 On、關掉視窗、Special > Shut Down，`mac_run -O` 存下磁碟）：用存下的磁碟**重新執行**也停在「Welcome to Macintosh」。比較 VM 開與關的兩份磁碟，PRAM 完全相同；磁碟上不同的是 VM Storage 檔（10 MB）的配置與 catalog，以及 **System 檔案資源 fork 裡的一個位元組**：
 
+- 資源 `'vm  '`，ID 0，37 位元組：第一個 32 位元字 = 開關（0 = 關、1 = 開），接著是備份檔的大小（`$00A00000` = 10 MB）與卷宗名稱（Pascal 字串）。這是實驗得到的，Inside Macintosh 沒有公開這個資源的格式。
+- 因為 68k_HAL 磁碟的疊加層會保存 Mac 對系統碟的修改（`docs/mac_disk.md`），打開一次之後**每次開機都會卡住**，只能 `macsys reset`（丟掉所有系統修改）。
+
+**處理（使用者 2026-10-19 決定）**：kernel 在每次啟動 Mac 之前（`kernel/mac/machine.c`）呼叫 `sysvm_turn_off`（`kernel/mac/sysvm.c`）：
+
+1. 在 Mac 的系統碟上找 HFS 卷宗（Apple_HFS 分割區或從區塊 0 開始的卷宗），從 MDB 的 `drFndrInfo[0]` 得到 System Folder（blessed folder，Inside Macintosh: Files 2-60），在裡面找類型 `zsys` 的檔案。
+2. 用 `kernel/mac/rsrc.c` 解析它的資源 fork（Inside Macintosh: More Macintosh Toolbox，Resource File Format），找到 `'vm  '` 0。
+3. 開關不是 0 就用 `hfs_fork_locate`（`kernel/fs/hfs`）找出那幾個位元組在磁碟上的區塊，讀出、改成 0、寫回。只改檔案的內容，不動 HFS 的任何結構；在 68k_HAL 磁碟上寫進疊加層，原始映像不變。`dmesg` 印 `mac: virtual memory was on in the System file; turned it off (not supported)`。
+
+Memory 控制台照常顯示這個選項；選了 On 之後，下次開機會變回 Off。VM Storage 檔留在磁碟上（占空間），可以在 Finder 裡丟掉。不改 Gestalt（不影響其他檢查 MMU 的程式）。測試：`tests/host/test_sysvm.c`（`tools/make_macsys_image.sh` 合成的系統碟）、`make test-mac-disk`（本機：系統映像先用 `tools/mac_memory_vm.sh` 打開 VM，kernel 第一次開機要把它關掉並開到桌面）。
+
+## 15. 參數 RAM 的保存（P11 K1）
+
+模型的參數 RAM 是 `mac_t.xpram`（256 位元組，`emul_clknomem` 讀寫）；Mac OS 改了其中的位元組時 `xpram_dirty` 變成 true。kernel 在 68k_HAL 磁碟上把它存進 Boot 分割區的 `68k_hal/pram`，下次啟動時載入（格式、時機與其他設定的關係見 `docs/mac_disk.md` 第 6.1 節）。host 的 `mac_run -X <檔案>` 做同樣的事（256 位元組的原始內容）：`make test-rom` 用 Keyboard 控制台（`tools/mac_keyboard_panel.sh`）改「重複速度」與「重複延遲」，下一次執行打開控制台要看到同樣的設定。

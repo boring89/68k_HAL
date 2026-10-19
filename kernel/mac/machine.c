@@ -6,6 +6,8 @@
 #include "machine.h"
 
 #include "adbkeys.h"
+#include "pram.h"
+#include "sysvm.h"
 #include "emu/mac/mac.h"
 #include "emu/m68k/vm.h"
 #include "hal/boot.h"
@@ -748,6 +750,24 @@ static const struct
 #define KERNEL_MAC_TEST_SCRIPT
 #endif
 
+/*
+ * The parameter RAM is written to 68k_hal/pram once the Mac OS has left it alone for this many frames
+ * (2 s; a control panel writes several bytes in a row), and when the run ends (kernel/mac/pram.h).
+ */
+#define PRAM_SAVE_DELAY_FRAMES 120u
+
+/* mac_pram = off (68k_hal.cfg) keeps the parameter RAM fresh at every start, as before P11. */
+static bool pram_wanted(void)
+{
+    return k_strcmp(config_get_or("mac_pram", "on"), "off") != 0 && macdisk_boot() != NULL;
+}
+
+static void pram_save(const mac_t *mac)
+{
+    if (mac_pram_save(macdisk_boot(), mac->xpram) != 0)
+        kernel_printf("%s\n", "mac: cannot write the parameter RAM to 68k_hal/pram");
+}
+
 /* Frames the power key stays down: about 1/6 s, like a short press. */
 #define POWER_KEY_FRAMES 10
 
@@ -993,6 +1013,30 @@ int mac_machine_run(uint32_t frames)
         audio_count = 0;
         mac->audio = audio_collect;
     }
+    /*
+     * Virtual memory cannot run on this machine; a "VM on" left in the System file would stop every start
+     * (kernel/mac/sysvm.h). Only for real disks: the boot module's changes do not outlive this run.
+     */
+    if (drive != NULL)
+    {
+        int vm = sysvm_turn_off(drive);
+
+        if (vm > 0)
+            kernel_printf("%s\n", "mac: virtual memory was on in the System file; turned it off (not supported)");
+        else if (vm < 0)
+            kernel_printf("%s\n", "mac: could not check the System file for virtual memory");
+    }
+
+    /* The parameter RAM of the last run (control panel settings), from the Boot partition. */
+    bool keep_pram = pram_wanted();
+
+    if (keep_pram)
+    {
+        mac_pram_status_t pram = mac_pram_load(macdisk_boot(), mac->xpram);
+
+        kernel_printf("mac: parameter RAM: %s\n", mac_pram_status_name(pram));
+        keep_pram = pram == MAC_PRAM_OK || pram == MAC_PRAM_EMPTY || pram == MAC_PRAM_DAMAGED;
+    }
     mac_reset(mac);
 
     kernel_printf("%s\n", have_screen ? "mac: running (` stops)"
@@ -1013,6 +1057,7 @@ int mac_machine_run(uint32_t frames)
 
     uint64_t paced_start = hal_timer_ns();
     uint32_t power_key_frames = 0;
+    uint32_t pram_wait = 0;
     bool finder_seen = false;
 
     for (uint32_t frame = 1; frames == 0 || frame <= frames; frame++)
@@ -1054,6 +1099,17 @@ int mac_machine_run(uint32_t frames)
             finder_seen = true;
             kernel_printf("mac: the Finder runs after %u frames, %u ms\n", frame,
                           (unsigned int)((hal_timer_ns() - paced_start) / 1000000u));
+        }
+
+        /* The parameter RAM changed: write it once the Mac OS is done with it. */
+        if (keep_pram && mac->xpram_dirty)
+        {
+            mac->xpram_dirty = false;
+            pram_wait = PRAM_SAVE_DELAY_FRAMES;
+        }
+        else if (pram_wait > 0 && --pram_wait == 0)
+        {
+            pram_save(mac);
         }
 
         /* Shut Down or Restart in the Mac OS: the run ends (the machine follows below). */
@@ -1114,6 +1170,10 @@ int mac_machine_run(uint32_t frames)
         }
     }
     uint64_t wall_ns = hal_timer_ns() - paced_start;
+
+    /* Before the machine follows a Shut Down or Restart, and when ` stops the Mac. */
+    if (keep_pram && (pram_wait > 0 || mac->xpram_dirty))
+        pram_save(mac);
 
     if (frames == 0 && mac->card[0].present)
     {

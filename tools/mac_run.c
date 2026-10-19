@@ -19,6 +19,8 @@
  *   -M   dx,dy,button,frame: with -F, move the mouse by (dx,dy) at that frame (repeatable)
  *   -K   code,down,frame: with -F, a key (ADB code) goes down/up at that frame (repeatable)
  *   -R   present the disk as write-protected
+ *   -X   file: the parameter RAM (256 bytes): read from the file at the start if it exists, written at the end
+ *        (like 68k_hal/pram on a 68k_HAL disk, kernel/mac/pram.h)
  *   -p   write the screen as a PPM image at the end
  *   -m   print 16 bytes of guest memory at this address (hex) at the end
  *   -s   after a -b break, run this many more instructions
@@ -426,6 +428,7 @@ int main(int argc, char **argv)
     const char *ppm_path = NULL;
     const char *wav_path = NULL;
     const char *disk_out_path = NULL;
+    const char *xpram_path = NULL;
     int64_t beep_frame = -1;
     const char *save_path = NULL;
     uint32_t save_addr = 0;
@@ -612,6 +615,10 @@ int main(int argc, char **argv)
         {
             wav_path = argv[++i];
         }
+        else if (argv[i][0] == '-' && argv[i][1] == 'X' && i + 1 < argc)
+        {
+            xpram_path = argv[++i];
+        }
         else if (argv[i][0] == '-' && argv[i][1] == 'O' && i + 1 < argc)
         {
             /* -O file: write the disk image (with what the Mac changed) to that file at the end */
@@ -764,6 +771,17 @@ int main(int argc, char **argv)
     {
         mac.pc_hook = log_hook;
     }
+    if (xpram_path != NULL)
+    {
+        FILE *xf = fopen(xpram_path, "rb");
+
+        if (xf != NULL)
+        {
+            if (fread(mac.xpram, 1, sizeof mac.xpram, xf) != sizeof mac.xpram)
+                printf("mac: %s is shorter than 256 bytes\n", xpram_path);
+            fclose(xf);
+        }
+    }
     mac_reset(&mac);
     if (dis_n > 0)
     {
@@ -836,6 +854,17 @@ int main(int argc, char **argv)
                 printf("mac: %s at frame %u\n", mac.power_request == MAC_POWER_OFF ? "power off" : "restart", f);
                 break;
             }
+        }
+        if (xpram_path != NULL)
+        {
+            FILE *xf = fopen(xpram_path, "wb");
+
+            if (xf != NULL)
+            {
+                fwrite(mac.xpram, 1, sizeof mac.xpram, xf);
+                fclose(xf);
+            }
+            printf("mac: parameter RAM %s\n", mac.xpram_dirty ? "changed" : "unchanged");
         }
         if (disk_out_path != NULL && disk_image != NULL)
         {

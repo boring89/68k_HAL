@@ -262,6 +262,9 @@ HOST_LIB_SOURCES := \
 	kernel/keyboard/keychar.c \
 	kernel/keyboard/keyseq.c \
 	kernel/mac/adbkeys.c \
+	kernel/mac/pram.c \
+	kernel/mac/rsrc.c \
+	kernel/mac/sysvm.c \
 	kernel/block/block.c \
 	kernel/block/ramdisk.c \
 	kernel/block/overlay.c \
@@ -391,6 +394,16 @@ test-rom: $(BUILD)/host/mac_run_fast
 			if [ "$$n" != 2 ] || ! echo "$$two" | grep -q "on the desktop at 640,0"; then \
 				echo "test-rom: FAIL: two cards: $$n GDevices"; exit 1; fi; \
 			echo "test-rom: ok: two cards, the second screen right of the first"; \
+			mkdir -p $(BUILD)/mac; rm -f $(BUILD)/mac/pram_test.bin; \
+			$(BUILD)/host/mac_run_fast -F 2400 -t 0 $$(tools/mac_keyboard_panel.sh set) -X $(BUILD)/mac/pram_test.bin \
+				-d "$(MAC_DISK)" "$(MAC_ROM)" > /dev/null; \
+			kept=$$($(BUILD)/host/mac_run_fast -F 1900 -t 0 $$(tools/mac_keyboard_panel.sh) -X $(BUILD)/mac/pram_test.bin \
+				-d "$(MAC_DISK)" "$(MAC_ROM)" | sed -n 's/^mac: screen crc \([0-9a-f]*\).*/\1/p'); \
+			fresh=$$($(BUILD)/host/mac_run_fast -F 1900 -t 0 $$(tools/mac_keyboard_panel.sh) \
+				-d "$(MAC_DISK)" "$(MAC_ROM)" | sed -n 's/^mac: screen crc \([0-9a-f]*\).*/\1/p'); \
+			if [ -z "$$kept" ] || [ "$$kept" = "$$fresh" ]; then \
+				echo "test-rom: FAIL: the kept parameter RAM did not bring back the Keyboard settings"; exit 1; fi; \
+			echo "test-rom: ok: the parameter RAM kept the Keyboard control panel's settings (-X)"; \
 		fi; \
 	fi
 
@@ -641,28 +654,37 @@ mac-esp: $(BUILD)/kernel-gfx.elf $(BUILD)/kernel-gfx1080.elf $(BUILD)/kernel-gfx
 	cp "$(MAC_ROM)" $(MAC_ESP)/68k_hal/mac_rom
 	grub-editenv $(MAC_ESP)/68k_hal/grubenv create
 	grub-editenv $(MAC_ESP)/68k_hal/grubenv set boot_slot=a system_slot=a trial=
+	head -c 512 /dev/zero > $(MAC_ESP)/68k_hal/pram
 
 mac-disk: mac-esp tools/make_mac_disk.py
 	@if [ ! -f "$(MAC_DISK)" ]; then echo "mac-disk: no Mac system image (set MAC_DISK)"; exit 1; fi
 	python3 -I tools/make_mac_disk.py --out $(MAC_DISK_IMAGE) --system "$(MAC_DISK)" --esp-dir $(MAC_ESP) $(MAC_DISK_SIZES)
 	@ls -ls $(MAC_DISK_IMAGE)
 
-# The whole 68k_HAL disk under UEFI (local only: the user's ROM and System). First boot: straight into the
-# Mac; a folder in Applications (A, Command-O, Command-N, Command-W) and one on the desktop (Command-N), then
-# the power button and Return (Shut Down: QEMU ends). Second boot of the same image: both folders are
-# there (the HAL's HFS reader, after ` stops the Mac); macsys reset drops the one on the system disk and
-# keeps the one in Applications. A small image (the same layout, smaller partitions).
+# The whole 68k_HAL disk under UEFI (local only: the user's ROM and System). The system is a copy of
+# MAC_DISK on which the Memory control panel turned virtual memory on (tools/mac_memory_vm.sh in the host
+# runner; it would stop every start). First boot: the kernel turns virtual memory off and the parameter RAM
+# file is empty; straight into the Mac; a folder in Applications (A, Command-O, Command-N, Command-W) and one
+# on the desktop (Command-N), then the power button and Return (Shut Down: QEMU ends). Second boot of the
+# same image: the parameter RAM of the first boot is kept; both folders are there (the HAL's HFS reader,
+# after ` stops the Mac); macsys reset drops the one on the system disk and keeps the one in Applications.
+# A small image (the same layout, smaller partitions).
 MAC_TEST_DISK := $(BUILD)/mac/test_disk.img
-test-mac-disk: mac-esp
+MAC_VM_SYSTEM := $(BUILD)/mac/system_vm_on.img
+test-mac-disk: mac-esp $(BUILD)/host/mac_run_fast
 	@if [ ! -f "$(MAC_DISK)" ]; then echo "test-mac-disk: SKIP (no MAC_DISK)"; exit 0; fi; \
-	python3 -I tools/make_mac_disk.py --out $(MAC_TEST_DISK) --system "$(MAC_DISK)" --esp-dir $(MAC_ESP) \
+	$(BUILD)/host/mac_run_fast -F 3000 -t 0 $$(tools/mac_memory_vm.sh) -d "$(MAC_DISK)" -O $(MAC_VM_SYSTEM) \
+		"$(MAC_ROM)" | grep -q "power off" || { echo "test-mac-disk: FAIL: turning virtual memory on"; exit 1; }; \
+	python3 -I tools/make_mac_disk.py --out $(MAC_TEST_DISK) --system $(MAC_VM_SYSTEM) --esp-dir $(MAC_ESP) \
 		--boot-mib 64 --system-mib 64 --overlay-mib 256 --apps-mib 64 || exit 1; \
 	python3 -I tools/mac_disk_check.py --uefi --no-reboot --disk $(MAC_TEST_DISK) --serial-out $(BUILD)/mac/test_disk_1.log \
 		--run "wait:75" "key:a" "wait:2" "key:alt-o" "wait:6" "key:alt-n" "wait:6" "key:alt-w" "wait:4" \
 		"key:alt-n" "wait:6" "shot:$(BUILD)/mac/test_disk_1.ppm" "monitor:system_powerdown" "wait:5" "key:ret" "quit" \
-		"expect:autostart: mac" "expect:the Mac OS shut down" || exit 1; \
+		"expect:autostart: mac" "expect:the Mac OS shut down" "expect:parameter RAM: empty" \
+		"expect:virtual memory was on in the System file" || exit 1; \
 	python3 -I tools/mac_disk_check.py --uefi --no-reboot --disk $(MAC_TEST_DISK) --serial-out $(BUILD)/mac/test_disk_2.log \
-		--run "wait:75" "shot:$(BUILD)/mac/test_disk_2.ppm" "key:grave_accent" "wait:4" \
+		--run "mark" "wait:75" "shot:$(BUILD)/mac/test_disk_2.ppm" "key:grave_accent" "wait:4" \
+		"expect:parameter RAM: kept" "reject-new:virtual memory was on" \
 		"mark" "shell:mount system" "shell:ls Desktop Folder" "wait:2" "expect-new:untitled folder" \
 		"mark" "shell:mount apps" "shell:ls" "wait:2" "expect-new:untitled folder" \
 		"shell:macsys reset" "wait:3" "expect-new:system overlay is empty" \
@@ -729,6 +751,11 @@ $(BUILD)/images/hfs.img: tools/make_hfs_image.sh
 	mkdir -p $(dir $@)
 	tools/make_hfs_image.sh $@
 
+# A blessed System Folder whose 'zsys' file has a 'vm  ' resource (kernel/mac/sysvm.c).
+$(BUILD)/images/macsys.img: tools/make_macsys_image.sh
+	mkdir -p $(dir $@)
+	tools/make_macsys_image.sh $@
+
 $(BUILD)/images/fat.img: tools/make_fat_image.sh
 	mkdir -p $(dir $@)
 	tools/make_fat_image.sh $@
@@ -749,7 +776,7 @@ $(BUILD)/images/disk.img: $(BUILD)/images/hfs.img tools/make_disk_image.py
 test-mac-stub:
 	python3 -I tools/gen_mac_stub.py --check
 
-test-host: test-mac-stub $(HOST_TESTS) $(M68K_TEST_BINS) $(BUILD)/images/apm.img $(BUILD)/images/fat.img $(BUILD)/images/gpt.img $(BUILD)/images/gpt_fat.img $(BUILD)/images/hfs.img $(BUILD)/images/disk.img
+test-host: test-mac-stub $(HOST_TESTS) $(M68K_TEST_BINS) $(BUILD)/images/apm.img $(BUILD)/images/fat.img $(BUILD)/images/gpt.img $(BUILD)/images/gpt_fat.img $(BUILD)/images/hfs.img $(BUILD)/images/macsys.img $(BUILD)/images/disk.img
 	@for t in $(HOST_TESTS); do ./$$t || exit 1; done
 
 # SingleStepTests 68000 data (https://github.com/SingleStepTests/680x0, put

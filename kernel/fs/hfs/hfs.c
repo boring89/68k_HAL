@@ -25,6 +25,7 @@
 #define MDB_VOLUME_NAME 36      /* Str27 */
 #define MDB_FOLDER_COUNT 88
 #define MDB_FILE_COUNT_32 84
+#define MDB_FINDER_INFO 92      /* drFndrInfo: 8 longs, [0] = blessed folder (Inside Macintosh: Files 2-60) */
 #define MDB_EXTENTS_LENGTH 130
 #define MDB_EXTENTS_EXTENTS 134 /* 3 extent descriptors */
 #define MDB_CATALOG_LENGTH 146
@@ -487,13 +488,8 @@ int hfs_list(hfs_volume_t *volume, uint32_t folder_id, hfs_list_fn fn,
                       &search) < 0 ? -1 : 0;
 }
 
-int hfs_read(hfs_volume_t *volume, const hfs_entry_t *entry,
-             hfs_fork_kind_t fork, uint32_t offset, void *buffer,
-             uint32_t length)
+static fork_t entry_fork(const hfs_entry_t *entry, hfs_fork_kind_t fork)
 {
-    if (volume == NULL || entry == NULL || buffer == NULL || entry->is_folder)
-        return -1;
-
     fork_t source;
 
     source.kind = fork == HFS_FORK_DATA ? FORK_DATA : FORK_RESOURCE;
@@ -504,6 +500,18 @@ int hfs_read(hfs_volume_t *volume, const hfs_entry_t *entry,
     k_memcpy(source.extents,
              fork == HFS_FORK_DATA ? entry->data_extents : entry->rsrc_extents,
              sizeof(source.extents));
+
+    return source;
+}
+
+int hfs_read(hfs_volume_t *volume, const hfs_entry_t *entry,
+             hfs_fork_kind_t fork, uint32_t offset, void *buffer,
+             uint32_t length)
+{
+    if (volume == NULL || entry == NULL || buffer == NULL || entry->is_folder)
+        return -1;
+
+    fork_t source = entry_fork(entry, fork);
 
     if (offset >= source.length)
         return 0;
@@ -523,6 +531,32 @@ int hfs_read(hfs_volume_t *volume, const hfs_entry_t *entry,
 /* ------------------------------------------------------------------ */
 
 /* Node size and first leaf from the header node (node 0) of a tree. */
+int hfs_fork_locate(hfs_volume_t *volume, const hfs_entry_t *entry,
+                    hfs_fork_kind_t fork, uint32_t offset,
+                    uint64_t *device_block, uint32_t *block_offset)
+{
+    if (volume == NULL || entry == NULL || device_block == NULL ||
+        block_offset == NULL || entry->is_folder)
+        return -1;
+
+    fork_t source = entry_fork(entry, fork);
+    uint32_t volume_block;
+
+    if (offset >= source.length ||
+        fork_block_to_volume(volume, &source, offset / volume->alloc_block_size,
+                             &volume_block) != 0)
+        return -1;
+
+    uint64_t byte = (uint64_t)volume->alloc_start * BLOCK_SIZE +
+                    (uint64_t)volume_block * volume->alloc_block_size +
+                    offset % volume->alloc_block_size;
+
+    *device_block = volume->base + byte / BLOCK_SIZE;
+    *block_offset = (uint32_t)(byte % BLOCK_SIZE);
+
+    return 0;
+}
+
 static int read_tree_header(const hfs_volume_t *volume, const fork_t *tree,
                             uint32_t *first_leaf)
 {
@@ -562,6 +596,7 @@ int hfs_mount(hfs_volume_t *volume, block_device_t *device, uint64_t start,
     volume->free_alloc_blocks = be16(mdb + MDB_FREE_BLOCKS);
     volume->file_count = be32(mdb + MDB_FILE_COUNT_32);
     volume->folder_count = be32(mdb + MDB_FOLDER_COUNT);
+    volume->blessed_folder = be32(mdb + MDB_FINDER_INFO);
 
     if (volume->alloc_block_size == 0 ||
         volume->alloc_block_size % BLOCK_SIZE != 0 ||

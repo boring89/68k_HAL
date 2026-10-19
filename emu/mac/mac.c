@@ -518,10 +518,16 @@ static void emul_clknomem(mac_t *mac)
         }
         else
         {
+            uint8_t old = *cell;
+
             *cell = (uint8_t)data;
             if (cell == &mac->xpram[XPRAM_ADDRESSING])
             {
                 *cell = XPRAM_32BIT;
+            }
+            if (*cell != old)
+            {
+                mac->xpram_dirty = true;
             }
         }
     }
