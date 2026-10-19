@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+> **已封存（v1.0 final，2026-10-19）**：68k_HAL 停在 v1.0，repo 在 GitHub 上是唯讀的；後續開發在新專案 STELA（不依賴任何 Apple 元件，Mac 只當可選的 Classic 環境）。以下內容保留為 v1.0 的開發紀錄。
+
 68k_HAL：在 x86-64（預設；長模式，使用者程式是 i386 compatibility mode）上執行的實驗性 OS 核心，也可建成 32 位元（`make ARCH=i386`，輸出 `build/i386/`），長期目標是讓 Classic Mac OS 的架構在現代硬體上延續（參見 README.md）。目前為早期開發階段。
 
 ## 回應規則
@@ -72,7 +74,7 @@ platform/pc/   PC 平台：boot（Multiboot 進入點、hal_boot）、video（fr
 drivers/       裝置驅動：vga、serial、ps2_keyboard、ps2_mouse、ata（讀寫，見 docs/storage.md）、ahci（SATA）、e1000 與 virtio_net（網卡）、hda（Intel HD Audio）、bga（Bochs VBE 顯示）、usb_host（列舉 USB 控制器）、xhci（xHCI 控制器、HID 鍵盤滑鼠）、nvme（NVMe，輪詢）、e1000e（82574L 與 I219）
 kernel/        與硬體無關的核心：main.c、panic、memory（pmm、heap）、block（區塊裝置、ramdisk、overlay 寫入時複製的疊加層）、fs（apm、gpt、fat（只找檔案的磁區）、grubenv、macdisk = 68k_HAL 磁碟配置與槽、hfs 唯讀、volume、ehfs = 自己的檔案系統；見 docs/hfs.md、docs/mac_disk.md、docs/ehfs.md）、config（68k_hal.cfg 與命令列的設定）、display（含 fb_scale、fbcon 圖形模式文字終端）、console、terminal（含 mirror、ANSI 解析器 ansi）、keyboard（keycode、state、keychar、keyseq 按鍵序列）、input、shell、log、printf、lib、m68k（guest RAM 與示範）、mac（在 kernel 裡執行 Mac、參數 RAM、VM 開關、外部檔案系統的後端 fs_hal 與 fs_ehfs；見 docs/mac.md、docs/fsm.md）、user（ELF 載入器、系統呼叫、console；見 docs/userland.md）、vfs（ramfs、tarfs、hfsfs、ehfsfs = /ehfs、devfs 的 console；見 docs/userland.md、docs/ehfs.md）、net（packet 純函式、tcp、net 堆疊；見 docs/net.md）、usb（控制器註冊表；見 docs/usb.md）、sound（見 docs/sound.md）、pci（名稱表；見 docs/pci.md）、test
 emu/m68k/      68k 虛擬機：Musashi 的封裝層（vm：含可選的 bus 與逐指令 hook）、A-line trap 分派（trap）、Musashi 設定（m68kconf.h）；freestanding/ 是 kernel 建置用的 libc 替身
-emu/mac/       Mac IIci 機器模型（M-P3，見 docs/mac.md）：記憶體配置與模擬 opcode（mac.c）、ROM 修補（rom_patch.c）、VIA（via.c）、RBV/DAC/視訊（video.c）、虛擬 NuBus 顯示卡（nubus_video.c、nubus_driver.s；docs/nubus_video.md）、IWM、SCSI、.Disk 驅動（disk.c、stub.s）、外部檔案系統（fsm.c、fsm.s、fs_paths.c；docs/fsm.md）；與硬體無關，檔案由使用者提供，不在 repo
+emu/mac/       Mac IIci 機器模型（M-P3，見 docs/mac.md）：記憶體配置與模擬 opcode（mac.c）、ROM 修補（rom_patch.c）、VIA（via.c）、RBV/DAC/視訊（video.c）、虛擬 NuBus 顯示卡（nubus_video.c、nubus_driver.s；docs/nubus_video.md）、IWM、SCSI、.Disk 驅動（disk.c、stub.s）、外部檔案系統（fsm.c、fsm.s、fs_paths.c、mac_roman.c = UTF-8 ↔ Mac Roman；docs/fsm.md）；與硬體無關，檔案由使用者提供，不在 repo
 third_party/   第三方原始碼，不修改：musashi（68k CPU 核心，MIT）、x86emu（X.org 的真實模式 x86 模擬器，MIT/X11 類；platform/pc/video/vbe.c 用）；downloads/ 是下載的 musl、Lua、TinyCC、Haiku（gitignore）
 sdk/           C SDK 的執行期輔助（rt/divdi3.c：32 位元的 64 位元除法，因為 host 沒有 32 位元 libgcc）
 userland/      範例使用者程式（C，用 tools/68khal-cc 編譯）、data/（程式讀的檔案）、expected/（預期輸出）
@@ -177,7 +179,7 @@ Claude 依照上方工作規則直接實作。
 - 更新率只有韌體設定的模式（通常 60 Hz）；UEFI 開機後不能換實體解析度（沒有 video BIOS）；兩者都需要原生 NVIDIA 驅動（`docs/gpu.md` 第 8 節）。
 - 滑鼠事件（`INPUT_EVENT_MOUSE`）進入 input buffer 但主迴圈忽略。
 - HFS 名稱比較只對 ASCII 不分大小寫，查詢是線性掃描（見 `docs/hfs.md`）。
-- eHFS（`docs/ehfs.md` 11 節）：fsck 只檢查不修復；延伸屬性的值最多 3 KiB；一次只掛一顆卷宗；`/ehfs` 的 readdir 每次從頭走；`rename` 覆蓋目標分兩個交易。Mac 端（`docs/fsm.md` 第 7 節）：名字只有 ASCII（Mac Roman 的對照表待決定）、卷宗最多顯示 2 GB、卷宗的 Finder 資訊不保存、沒有檔案 ID 參照與 CatSearch；HAL 與 Data 卷宗（以及 Applications）在桌面上是一般的文件圖示。
+- eHFS（`docs/ehfs.md` 11 節）：fsck 只檢查不修復；延伸屬性的值最多 3 KiB；一次只掛一顆卷宗；`/ehfs` 的 readdir 每次從頭走；`rename` 覆蓋目標分兩個交易。Mac 端（`docs/fsm.md` 第 7 節）：名字只有 Mac Roman 的字元（其他是 `_` 加 `#<ID>`），大小寫只對 ASCII 不分、卷宗最多顯示 2 GB、卷宗的 Finder 資訊不保存、沒有檔案 ID 參照與 CatSearch；HAL 與 Data 卷宗（以及 Applications）在桌面上是一般的文件圖示。
 - ATA 驅動只支援 primary master、LBA28、輪詢（可讀寫，寫入後 FLUSH CACHE）。
 - 68k_HAL 磁碟（`docs/mac_disk.md`）：只支援 UEFI 開機；系統卷宗的大小是原始映像的大小（不是分割區的 1 GiB）；區塊大小必須是 512（4 KiB 區塊的 NVMe 不行）；疊加層的資料區用完時寫入失敗（不回收）。
 - 使用者程式：多工（fork／execve／wait／pipe／訊號，最多 64 個行程；協作式排程加上「只在使用者模式被計時器打斷」的搶佔；kernel 內不搶佔；fork 複製整個位址空間；沒有執行緒、alarm、作業控制，見 `docs/process.md` 第 9 節）；終端機沒有 UTF-8；沒有 NX（可讀即可執行）；堆疊固定 2 MiB。見 `docs/userland.md` 第 7 節。

@@ -1,26 +1,19 @@
 # 68k Hardware Abstraction Layer Project
 
- A modern Hardware Abstraction Layer designed to bring the classic Macintosh System experience to modern x86 hardware.
+> **Archived.** 68k_HAL ended with **v1.0** (the final release). It is kept here as the record of
+> the transitional phase; development continues in a new project, **STELA**, which does not
+> depend on any Apple component and keeps the Macintosh only as an optional Classic environment.
+> This repository is read-only: no further changes, issues or pull requests.
 
-> **Project Status:** Early Development
-
----
-
-## Overview
-
-68k HAL is an experimental operating system project that explores an alternative evolution of the classic Macintosh operating system.
-
-Instead of emulating old Macintosh hardware, this project aims to build a modern Hardware Abstraction Layer (HAL) that allows the architecture and philosophy of Classic Mac OS to evolve on contemporary hardware.
-
-The long-term vision is simple:
-
-> **What if Classic Mac OS had continued to evolve instead of being replaced?**
+68k_HAL is an experimental operating system kernel for x86-64 PCs that runs a Macintosh IIci
+(a 68030 emulated with Musashi) from the user's own ROM and System 7.5.3 disk image. At v1.0 a
+Lenovo ThinkStation P520 boots from its own disk straight into the Mac desktop at 2560x1440, with
+the Mac's changes kept in a power-fail-safe overlay over a never-modified System image, a
+journaled file system of its own (eHFS) for data, and updates that do not touch what the Mac wrote.
 
 ---
 
-## Features
-
-### Current
+## Features (v1.0)
 
 - x86-64 long mode kernel (the default; user programs run in i386 compatibility mode) and a 32-bit protected mode build, `make ARCH=i386` ([docs/x86_64.md](docs/x86_64.md))
 - GRUB Multiboot and Multiboot2 support
@@ -31,7 +24,7 @@ The long-term vision is simple:
 - 68k virtual machine (Musashi) and a Macintosh IIci machine model that boots a user-supplied ROM and System 7.5.3 disk image to the Finder desktop, with keyboard, mouse, sound (Apple Sound Chip), a real-time clock, a virtual NuBus video card (640x480 to 3840x2160, up to millions of colors, switched in the Monitors control panel) shown enlarged in half steps (HiDPI), and writes to an ATA disk (experimental, see [docs/mac.md](docs/mac.md) and [docs/nubus_video.md](docs/nubus_video.md); measurements for a true 2x HiDPI screen in [docs/hidpi.md](docs/hidpi.md))
 - A disk of its own for the Mac: `make mac-disk` builds a UEFI GPT image that boots straight into the Mac desktop, with the original System image never modified (the Mac's writes go to a power-fail-safe overlay that `macsys reset` drops), an Applications volume, two kernel and two System slots, a settings file, the Mac's parameter RAM kept between starts, and Shut Down / Restart / the power button mapped to ACPI ([docs/mac_disk.md](docs/mac_disk.md))
 - eHFS, a file system of its own: journaled metadata, B-trees, Unicode names (NFC, compared without regard to case), resource forks and Finder information, extended attributes; mounted read/write at `/ehfs`, with Linux tools `mkfs.ehfs`, `fsck.ehfs` and `ehfs-cp` ([docs/ehfs.md](docs/ehfs.md)). A data partition of the 68k_HAL disk holds one (`tools/add_data_partition.sh`)
-- An external file system for the Mac (System 7.5's File System Manager): the HAL's files appear on the Mac's desktop as a read-only volume "HAL", and the eHFS volume as a volume "Data" the Finder and applications write to ([docs/fsm.md](docs/fsm.md))
+- An external file system for the Mac (System 7.5's File System Manager): the HAL's files appear on the Mac's desktop as a read-only volume "HAL", and the eHFS volume as a volume "Data" the Finder and applications write to; names are converted between UTF-8 and Mac Roman ([docs/fsm.md](docs/fsm.md))
 - CPU: CPUID, x87/SSE, TSC nanosecond clock, ACPI tables, starting the other processors ([docs/cpu.md](docs/cpu.md))
 - Ring 3 user mode running static Linux i386 programs, with a C SDK (musl) so that C programs can be ported; Lua, SQLite, the Kilo editor, the Tiny C Compiler, dash and GNU make already run, and the OS can compile C itself; there is a terminal (ANSI, termios), a toolbox of shell commands with pipes and redirection, `/proc`, `/dev/fb0` and Linux input events ([docs/userland.md](docs/userland.md)). The text console also works in graphics mode
 - Virtual file tree (initrd, RAM disk `/tmp`, `/dev`, the Mac disk's HFS volume at `/hfs`, the eHFS volume at `/ehfs`)
@@ -44,22 +37,6 @@ The long-term vision is simple:
 - Real hardware: a USB image for the Lenovo ThinkStation P520 with safe mode and diagnostics ([docs/p520.md](docs/p520.md))
 - Audio: Intel HD Audio driver and a streaming sound interface ([docs/sound.md](docs/sound.md))
 - Graphics: Bochs/QEMU VGA mode setting at any resolution ([docs/gpu.md](docs/gpu.md))
-
-### Planned
-
-- 68k compatibility layer
-- Preemption inside the kernel, copy-on-write fork, threads
-- Mac Roman names on eHFS for the Mac; the Applications volume and the system overlay moved into eHFS
-- Native GPUs
-- Using the other processors (SMP scheduling)
-
----
-
-## Vision
-
-68k HAL is **not** an emulator or a Macintosh clone.
-
-The goal is to preserve the simplicity, usability, and software philosophy of the Classic Macintosh while replacing the underlying kernel, hardware abstraction, and drivers with modern implementations.
 
 ---
 
@@ -166,11 +143,7 @@ how to add one.
 
 ## Contributing
 
-Contributions are welcome!
-
-If you would like to contribute, please open an **Issue** first to discuss major architectural changes before submitting a **Pull Request**.
-
-Coding guidelines and contribution documentation will be added as the project matures.
+The project is archived and does not take contributions. See STELA for the work that continues.
 
 ---
 
