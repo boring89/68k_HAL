@@ -50,6 +50,8 @@ UNIQUE = {
     "apps": "68AC1001-0000-4000-8000-000000000005",
     "data": "68AC1001-0000-4000-8000-000000000006",
 }
+# Also the key of tools/68k_hal-noauto.rules, which keeps Linux desktops from mounting the disk
+# (docs/p520.md 7.2): change both together.
 DISK_GUID = "68AC1001-0000-4000-8000-000000000000"
 
 

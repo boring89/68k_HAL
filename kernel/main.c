@@ -216,7 +216,11 @@ void kernel_main(void)
                       overlay_status_name(macdisk_overlay_status()), config_get_or("kernel_slot", "?"));
 
         if (macdisk_overlay_status() == OVERLAY_MISMATCH)
-            kernel_log(LOG_WARN, "macdisk: the system overlay belongs to another System image and is not applied; 'macsys reset' starts a new one");
+        {
+            /* Usually the System partition was mounted read/write on Linux, which rewrote its volume header. */
+            kernel_log(LOG_WARN, "macdisk: the System image changed (mounted on Linux?), so the system overlay is not applied");
+            kernel_log(LOG_WARN, "macdisk: restore the System partition from the disk image (docs/p520.md 7.5) to keep the Mac's changes; 'macsys reset' drops them");
+        }
         else if (macdisk_overlay_status() != OVERLAY_OK)
             kernel_log(LOG_ERROR, "macdisk: the system overlay cannot be opened");
     }

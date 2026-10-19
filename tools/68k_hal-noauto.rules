@@ -1,0 +1,18 @@
+# Copyright (C) 2026 YuanChi Hsieh
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# udev rule for the Linux machine a 68k_HAL disk is attached to (docs/p520.md 7.2).
+# A Linux desktop shows the disk's HFS partitions and mounts them read/write when they are
+# opened (or by itself). Linux then rewrites the volume header of System A/B, so the system
+# overlay no longer matches the System image and the Mac does not start (docs/mac_disk.md 3).
+# UDISKS_IGNORE hides every partition of the disk from the desktop, so nothing mounts them.
+#
+# The key is the disk GUID that tools/make_mac_disk.py gives every 68k_HAL disk.
+#
+# Install:  sudo cp tools/68k_hal-noauto.rules /etc/udev/rules.d/99-68k_hal-noauto.rules
+#           sudo udevadm control --reload
+#           sudo udevadm trigger --action=change --subsystem-match=block
+# Check:    udevadm info /dev/sdX2 | grep UDISKS_IGNORE      (prints E: UDISKS_IGNORE=1)
+# Remove:   sudo rm /etc/udev/rules.d/99-68k_hal-noauto.rules, then the two udevadm lines
+
+ENV{ID_PART_TABLE_UUID}=="68ac1001-0000-4000-8000-000000000000", ENV{UDISKS_IGNORE}="1"

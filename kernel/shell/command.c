@@ -2343,8 +2343,10 @@ static void cmd_macsys(
     }
     else if (macdisk_overlay_status() == OVERLAY_MISMATCH)
     {
-        terminal_write_line("  The overlay belongs to another System image and is not applied.");
-        terminal_write_line("  'macsys reset' empties it and binds it to this image.");
+        terminal_write_line("  The System image is not the one the overlay was made for, so the overlay is not applied.");
+        terminal_write_line("  Usually the System partition was mounted on Linux, which rewrote its volume header.");
+        terminal_write_line("  To keep the Mac's changes: restore the partition from the disk image (docs/p520.md 7.5).");
+        terminal_write_line("  To drop them: 'macsys reset' empties the overlay and binds it to this image.");
     }
 
     uint8_t xpram[MAC_PRAM_SIZE];

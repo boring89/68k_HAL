@@ -878,7 +878,7 @@ int mac_machine_run(uint32_t frames)
 
     if (macdisk_present() && system_disk == NULL && k_strcmp(disk_setting, "auto") == 0)
     {
-        kernel_printf("%s\n", "mac: the system overlay is not usable (see macsys status; macsys reset starts a new one)");
+        kernel_printf("%s\n", "mac: the system overlay is not usable; macsys status says why and what to do");
         goto out;
     }
     if (boot_module_find(MAC_MODULE_ROM, &rom_module) == NULL || (!disk_in_memory && drive == NULL))
