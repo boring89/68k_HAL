@@ -22,13 +22,13 @@ The long-term vision is simple:
 
 ### Current
 
-- x86 Protected Mode boot
-- GRUB Multiboot support
+- x86-64 long mode kernel (the default; user programs run in i386 compatibility mode) and a 32-bit protected mode build, `make ARCH=i386` ([docs/x86_64.md](docs/x86_64.md))
+- GRUB Multiboot and Multiboot2 support
 - VGA text console
-- Interrupt handling (IDT / PIC)
-- Basic keyboard input
-- Modular HAL architecture
-- 68k virtual machine (Musashi) and a Macintosh IIci machine model that boots a user-supplied ROM and System 7.5.3 disk image to the Finder desktop, with keyboard, mouse, sound (Apple Sound Chip), a real-time clock, a virtual NuBus video card (640x480 to 3840x2160, up to millions of colors, switched in the Monitors control panel) shown enlarged in half steps (HiDPI), and writes to an ATA disk (experimental, see [docs/mac.md](docs/mac.md) and [docs/nubus_video.md](docs/nubus_video.md))
+- Interrupt handling (IDT; 8259 PIC or local APIC and I/O APIC)
+- Keyboard and mouse input (PS/2 and USB)
+- Modular HAL architecture ([docs/hal.md](docs/hal.md))
+- 68k virtual machine (Musashi) and a Macintosh IIci machine model that boots a user-supplied ROM and System 7.5.3 disk image to the Finder desktop, with keyboard, mouse, sound (Apple Sound Chip), a real-time clock, a virtual NuBus video card (640x480 to 3840x2160, up to millions of colors, switched in the Monitors control panel) shown enlarged in half steps (HiDPI), and writes to an ATA disk (experimental, see [docs/mac.md](docs/mac.md) and [docs/nubus_video.md](docs/nubus_video.md); measurements for a true 2x HiDPI screen in [docs/hidpi.md](docs/hidpi.md))
 - A disk of its own for the Mac: `make mac-disk` builds a UEFI GPT image that boots straight into the Mac desktop, with the original System image never modified (the Mac's writes go to a power-fail-safe overlay that `macsys reset` drops), an Applications volume, two kernel and two System slots, a settings file, the Mac's parameter RAM kept between starts, and Shut Down / Restart / the power button mapped to ACPI ([docs/mac_disk.md](docs/mac_disk.md))
 - eHFS, a file system of its own: journaled metadata, B-trees, Unicode names (NFC, compared without regard to case), resource forks and Finder information, extended attributes; mounted read/write at `/ehfs`, with Linux tools `mkfs.ehfs`, `fsck.ehfs` and `ehfs-cp` ([docs/ehfs.md](docs/ehfs.md)). A data partition of the 68k_HAL disk holds one (`tools/add_data_partition.sh`)
 - An external file system for the Mac (System 7.5's File System Manager): the HAL's files appear on the Mac's desktop as a read-only volume "HAL", and the eHFS volume as a volume "Data" the Finder and applications write to ([docs/fsm.md](docs/fsm.md))
@@ -38,7 +38,7 @@ The long-term vision is simple:
 - PCI bus, driver framework and DMA memory ([docs/pci.md](docs/pci.md))
 - Networking: Intel e1000, e1000e/I219 and virtio-net drivers, ARP, IPv4, ICMP, UDP, TCP, DHCP, DNS, BSD sockets for programs ([docs/net.md](docs/net.md))
 - Storage: ATA (read/write), AHCI/SATA and NVMe drivers ([docs/storage.md](docs/storage.md))
-- USB: xHCI host controller with HID keyboards and mice, hot plug ([docs/usb.md](docs/usb.md)); the other controllers are listed
+- USB: xHCI host controller with HID keyboards and mice, hubs, USB sticks (mass storage) and hot plug ([docs/usb.md](docs/usb.md)); the other controllers are listed
 - Multitasking: processes with their own address spaces, `fork`/`execve`/`wait`, pipes, signals, scheduling (cooperative in the kernel, preemptive for user code) ([docs/process.md](docs/process.md))
 - Interrupts through the local APIC and I/O APIC, PCI MSI ([docs/apic.md](docs/apic.md)); Multiboot2 and UEFI boot (2560x1440 requested at boot); screen modes through the video BIOS's VBE run in an emulated CPU (x86emu) on BIOS boots ([docs/gpu.md](docs/gpu.md)); big-screen console
 - Real hardware: a USB image for the Lenovo ThinkStation P520 with safe mode and diagnostics ([docs/p520.md](docs/p520.md))
@@ -48,9 +48,9 @@ The long-term vision is simple:
 ### Planned
 
 - 68k compatibility layer
-- Preemptive multitasking, copy-on-write fork, threads
+- Preemption inside the kernel, copy-on-write fork, threads
 - Mac Roman names on eHFS for the Mac; the Applications volume and the system overlay moved into eHFS
-- USB hubs and mass storage, native GPUs
+- Native GPUs
 - Using the other processors (SMP scheduling)
 
 ---
@@ -78,8 +78,8 @@ The goal is to preserve the simplicity, usability, and software philosophy of th
 | GRUB BIOS modules | `grub-pc-bin` | Make the ISO bootable on BIOS (QEMU's default firmware) |
 | `xorriso` | `xorriso` | Used by `grub-mkrescue` to write the ISO |
 | `mformat` | `mtools` | Used by `grub-mkrescue` to build the EFI image |
-| `qemu-system-i386` | `qemu-system-x86` | Run the kernel and the in-kernel self tests |
-| OVMF (UEFI firmware for QEMU) | `ovmf` | Only for `make test-uefi` and `make test-usb-image` (not part of `make test`) |
+| `qemu-system-x86_64`, `qemu-system-i386` | `qemu-system-x86` | Run the kernel (64-bit and 32-bit builds) and the in-kernel self tests |
+| OVMF (UEFI firmware for QEMU) | `ovmf` | Only for `make test-uefi`, `make test-usb-image` and the local Mac disk tests (`make test-mac-disk`, `make test-mac-update`, `make mac-uefi-shot`); not part of `make test` |
 | GRUB UEFI modules | `grub-efi-amd64-bin` | The UEFI half of the ISO and the USB image (`grub-mkrescue` adds it when present) |
 | `python3` | `python3` | Generate the test disk images (`tools/make_*_image.py`); also the optional `tools/boot_log.py` and `tools/fb_check.py` |
 | `sgdisk` | `gdisk` | Partition the 68k_HAL disk image (`tools/make_mac_disk.py`, `make test-update-script`, `make test-data-partition`, `make test-ehfs-qemu`); `grub-editenv` (`grub2-common`) and `mtools` are used there too |
@@ -96,7 +96,7 @@ make            # build/kernel.elf (64-bit kernel; make ARCH=i386 builds the 32-
 make iso        # build/68k_HAL.iso (BIOS and UEFI)
 make usb-image  # build/68k_HAL_usb.img for a USB stick, with a boot menu (see docs/p520.md)
 make run        # boot the ISO in QEMU, serial output on stdio
-make test       # boundary check, host unit tests, QEMU self tests, shell and video tests
+make test       # boundary check, host unit tests, QEMU self tests, shell, video, disk and eHFS tests
 make sdk        # the C SDK (musl) in build/sdk; downloads musl on the first run
 make initrd     # the example programs, Lua and tcc, packed as build/initrd.tar
 make ehfs-tools # mkfs.ehfs, fsck.ehfs, ehfs-cp in build/host/ehfs (eHFS images and partitions)
@@ -129,15 +129,19 @@ scale=1.5` chooses yourself (`depth=32` starts in millions of colors,
 while it runs, and the Monitors control panel switches depth and resolution
 ([docs/nubus_video.md](docs/nubus_video.md)). Details, the list of ROM
 patches and the known limits (no serial or network yet) are in
-[docs/mac.md](docs/mac.md). More local tests: `make test-mac-sound`,
-`make test-mac-clock`, `make test-mac-persist`, `make test-mac-perf`,
-`make mac-uefi-shot`.
+[docs/mac.md](docs/mac.md). The host runner shows a folder to the Mac as the
+read-only volume "HAL" with `-A <folder>` and an eHFS image as the writable
+volume "Data" with `-e <image>` ([docs/fsm.md](docs/fsm.md)). More local tests:
+`make test-mac-sound`, `make test-mac-clock`, `make test-mac-persist`,
+`make test-mac-perf`, `make test-mac-keys`, `make test-mac-fsm`,
+`make mac-hidpi-measure`, `make mac-uefi-shot`.
 
 A whole disk for the Mac (UEFI; boots straight into the desktop):
 
 ```bash
 make mac-disk MAC_ROM="Mac IIci.ROM" MAC_DISK=System7_5_3.img   # build/68k_HAL_mac.img
 make test-mac-disk MAC_ROM="Mac IIci.ROM" MAC_DISK=System7_5_3.img
+make test-mac-update MAC_ROM="Mac IIci.ROM" MAC_DISK=System7_5_3.img  # updates with tools/update_68khal.sh
 ```
 
 Writing it to a real disk is up to you: [docs/p520.md](docs/p520.md) section 7.
