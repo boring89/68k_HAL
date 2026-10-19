@@ -24,6 +24,23 @@
 int ehfs_bt_find(ehfs_t *fs, int tree, const uint8_t *key, uint32_t key_length, void *value, uint32_t value_size,
                  uint32_t *value_length);
 
+/*
+ * The record with the greatest key that is <= key: its key (at most key_size
+ * bytes, *found_length its length) and value. ENOENT if every key is greater.
+ */
+int ehfs_bt_find_le(ehfs_t *fs, int tree, const uint8_t *key, uint32_t key_length, uint8_t *found,
+                    uint32_t key_size, uint32_t *found_length, void *value, uint32_t value_size,
+                    uint32_t *value_length);
+
+/*
+ * The first record whose key is > key (or >= key when inclusive): its key and
+ * value copied out, so the caller may change the tree before asking for the
+ * next one. ENOENT at the end.
+ */
+int ehfs_bt_next(ehfs_t *fs, int tree, const uint8_t *key, uint32_t key_length, bool inclusive, uint8_t *found,
+                 uint32_t key_size, uint32_t *found_length, void *value, uint32_t value_size,
+                 uint32_t *value_length);
+
 /* Add a record. EEXIST if the key is there already. */
 int ehfs_bt_insert(ehfs_t *fs, int tree, const uint8_t *key, uint32_t key_length, const void *value,
                    uint32_t value_length);
@@ -52,7 +69,7 @@ uint64_t ehfs_bt_records(ehfs_t *fs, int tree);
 /*
  * fsck of one tree: every node reachable from the root, sorted keys within
  * the parent's bounds, the leaf chain, the header's counts and node map.
- * Problems are counted in report. Calls owner for the tree's own blocks too.
+ * Problems are counted in report.
  */
 int ehfs_bt_check(ehfs_t *fs, int tree, ehfs_check_t *report);
 

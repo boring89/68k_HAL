@@ -388,6 +388,107 @@ int ehfs_bt_find(ehfs_t *fs, int tree, const uint8_t *key, uint32_t key_length, 
     return EHFS_OK;
 }
 
+int ehfs_bt_find_le(ehfs_t *fs, int tree, const uint8_t *key, uint32_t key_length, uint8_t *found,
+                    uint32_t key_size, uint32_t *found_length, void *value, uint32_t value_size,
+                    uint32_t *value_length)
+{
+    path_t path;
+    bool exact;
+    int r = read_header(fs, tree);
+
+    if (r != EHFS_OK)
+        return r;
+    if (ehfs_le64(fs->node[2] + HDR_ROOT) == 0)
+        return EHFS_ENOENT;
+    r = descend(fs, tree, key, key_length, &path);
+    if (r != EHFS_OK)
+        return r;
+
+    uint8_t *node = fs->node[0];
+    uint32_t i = lower_bound(node, key, key_length, &exact);
+
+    if (!exact)
+    {
+        if (i == 0)
+        {
+            /* Every key here is greater: the last record of the leaf before, if any. */
+            uint64_t prev = ehfs_le64(node + NODE_PREV);
+
+            if (prev == 0)
+                return EHFS_ENOENT;
+            r = read_node(fs, tree, prev, node);
+            if (r != EHFS_OK)
+                return r;
+            if (count_of(node) == 0)
+                return EHFS_ECORRUPT;
+            i = count_of(node);
+        }
+        i--;
+    }
+
+    uint32_t k, v;
+    const uint8_t *kp = key_of(node, i, &k);
+    const uint8_t *vp = value_of(node, i, &v);
+
+    if (found != NULL)
+        k_memcpy(found, kp, k < key_size ? k : key_size);
+    if (found_length != NULL)
+        *found_length = k;
+    if (value != NULL)
+        k_memcpy(value, vp, v < value_size ? v : value_size);
+    if (value_length != NULL)
+        *value_length = v;
+    return EHFS_OK;
+}
+
+int ehfs_bt_next(ehfs_t *fs, int tree, const uint8_t *key, uint32_t key_length, bool inclusive, uint8_t *found,
+                 uint32_t key_size, uint32_t *found_length, void *value, uint32_t value_size,
+                 uint32_t *value_length)
+{
+    path_t path;
+    bool exact;
+    int r = read_header(fs, tree);
+
+    if (r != EHFS_OK)
+        return r;
+    if (ehfs_le64(fs->node[2] + HDR_ROOT) == 0)
+        return EHFS_ENOENT;
+    r = descend(fs, tree, key, key_length, &path);
+    if (r != EHFS_OK)
+        return r;
+
+    uint8_t *node = fs->node[0];
+    uint32_t i = lower_bound(node, key, key_length, &exact);
+
+    if (exact && !inclusive)
+        i++;
+    while (i >= count_of(node))
+    {
+        uint64_t next = ehfs_le64(node + NODE_NEXT);
+
+        if (next == 0)
+            return EHFS_ENOENT;
+        r = read_node(fs, tree, next, node);
+        if (r != EHFS_OK)
+            return r;
+        i = 0;
+    }
+
+    uint32_t k, v;
+    const uint8_t *kp = key_of(node, i, &k);
+    const uint8_t *vp = value_of(node, i, &v);
+
+    if (k > key_size || v > value_size)
+        return EHFS_ECORRUPT;
+    k_memcpy(found, kp, k);
+    *found_length = k;
+    if (value != NULL)
+        k_memcpy(value, vp, v);
+    if (value_length != NULL)
+        *value_length = v;
+    return EHFS_OK;
+}
+
 uint64_t ehfs_bt_records(ehfs_t *fs, int tree)
 {
     return read_header(fs, tree) == EHFS_OK ? ehfs_le64(fs->node[2] + HDR_RECORDS) : 0;

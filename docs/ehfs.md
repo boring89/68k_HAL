@@ -1,6 +1,6 @@
 # eHFS：68k_HAL 的檔案系統
 
-> **狀態（P11 K4，進行中）**：核心已實作（`kernel/fs/ehfs/`）：名稱的比較形式（NFC + 大小寫折疊）、metadata 日誌、bitmap、mkfs、fsck、B-tree、catalog。檔案內容（fork、extent）、延伸屬性、Linux 工具、kernel 的掛載與 Mac 端（`docs/fsm.md`）接著做。使用者 2026-10-19 決定了第 9 節的 E1–E9，並同意 P11 自動實作、事後審核。第 3–5 節是設計；實作的細節與和設計不同的地方在第 11 節。
+> **狀態（P11 K4，進行中）**：核心已實作（`kernel/fs/ehfs/`）：名稱的比較形式（NFC + 大小寫折疊）、metadata 日誌、bitmap、mkfs、fsck、B-tree、catalog、檔案內容（fork、extent）、延伸屬性；Linux 工具 `mkfs.ehfs`、`fsck.ehfs`、`ehfs-cp`（`make ehfs-tools`）。kernel 的掛載與 Mac 端（`docs/fsm.md`）接著做。使用者 2026-10-19 決定了第 9 節的 E1–E9，並同意 P11 自動實作、事後審核。第 3–5 節是設計；實作的細節與和設計不同的地方在第 11 節。
 
 ## 1. 要解決什麼
 
@@ -88,18 +88,18 @@ fork 描述（144 位元組）
   extent[8]          每個 =（起始區塊 8, 區塊數 8）
 ```
 
-超過 8 段的檔案，其餘的 extent 放在 extents B-tree，鍵 =（CNID, fork 種類, 該段在檔案中的起始區塊）。
+超過 8 段的檔案，其餘的 extent 放在 extents B-tree，鍵 =（CNID, fork 種類, 該段在檔案中的起始區塊）。實作：鍵 17 位元組（大端序 CNID 8、fork 1（0 = 資料、1 = 資源）、起始區塊 8），值 = 8 段（和 fork 描述裡的一樣，沒用到的是 0）。
 
 ### 4.4 延伸屬性（attributes B-tree）
 
-鍵 =（CNID, 屬性名稱 UTF-8）；值小的（≤ 3 KiB）直接放在記錄裡，大的用 fork 描述。用途：Linux 的 xattr、之後的其他 metadata。Finder 資訊與 type/creator **不**放這裡（內建欄位，Mac 每次都要用）。
+鍵 =（CNID, 屬性名稱 UTF-8）；值小的（≤ 3 KiB）直接放在記錄裡，大的用 fork 描述（實作：只有直接放的，值 = u16 種類（1）、u32 長度、內容；超過 3 KiB 的拒絕。名稱分大小寫，不正規化）。用途：Linux 的 xattr、之後的其他 metadata。Finder 資訊與 type/creator **不**放這裡（內建欄位，Mac 每次都要用）。
 
 ## 5. 日誌（只記 metadata）
 
 - 物理區塊日誌（像 ext4 的 jbd2、HFS+ 的 journal）：一個交易 = 描述區塊（要改哪些區塊）＋ 那些 metadata 區塊的新內容 ＋ 提交區塊（含 CRC32C）。提交後再寫到真正的位置（checkpoint）。掛載時若有提交完整、還沒 checkpoint 的交易就重做；不完整的丟掉。
 - **ordered 模式**：新配置給檔案的資料區塊先寫，metadata 交易後提交——斷電後不會看到別人的舊資料。
 - 資料本身不寫日誌、不算 checksum（效能；第 9 節）。
-- 日誌是 CNID 7 的檔案，mkfs 時配置（預設 64 MiB）。
+- 日誌是 CNID 7 的檔案，mkfs 時配置（實作：預設是卷宗的 1/256，260–16384 個區塊，也就是 1–64 MiB）。
 
 ## 6. 名稱：UTF-8 與 Mac 端的 31 字元
 
@@ -113,11 +113,11 @@ fork 描述（144 位元組）
 - Mac 的 dirID／fileID 是 32 位元：外掛直接用 CNID 的低 32 位元；CNID 依序配置，40 億個以內不會衝突（超過時的處理見第 9 節）。
 - 卷宗的資料在 HAL 端讀寫（kernel 裡的 eHFS 程式碼），Mac 端的外掛只是轉接：一個模擬 opcode 把參數區塊交給 HAL（和 `.Disk` 驅動相同的手法，`docs/mac.md` 第 6 節）。
 
-## 8. 工具與程式碼的組織（預定）
+## 8. 工具與程式碼的組織
 
 ```
 kernel/fs/ehfs/      freestanding 的核心（B-tree、bitmap、日誌、CRC32C）：kernel 與工具共用
-tools/ehfs/          Linux 端：mkfs.ehfs、fsck.ehfs、ehfs-cp（複製進出，fork 與 Finder 資訊用 AppleDouble 或 xattr）
+tools/ehfs/          Linux 端：mkfs.ehfs、fsck.ehfs、ehfs-cp（複製進出，fork 與 Finder 資訊用 xattr，E7）
 emu/mac/fsm_*        Mac 端的 FSM 外掛（68k 碼）與它的模擬 opcode
 ```
 
@@ -157,6 +157,8 @@ host 單元測試照現在的做法（`tests/host/`）；fsck 是測試的主力
 | `mkfs.c` | 建立空的卷宗與根資料夾 |
 | `btree.c` | B+-tree |
 | `catalog.c` | 目錄：記錄、thread、建立、刪除、搬移與改名、列出 |
+| `fork.c` | fork 的區塊：檔案區塊 → 裝置區塊、加長（盡量接在最後一段後面）、縮短（連同用不到的 extents 記錄） |
+| `file.c` | 給 kernel、Mac 端、Linux 工具用的操作：建立、刪除（連同 fork 的區塊與屬性）、搬移、資訊（旗標、時間、Finder 資訊）、讀、寫、設定長度、延伸屬性 |
 | `check.c` | fsck（只檢查，不修復） |
 
 `kernel/lib/k_crc32c.c`：CRC-32C（Castagnoli，RFC 3720 附錄 B）。
@@ -170,10 +172,27 @@ host 單元測試照現在的做法（`tests/host/`）；fsck 是測試的主力
 - **樹的成長**：樹的檔案用完時加倍，新的區塊接在 superblock 的 fork 描述後面（最多 8 段）。
 - **catalog**：鍵 = 父 CNID（大端序 8 位元組）＋ 名稱的比較形式。thread 的鍵只有 CNID 的 8 位元組，所以排在那個資料夾的子項目之前。記錄裡存原本的名稱（UTF-8）。根資料夾（CNID 2）的父親是 1，名稱是卷宗名稱。superblock 的資料夾數不算根資料夾。
 - **日誌**：一次只有一個交易：描述區塊（要改的區塊號碼，最多 256 個）、新內容、提交區塊（CRC32C 涵蓋描述與內容）。提交後馬上寫回原位，再更新日誌的標頭。mount 時若有完整、比標頭新的交易就重做；唯讀 mount 不寫，交易的區塊只在記憶體裡讀取。
-- **fsck**：superblock 與副本、特殊檔案、每棵樹的結構（排序、範圍、鏈結、計數、節點 bitmap）、catalog（記錄與 thread 互相對應、鍵與名稱一致、子項目數、檔案與資料夾數、CNID 範圍與 E5）、bitmap 與所有擁有者（逐一 bitmap 區塊比對，記憶體固定，大卷宗較慢）。
+- **檔案的寫入**：ordered——資料先寫到區塊，再提交把區塊交給檔案（並改長度）的交易。fork 新得到的區塊沒寫到的部分補 0，看不到舊資料；寫在檔案結尾之後時，中間的空隙也補 0。大的寫入、縮短與刪除切成每個交易最多 256 個區塊（1 MiB）；在兩個交易之間斷電，結果是一致的、做了一部分的狀態（例：檔案只寫了前 1 MiB）。
+- **時間**：1970 年起的奈秒（UTC），每個項目 5 個：建立、修改、屬性修改、存取、備份。
+- **fsck**：superblock 與副本、特殊檔案、每棵樹的結構（排序、範圍、鏈結、計數、節點 bitmap）、catalog（記錄與 thread 互相對應、鍵與名稱一致、子項目數、檔案與資料夾數、CNID 範圍與 E5）、fork（每段在卷宗內、加起來等於區塊數、長度不超過區塊數、extents 記錄的鍵與內容相符、沒有孤兒記錄）、屬性（擁有者存在、格式）、bitmap 與所有擁有者（逐一 bitmap 區塊比對，記憶體固定，大卷宗較慢）。
 
 ### 11.3 測試（`make test` 的 host 測試）
 
 - `test_ehfs`：CRC-32C 的標準值、名稱（大小寫、NFC、韓文、希臘文、ß 不折成 ss、不合法的 UTF-8）、mkfs／mount／唯讀、配置與釋放、在提交過程中的每一個寫入點斷電（重新 mount 後要嘛全有、要嘛全無；唯讀 mount 也看得到已提交的交易）、損壞的 superblock、不認得的 incompat 旗標、bitmap 與標頭節點被改壞時 fsck 抓得到。
 - `test_ehfs_btree`：4000 個鍵的 12,000 次隨機插入、刪除、替換（值從幾個位元組到 3 KiB），每 1500 次用 fsck 與參考模型比對；樹的檔案成長；全部刪光；遞增與遞減的順序；左邊界；太大的記錄。
 - `test_ehfs_catalog`：根資料夾、巢狀的資料夾與檔案、不分大小寫與 NFC 的查詢、用 CNID 找、列出的順序、改名、搬移（不能搬進自己）、刪除（不能刪有東西的資料夾）、2000 個檔案、建立的交易在每一個寫入點斷電。
+- `test_ehfs_file`：讀寫（跨區塊、空隙補 0、超過 8 段後進 extents 樹、幾十段的碎片檔案）、縮短與加長、資源 fork、刪除後區塊歸還、Finder 資訊與時間、延伸屬性（建立、替換、列出、刪除、3 KiB 上限）、加長檔案的寫入在每一個寫入點斷電（舊的部分不變，長度是舊的或新的）。每個測試之後跑 fsck。
+- `make test-ehfs-tools`（`tools/ehfs_tools_check.py`）：在映像檔上用 Linux 工具：mkfs、複製一個資料夾樹進去（UTF-8 名稱、3 MB 的檔案、資源 fork、Finder 資訊、其他 xattr）、列出、fsck、複製出來比對內容與 xattr、刪除、建立資料夾、在分割區偏移上操作（之前的位元組不變）、改壞 catalog 節點後 fsck 回報、拒絕不是一般檔案的目標。
+
+### 11.4 Linux 工具（`make ehfs-tools` → `build/host/ehfs/`）
+
+| 工具 | 用法 |
+|---|---|
+| `mkfs.ehfs` | `mkfs.ehfs [-L 名稱] [--offset 磁區] [--sectors N] [--journal 區塊] [--device] 目標` |
+| `fsck.ehfs` | `fsck.ehfs [--offset 磁區] [--device] 目標`：只檢查；結束碼 0 = 乾淨、1 = 有問題、2 = 讀不了 |
+| `ehfs-cp` | `ehfs-cp [--offset 磁區] [--device] 目標 in 本機路徑 eHFS路徑`、`out eHFS路徑 本機路徑`、`ls [eHFS路徑]`、`mkdir eHFS路徑`、`rm eHFS路徑` |
+
+- 目標預設只能是映像檔；不是一般檔案（`/dev/sdX`）時要加 `--device` 才會動手——先在映像檔上用。`--offset` 是分割區的第一個磁區（512 位元組）。
+- Mac 的部分在 Linux 端是 xattr（E7）：`user.com.apple.ResourceFork` = 資源 fork，`user.com.apple.FinderInfo` = 32 位元組的 Finder 資訊（type、creator、旗標……）。Linux 的 xattr 要有命名空間，所以加上 `user.`。其他 xattr 以同樣的名字存成 eHFS 的屬性（3 KiB 以內）。
+- 和 kernel 共用 `kernel/fs/ehfs/` 的程式碼；用 `-O2` 編譯，不開 sanitizer（host 測試另外有 ASan/UBSan）。
+

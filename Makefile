@@ -55,7 +55,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: test-ehfs-unicode test-mac-fsm mac-hidpi-measure mac-esp mac-disk test-macdisk test-mac-disk test-mac-update test-update-script test-mac-remember test-mac-hotkeys test-vbe mac-uefi-shot test-mac-perf test-pci-roots test-power usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: ehfs-tools test-ehfs-tools test-ehfs-unicode test-mac-fsm mac-hidpi-measure mac-esp mac-disk test-macdisk test-mac-disk test-mac-update test-update-script test-mac-remember test-mac-hotkeys test-vbe mac-uefi-shot test-mac-perf test-pci-roots test-power usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -368,6 +368,26 @@ $(BUILD)/host/mac_run_fast: $(MAC_FAST_SOURCES) tools/mac_measure.h tools/mac_tr
 		-DMUSASHI_CNF='"$(MUSASHI_CNF)"' $(MAC_FAST_SOURCES) \
 		$(MUSASHI_GEN)/m68kops.c $(MUSASHI)/m68kcpu.c $(MUSASHI)/m68kdasm.c \
 		$(MUSASHI)/softfloat/softfloat.c -lm -o $@
+
+# The Linux tools of eHFS (docs/ehfs.md): mkfs.ehfs, fsck.ehfs, ehfs-cp. Optimized and
+# without the sanitizers: they are meant for real volumes (images first).
+EHFS_TOOL_DIR := $(BUILD)/host/ehfs
+EHFS_TOOL_LIB := tools/ehfs/ehfs_tool.c $(wildcard kernel/fs/ehfs/*.c) kernel/lib/k_crc32c.c kernel/lib/k_string.c \
+	kernel/lib/k_memory.c kernel/block/block.c kernel/block/cache.c
+EHFS_TOOL_DEPS := $(EHFS_TOOL_LIB) tools/ehfs/ehfs_tool.h $(wildcard kernel/fs/ehfs/*.h) kernel/block/block.h
+EHFS_TOOLS := $(EHFS_TOOL_DIR)/mkfs.ehfs $(EHFS_TOOL_DIR)/fsck.ehfs $(EHFS_TOOL_DIR)/ehfs-cp
+
+$(EHFS_TOOL_DIR)/mkfs.ehfs: tools/ehfs/mkfs_ehfs.c $(EHFS_TOOL_DEPS)
+$(EHFS_TOOL_DIR)/fsck.ehfs: tools/ehfs/fsck_ehfs.c $(EHFS_TOOL_DEPS)
+$(EHFS_TOOL_DIR)/ehfs-cp: tools/ehfs/ehfs_cp.c $(EHFS_TOOL_DEPS)
+$(EHFS_TOOLS):
+	mkdir -p $(dir $@)
+	$(HOST_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -I. $< $(EHFS_TOOL_LIB) -o $@
+
+ehfs-tools: $(EHFS_TOOLS)
+
+test-ehfs-tools: $(EHFS_TOOLS)
+	python3 -I tools/ehfs_tools_check.py $(EHFS_TOOL_DIR) $(BUILD)/ehfs_tools_test
 
 # The user's own ROM and disk image. They are never copied into the
 # repository, and make test does not need them.
@@ -1156,4 +1176,4 @@ test-boundary:
 	done
 	@echo "boundary check: PASS"
 
-test: test-boundary test-host test-qemu test-noapic test-q35 test-usb test-e1000e test-shell test-macdisk test-update-script test-video test-vbe test-fb test-net test-virtio-net test-pci-roots
+test: test-boundary test-host test-ehfs-tools test-qemu test-noapic test-q35 test-usb test-e1000e test-shell test-macdisk test-update-script test-video test-vbe test-fb test-net test-virtio-net test-pci-roots

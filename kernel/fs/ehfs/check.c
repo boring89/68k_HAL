@@ -13,6 +13,7 @@
 #include "btree.h"
 #include "catalog.h"
 #include "ehfs.h"
+#include "file.h"
 
 #include "kernel/lib/k_crc32c.h"
 #include "kernel/lib/k_memory.h"
@@ -36,31 +37,6 @@ static void problem(ehfs_check_t *report, const char *what)
 
 typedef int (*extent_fn)(void *ctx, uint64_t start, uint64_t count);
 
-typedef struct
-{
-    extent_fn visit;
-    void *ctx;
-} file_walk_t;
-
-static int file_extents(void *ctx, const ehfs_entry_t *e)
-{
-    file_walk_t *w = ctx;
-    const uint8_t *forks[2] = {e->data_fork, e->rsrc_fork};
-    int r = EHFS_OK;
-
-    for (int f = 0; f < 2 && r == EHFS_OK; f++)
-    {
-        for (uint32_t i = 0; r == EHFS_OK && i < EHFS_INLINE_EXTENTS; i++)
-        {
-            uint64_t count = ehfs_le64(forks[f] + FORK_EXTENT + 16 * i + 8);
-
-            if (count != 0)
-                r = w->visit(w->ctx, ehfs_le64(forks[f] + FORK_EXTENT + 16 * i), count);
-        }
-    }
-    return r;
-}
-
 /* Every run of blocks that something owns. */
 static int walk_owners(ehfs_t *fs, extent_fn visit, void *ctx)
 {
@@ -81,11 +57,7 @@ static int walk_owners(ehfs_t *fs, extent_fn visit, void *ctx)
         }
     }
     if (r == EHFS_OK)
-    {
-        file_walk_t w = {visit, ctx};
-
-        r = ehfs_cat_each_file(fs, file_extents, &w);
-    }
+        r = ehfs_file_runs(fs, visit, ctx);
     return r;
 }
 
@@ -200,6 +172,8 @@ int ehfs_check(ehfs_t *fs, ehfs_check_t *report)
     }
     if (report->errors == 0)
         ehfs_cat_check(fs, report);
+    if (report->errors == 0)
+        ehfs_file_check(fs, report);
 
     /* The bitmap, one block at a time, against the owners. */
     uint64_t used = 0;
