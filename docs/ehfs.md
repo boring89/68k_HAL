@@ -1,6 +1,6 @@
 # eHFS：68k_HAL 的檔案系統
 
-> **狀態（P11 K4，進行中）**：核心已實作（`kernel/fs/ehfs/`）：名稱的比較形式（NFC + 大小寫折疊）、metadata 日誌、bitmap、mkfs、fsck、B-tree、catalog、檔案內容（fork、extent）、延伸屬性；Linux 工具 `mkfs.ehfs`、`fsck.ehfs`、`ehfs-cp`（`make ehfs-tools`）；kernel 掛在檔案樹的 `/ehfs`（11.5 節）；Mac 桌面上的可讀寫卷宗「Data」（P11 K5，`docs/fsm.md` 第 7 節）；68k_HAL 磁碟的資料分割區（`docs/mac_disk.md` 8.5 節）。使用者 2026-10-19 決定了第 9 節的 E1–E9，並同意 P11 自動實作、事後審核。第 3–5 節是設計；實作的細節與和設計不同的地方在第 11 節。
+> **狀態（P11 K4–K5 完成，使用者尚未審核）**：已實作（`kernel/fs/ehfs/`）：名稱的比較形式（NFC + 大小寫折疊）、metadata 日誌、bitmap、mkfs、fsck、B-tree、catalog、檔案內容（fork、extent）、延伸屬性；Linux 工具 `mkfs.ehfs`、`fsck.ehfs`、`ehfs-cp`（`make ehfs-tools`）；kernel 掛在檔案樹的 `/ehfs`（11.5 節）；Mac 桌面上的可讀寫卷宗「Data」（P11 K5，`docs/fsm.md` 第 7 節）；68k_HAL 磁碟的資料分割區（`docs/mac_disk.md` 8.5 節）。使用者 2026-10-19 決定了第 9 節的 E1–E9，並同意 P11 自動實作、事後審核。第 3–5 節是設計；實作的細節與和設計不同的地方在第 11 節。
 
 ## 1. 要解決什麼
 
