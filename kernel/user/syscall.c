@@ -1106,6 +1106,15 @@ static int32_t clock_ns(uint32_t clock, int64_t *seconds, int64_t *nanoseconds)
     return -K_EINVAL;
 }
 
+uint64_t user_realtime_ns(void)
+{
+    int64_t seconds, nanoseconds;
+
+    clock_ns(0, &seconds, &nanoseconds);
+
+    return (uint64_t)seconds * 1000000000u + (uint64_t)nanoseconds;
+}
+
 static int32_t sys_clock_gettime(uint32_t clock, uint32_t address, int wide)
 {
     int64_t sec;

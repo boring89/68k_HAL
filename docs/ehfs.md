@@ -1,6 +1,6 @@
 # eHFS：68k_HAL 的檔案系統
 
-> **狀態（P11 K4，進行中）**：核心已實作（`kernel/fs/ehfs/`）：名稱的比較形式（NFC + 大小寫折疊）、metadata 日誌、bitmap、mkfs、fsck、B-tree、catalog、檔案內容（fork、extent）、延伸屬性；Linux 工具 `mkfs.ehfs`、`fsck.ehfs`、`ehfs-cp`（`make ehfs-tools`）。kernel 的掛載與 Mac 端（`docs/fsm.md`）接著做。使用者 2026-10-19 決定了第 9 節的 E1–E9，並同意 P11 自動實作、事後審核。第 3–5 節是設計；實作的細節與和設計不同的地方在第 11 節。
+> **狀態（P11 K4，進行中）**：核心已實作（`kernel/fs/ehfs/`）：名稱的比較形式（NFC + 大小寫折疊）、metadata 日誌、bitmap、mkfs、fsck、B-tree、catalog、檔案內容（fork、extent）、延伸屬性；Linux 工具 `mkfs.ehfs`、`fsck.ehfs`、`ehfs-cp`（`make ehfs-tools`）；kernel 掛在檔案樹的 `/ehfs`（11.5 節）。Mac 端（`docs/fsm.md`）接著做。使用者 2026-10-19 決定了第 9 節的 E1–E9，並同意 P11 自動實作、事後審核。第 3–5 節是設計；實作的細節與和設計不同的地方在第 11 節。
 
 ## 1. 要解決什麼
 
@@ -196,3 +196,16 @@ host 單元測試照現在的做法（`tests/host/`）；fsck 是測試的主力
 - Mac 的部分在 Linux 端是 xattr（E7）：`user.com.apple.ResourceFork` = 資源 fork，`user.com.apple.FinderInfo` = 32 位元組的 Finder 資訊（type、creator、旗標……）。Linux 的 xattr 要有命名空間，所以加上 `user.`。其他 xattr 以同樣的名字存成 eHFS 的屬性（3 KiB 以內）。
 - 和 kernel 共用 `kernel/fs/ehfs/` 的程式碼；用 `-O2` 編譯，不開 sanitizer（host 測試另外有 ASan/UBSan）。
 
+### 11.5 kernel：檔案樹的 `/ehfs`（`kernel/vfs/ehfsfs.c`）
+
+- **找卷宗**：開機時（macdisk 之後、檔案樹之前）依序看每個區塊裝置：sector 0 開始的裸卷宗，或 GPT 每個分割區的開頭——只認 superblock 的 magic，不看類型 GUID。第一個找到的以讀寫掛載（裝置不能寫就唯讀；區塊大小必須是 512）。開機訊息：`eHFS: "名稱" at /ehfs (read/write, 64 MiB)`。一次只有一個卷宗。
+- **能做的事**：讀、寫、建立（`O_CREAT`、`O_EXCL`）、`O_APPEND`、`O_TRUNC`、`ftruncate`、`mkdir`、`rmdir`、`unlink`、`rename`。shell 裡用工具箱：`box ls /ehfs`、`box cat /ehfs/檔案`、`cp`、`mkdir`、`>`／`>>` 轉向（內建的 `ls`、`cat` 仍然是 HFS 卷宗的）。
+- **名稱**：UTF-8 原樣；比較照 eHFS（NFC、不分大小寫），所以 `/ehfs/READ ME.TXT` 找得到 `Read Me.txt`；只改大小寫的 `rename` 可以。
+- **權限**：沒有 Unix 的擁有者與權限；顯示成資料夾 0755、檔案 0644。鎖定的項目（旗標 bit 0）顯示 0555／0444，開來寫回 `EACCES`，刪除回 `EPERM`。
+- **`rename` 的目標已經存在**時，先刪掉目標（檔案、或空的資料夾）再搬：兩個交易，中間斷電的話目標已經不在、來源還在原處。
+- **F4**：`ehfsfs_set_mac_running(true)` 期間，會改變卷宗的操作都回 `EROFS`（讀照常）；K5 在 Mac 執行時用。
+- **開著的檔案**記住卷宗的「代」：卸載或換了卷宗之後讀寫回 `EIO`。檔案被刪掉之後，開著的也讀不到（沒有 Unix「刪了還能讀到關檔為止」的語意）。
+- **關機**（`poweroff`、`reboot`、電源鍵、Mac 的 Shut Down／Restart）前卸載，superblock 標成乾淨。不卸載也不會壞（有日誌），只是 `fsck.ehfs` 會說沒有正常卸載。
+- **時間**：寫入的時間和使用者程式的 `clock_gettime(CLOCK_REALTIME)` 同一個來源（RTC 加單調時鐘）。
+- **限制**：`readdir` 每次從資料夾的開頭走（很大的資料夾列出來是 O(n²)）；資源 fork 與延伸屬性在檔案樹裡看不到（Mac 端與 `ehfs-cp` 才用）。
+- **測試**：host `test_ehfsfs`（檔案、資料夾、名稱、rename、F4、沒有卷宗與唯讀裝置）；`make test-ehfs-qemu`：`sgdisk` 在 `build/` 的映像檔建一個 GPT 分割區、`mkfs.ehfs`、`ehfs-cp` 放一個檔案，QEMU 裡用 shell 讀、建資料夾、複製、附加、`poweroff`，再在 host 上 `fsck.ehfs`（乾淨、正常卸載、檔案與資料夾數）並取出檔案比對。

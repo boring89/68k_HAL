@@ -23,6 +23,9 @@
 #include "kernel/config/config.h"
 #include "kernel/fs/macdisk.h"
 #include "kernel/fs/volume.h"
+#include "kernel/lib/k_memory.h"
+#include "kernel/lib/k_snprintf.h"
+#include "kernel/vfs/ehfsfs.h"
 
 #include "kernel/input/event_buffer.h"
 
@@ -156,6 +159,22 @@ static void mac_command_from_config(char *line, size_t size)
 /* Height of the colour bars above the graphics console. */
 #define FB_BARS_HEIGHT 16
 
+/* The boot message of the eHFS volume: its name, how it is mounted and its size. */
+static void report_ehfs_volume(void)
+{
+    const ehfs_t *fs = ehfsfs_volume();
+    char name[256];
+    uint32_t length = fs->sb[SB_NAME];
+
+    char line[320];
+
+    k_memcpy(name, fs->sb + SB_NAME + 1, length);
+    name[length] = '\0';
+    k_snprintf(line, sizeof line, "eHFS: \"%s\" at /ehfs (%s, %u MiB)", name, fs->read_only ? "read-only" : "read/write",
+               (unsigned int)(fs->blocks / (1024u * 1024u / EHFS_BLOCK_SIZE)));
+    kernel_log(LOG_INFO, line);
+}
+
 void kernel_main(void)
 {
     hal_init_console();
@@ -202,7 +221,11 @@ void kernel_main(void)
             kernel_log(LOG_ERROR, "macdisk: the system overlay cannot be opened");
     }
 
-    /* The file tree ("/", /tmp, /dev) and the mode switch for user programs. */
+    /* An eHFS volume (docs/ehfs.md): the file tree shows it at /ehfs. */
+    if (ehfsfs_mount_any() == 0)
+        report_ehfs_volume();
+
+    /* The file tree ("/", /tmp, /dev, /ehfs ...) and the mode switch for user programs. */
     user_init();
 
     /* Graphics mode: draw the text console on the framebuffer, under a strip of colour bars. */
@@ -331,6 +354,7 @@ void kernel_main(void)
         if (hal_power_button_pressed())
         {
             kernel_printf("%s\n", "Power button: turning the computer off");
+            ehfsfs_unmount();
             hal_power_off();
         }
 

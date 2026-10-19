@@ -26,6 +26,7 @@
 #include "kernel/memory/heap.h"
 #include "kernel/memory/pmm.h"
 #include "kernel/printf/printf.h"
+#include "kernel/vfs/ehfsfs.h"
 #include "kernel/vfs/hfsfs.h"
 #include "kernel/vfs/ramfs.h"
 #include "kernel/vfs/tarfs.h"
@@ -930,4 +931,5 @@ void user_init(void)
     mount_or_warn("/dev", devfs_create());
     mount_or_warn("/proc", procfiles_create());
     mount_or_warn("/hfs", hfsfs_create());
+    mount_or_warn("/ehfs", ehfsfs_create(user_realtime_ns));
 }

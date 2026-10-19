@@ -18,6 +18,7 @@
  *   /        the program disk (initrd, read-only)
  *   /tmp     a RAM file system (read/write)
  *   /hfs     the HFS volume of the Mac disk (read-only)
+ *   /ehfs    the eHFS volume (read/write; kernel/vfs/ehfsfs.h)
  *   /dev/... the console
  */
 

@@ -256,4 +256,7 @@ void user_socket_set_nonblock(vfs_file_t *file, int enabled);
 /* syscall.c */
 int32_t user_syscall(const hal_user_syscall_t *call);
 
+/* The time of day (CLOCK_REALTIME) in nanoseconds since 1970, UTC. */
+uint64_t user_realtime_ns(void);
+
 #endif

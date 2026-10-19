@@ -34,6 +34,7 @@
 #include "kernel/memory/heap.h"
 #include "kernel/printf/printf.h"
 #include "kernel/terminal/terminal.h"
+#include "kernel/vfs/ehfsfs.h"
 
 #include <stddef.h>
 
@@ -783,6 +784,8 @@ static void power_follows_mac(mac_power_t power, bool interactive)
 
     if (!interactive)
         return;
+
+    ehfsfs_unmount();
 
     if (power == MAC_POWER_OFF)
         hal_power_off();

@@ -26,6 +26,7 @@
 #include "kernel/mac/pram.h"
 #include "kernel/fs/volume.h"
 #include "kernel/user/process.h"
+#include "kernel/vfs/ehfsfs.h"
 #include "kernel/vfs/vfs.h"
 #include "kernel/lib/k_errno.h"
 #include "hal/boot.h"
@@ -2195,6 +2196,7 @@ static void cmd_poweroff(
     (void)argv;
 
     terminal_write_line("Powering off...");
+    ehfsfs_unmount();
     hal_power_off();
 }
 
@@ -2206,6 +2208,7 @@ static void cmd_reboot(
     (void)argv;
 
     terminal_write_line("Restarting...");
+    ehfsfs_unmount();
     hal_power_reboot();
 }
 

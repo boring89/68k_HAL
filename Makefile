@@ -55,7 +55,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: ehfs-tools test-ehfs-tools test-ehfs-unicode test-mac-fsm mac-hidpi-measure mac-esp mac-disk test-macdisk test-mac-disk test-mac-update test-update-script test-mac-remember test-mac-hotkeys test-vbe mac-uefi-shot test-mac-perf test-pci-roots test-power usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: ehfs-tools test-ehfs-tools test-ehfs-qemu test-ehfs-unicode test-mac-fsm mac-hidpi-measure mac-esp mac-disk test-macdisk test-mac-disk test-mac-update test-update-script test-mac-remember test-mac-hotkeys test-vbe mac-uefi-shot test-mac-perf test-pci-roots test-power usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -303,6 +303,7 @@ HOST_LIB_SOURCES := \
 	kernel/sound/sound.c \
 	kernel/user/elf.c \
 	kernel/user/region.c \
+	kernel/vfs/ehfsfs.c \
 	kernel/vfs/procfs.c \
 	kernel/vfs/ramfs.c \
 	kernel/vfs/tarfs.c \
@@ -1107,6 +1108,36 @@ test-macdisk: iso $(BUILD)/images/gpt.img
 		"macsys status=Overlay: ok" "macsys status=blocks written: 0" "disks=sys_a" "disks=apps" "disks=system: 40 x 512" \
 		"macsys bogus=usage: macsys" "cache bench sys_a 1=second read" "cache=hit rate"
 
+# eHFS in the kernel (kernel/vfs/ehfsfs.c): a GPT image with an eHFS partition on the SATA disk. The shell
+# reads /ehfs, makes a folder, copies and appends to a file and powers off; then the Linux tools check the
+# image: clean, unmounted cleanly, the file as written. Only image files under build/ are touched.
+EHFS_QEMU_IMAGE := $(BUILD)/images/ehfs_qemu.img
+test-ehfs-qemu: iso $(EHFS_TOOLS)
+	rm -rf $(BUILD)/ehfs_qemu && mkdir -p $(BUILD)/ehfs_qemu $(dir $(EHFS_QEMU_IMAGE))
+	rm -f $(EHFS_QEMU_IMAGE) && truncate -s 80M $(EHFS_QEMU_IMAGE)
+	sgdisk -n 1:2048:+64M -t 1:68AC0002-4441-5441-8D1E-68A1D5C0DE01 -c 1:"68k_HAL Data" $(EHFS_QEMU_IMAGE) > /dev/null
+	$(EHFS_TOOL_DIR)/mkfs.ehfs -L "Test Data" --offset 2048 --sectors 131072 $(EHFS_QEMU_IMAGE)
+	printf 'hello eHFS\n' > $(BUILD)/ehfs_qemu/readme.txt
+	$(EHFS_TOOL_DIR)/ehfs-cp --offset 2048 $(EHFS_QEMU_IMAGE) in $(BUILD)/ehfs_qemu/readme.txt /readme.txt
+	QEMU_ARGS="-machine q35 -boot d -drive file=$(EHFS_QEMU_IMAGE),format=raw,if=none,id=d0 -device ide-hd,drive=d0,bus=ide.0" \
+	python3 -I tools/shell_test.py $(BUILD)/68k_HAL.iso \
+		"dmesg=eHFS: \"Test Data\" at /ehfs (read/write, 64 MiB)" \
+		"box ls /ehfs=readme.txt" \
+		"box cat /ehfs/readme.txt=hello eHFS" \
+		"mkdir /ehfs/Notes=" \
+		"cp /data/message.txt /ehfs/Notes/m.txt=" \
+		"echo appended >> /ehfs/Notes/m.txt=" \
+		"wc -l /ehfs/Notes/m.txt=3 /ehfs/Notes/m.txt" \
+		"box cat /ehfs/Notes/m.txt=appended" \
+		"box ls /ehfs=Notes" \
+		"poweroff="
+	$(EHFS_TOOL_DIR)/fsck.ehfs --offset 2048 $(EHFS_QEMU_IMAGE) | tee $(BUILD)/ehfs_qemu/fsck.txt
+	! grep -q "not unmounted cleanly" $(BUILD)/ehfs_qemu/fsck.txt
+	grep -q "2 files, 1 folders" $(BUILD)/ehfs_qemu/fsck.txt
+	$(EHFS_TOOL_DIR)/ehfs-cp --offset 2048 $(EHFS_QEMU_IMAGE) out /Notes/m.txt $(BUILD)/ehfs_qemu/m.txt
+	{ cat userland/data/message.txt; echo appended; } | cmp - $(BUILD)/ehfs_qemu/m.txt
+	@echo "test-ehfs-qemu: PASS"
+
 # A second root bus (pxb-pcie is a host bridge of its own, like the extra root buses of the P520): the
 # root port on bus 0x20 and the card behind it on bus 0x21 must be found (hal_pci.c scans every bus).
 test-pci-roots: iso
@@ -1176,4 +1207,4 @@ test-boundary:
 	done
 	@echo "boundary check: PASS"
 
-test: test-boundary test-host test-ehfs-tools test-qemu test-noapic test-q35 test-usb test-e1000e test-shell test-macdisk test-update-script test-video test-vbe test-fb test-net test-virtio-net test-pci-roots
+test: test-boundary test-host test-ehfs-tools test-qemu test-noapic test-q35 test-usb test-e1000e test-shell test-ehfs-qemu test-macdisk test-update-script test-video test-vbe test-fb test-net test-virtio-net test-pci-roots
