@@ -55,7 +55,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: test-mac-fsm mac-hidpi-measure mac-esp mac-disk test-macdisk test-mac-disk test-mac-update test-update-script test-mac-remember test-mac-hotkeys test-vbe mac-uefi-shot test-mac-perf test-pci-roots test-power usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: test-ehfs-unicode test-mac-fsm mac-hidpi-measure mac-esp mac-disk test-macdisk test-mac-disk test-mac-update test-update-script test-mac-remember test-mac-hotkeys test-vbe mac-uefi-shot test-mac-perf test-pci-roots test-power usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -282,8 +282,10 @@ HOST_LIB_SOURCES := \
 	kernel/fs/grubenv.c \
 	kernel/fs/macdisk.c \
 	kernel/fs/hfs/hfs.c \
+	$(wildcard kernel/fs/ehfs/*.c) \
 	kernel/fs/volume.c \
 	kernel/lib/k_crc32.c \
+	kernel/lib/k_crc32c.c \
 	kernel/lib/k_string.c \
 	kernel/lib/k_number.c \
 	kernel/lib/k_snprintf.c \
@@ -807,7 +809,14 @@ $(BUILD)/images/disk.img: $(BUILD)/images/hfs.img tools/make_disk_image.py
 test-mac-stub:
 	python3 -I tools/gen_mac_stub.py --check
 
-test-host: test-mac-stub $(HOST_TESTS) $(M68K_TEST_BINS) $(BUILD)/images/apm.img $(BUILD)/images/fat.img $(BUILD)/images/gpt.img $(BUILD)/images/gpt_fat.img $(BUILD)/images/hfs.img $(BUILD)/images/macsys.img $(BUILD)/images/disk.img
+# kernel/fs/ehfs/unicode_data.h must be what tools/gen_ehfs_unicode.py makes of the Unicode 15.0 files
+# (checked when they have been downloaded into third_party/downloads/unicode-15.0.0/; see the script).
+test-ehfs-unicode:
+	@if [ -f third_party/downloads/unicode-15.0.0/UnicodeData.txt ]; then \
+		python3 -I tools/gen_ehfs_unicode.py --check && echo "test-ehfs-unicode: ok"; \
+	else echo "test-ehfs-unicode: SKIP (no Unicode data files)"; fi
+
+test-host: test-mac-stub test-ehfs-unicode $(HOST_TESTS) $(M68K_TEST_BINS) $(BUILD)/images/apm.img $(BUILD)/images/fat.img $(BUILD)/images/gpt.img $(BUILD)/images/gpt_fat.img $(BUILD)/images/hfs.img $(BUILD)/images/macsys.img $(BUILD)/images/disk.img
 	@for t in $(HOST_TESTS); do ./$$t || exit 1; done
 
 # SingleStepTests 68000 data (https://github.com/SingleStepTests/680x0, put

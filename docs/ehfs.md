@@ -1,6 +1,6 @@
-# eHFS：設計草稿（第二階段，尚未實作）
+# eHFS：68k_HAL 的檔案系統
 
-> **狀態：草稿。** 由 P10 的自動排程依使用者 2026-10-18 已同意的決策寫成，**沒有任何程式碼**。eHFS 是協作模式的新元件：實作前要逐項跟使用者確認（第 9 節列出還沒決定的事）。
+> **狀態（P11 K4，進行中）**：核心已實作（`kernel/fs/ehfs/`）：名稱的比較形式（NFC + 大小寫折疊）、metadata 日誌、bitmap、mkfs、fsck、B-tree、catalog。檔案內容（fork、extent）、延伸屬性、Linux 工具、kernel 的掛載與 Mac 端（`docs/fsm.md`）接著做。使用者 2026-10-19 決定了第 9 節的 E1–E9，並同意 P11 自動實作、事後審核。第 3–5 節是設計；實作的細節與和設計不同的地方在第 11 節。
 
 ## 1. 要解決什麼
 
@@ -123,19 +123,19 @@ emu/mac/fsm_*        Mac 端的 FSM 外掛（68k 碼）與它的模擬 opcode
 
 host 單元測試照現在的做法（`tests/host/`）；fsck 是測試的主力（每個寫入測試後跑一次 fsck）。
 
-## 9. 還沒決定的事（實作前要問使用者）
+## 9. 決定（使用者 2026-10-19「全部採用建議」）
 
-| # | 問題 | 選項 | 建議（理由） |
-|---|---|---|---|
-| E1 | Unicode 正規化 | NFC（Linux、Windows 的習慣）／NFD（舊 macOS 的習慣）／不正規化只比較 | NFC：和 Linux 工具互通最少意外 |
-| E2 | 大小寫比較用哪個版本的 Unicode 表 | 固定某版（例如 15.0）並寫進 superblock／跟著程式更新 | 固定並記錄版本：表一改，舊卷宗的排序會壞 |
-| E3 | B-tree 節點大小 | 4 KiB／16 KiB | 16 KiB：目錄大時樹比較矮；4 KiB 實作簡單 |
-| E4 | 資料要不要 checksum | 不要（只有 metadata）／可選 | 不要：先求簡單，之後可用 ro_compat 旗標加 |
-| E5 | CNID 超過 2^32 時 Mac 端怎麼辦 | 拒絕建立／Mac 端只看得到低位元不衝突的 | 拒絕（40 億個檔案在這台機器上不會發生）並在 fsck 報告 |
-| E6 | 區塊大小只允許 4 KiB 嗎 | 只 4 KiB／4–64 KiB 可選 | 先只 4 KiB；superblock 留著欄位 |
-| E7 | Linux 端複製工具的 fork 格式 | AppleDouble（`._name`）／xattr（`com.apple.ResourceFork`）／兩者 | xattr：ext4 支援，不會多出檔案 |
-| E8 | 系統碟的疊加層變成 eHFS 裡的檔案（記憶中的第二階段計畫）時，斷電安全怎麼和日誌配合 | 疊加層檔案預先配置、只覆寫（不改 metadata）／走日誌 | 預先配置：疊加層自己已經有斷電安全的順序 |
-| E9 | 名字：eHFS 確定嗎 | — | 使用者提議時帶問號 |
+| # | 問題 | 決定 |
+|---|---|---|
+| E1 | Unicode 正規化 | NFC |
+| E2 | 大小寫比較的表 | 固定 Unicode 15.0，版本寫在 superblock（偏移 1240） |
+| E3 | B-tree 節點大小 | 16 KiB |
+| E4 | 資料的 checksum | 不做（只有 metadata 有 CRC32C） |
+| E5 | CNID 超過 2^32 | 拒絕建立新項目；fsck 回報 |
+| E6 | 區塊大小 | 只有 4 KiB（superblock 有欄位） |
+| E7 | Linux 端的 fork 格式 | xattr（`com.apple.ResourceFork`、`com.apple.FinderInfo`） |
+| E8 | 疊加層變成 eHFS 檔案時 | 預先配置、只覆寫（之後的事） |
+| E9 | 名字 | 暫定 eHFS |
 
 ## 10. 為什麼這樣設計（參考）
 
@@ -143,3 +143,37 @@ host 單元測試照現在的做法（`tests/host/`）；fsck 是測試的主力
 - HFS+：Apple Technical Note TN1150（fork 描述內含 8 個 extent、特殊檔案也有 CNID、日誌）。只參考結構，不複製程式碼。
 - ext4／jbd2：日誌的交易格式（描述區塊、提交區塊）、feature 旗標的 compat／ro_compat／incompat 三分法。只參考概念（Linux 的程式碼是 GPL-2.0-only，不能引入）。
 - exFAT：bitmap 配置與簡單的 metadata checksum。
+
+## 11. 實作（P11 K4）
+
+### 11.1 程式
+
+| 檔案 | 內容 |
+|---|---|
+| `format.h` | 磁碟上的格式：所有偏移與常數 |
+| `name.c` | 名稱：UTF-8 檢查（1–255 位元組，不含 NUL 與 `/`）；比較形式 = NFC（UAX #15：標準分解、標準排序、標準組合，含韓文音節的演算法）再做 simple case folding（CaseFolding.txt 的 C 與 S）。表格 `unicode_data.h` 由 `tools/gen_ehfs_unicode.py` 從 Unicode 15.0 的資料檔產生（檢查 SHA-256；保留 Unicode License V3）。官方 NormalizationTest.txt 的 95,360 個 NFC 案例全部通過（手動驗證；`make test-ehfs-unicode` 檢查表格與產生器一致） |
+| `io.c` | 4 KiB 區塊的讀寫、交易、日誌、superblock、mount（重做日誌）、unmount |
+| `bitmap.c` | 配置與釋放（從提示的位置往後找第一段空的，再盡量延長；繞回開頭） |
+| `mkfs.c` | 建立空的卷宗與根資料夾 |
+| `btree.c` | B+-tree |
+| `catalog.c` | 目錄：記錄、thread、建立、刪除、搬移與改名、列出 |
+| `check.c` | fsck（只檢查，不修復） |
+
+`kernel/lib/k_crc32c.c`：CRC-32C（Castagnoli，RFC 3720 附錄 B）。
+
+### 11.2 和設計草稿不同或補上的細節
+
+- **位元組順序**：磁碟上的結構是小端序；**B-tree 的鍵**裡的整數用**大端序**，這樣三棵樹都直接用位元組比較（短的在前），B-tree 的程式只有一份。
+- **superblock**：保留區的偏移 1240 = Unicode 版本（`0x0F0000`），1244 = 節點大小（16384）。副本在最後一個區塊的位元組 1024。
+- **B-tree 節點**：標頭 32 位元組（CRC32C、種類、高度、記錄數、前後節點、空閒的起點）；記錄從前往後放（u16 鍵長、鍵、u16 值長、值），偏移表從節點尾端往前放。節點 0 是標頭節點（根、深度、節點數、空閒數、記錄數、第一與最後的 leaf、**節點的使用 bitmap**：16 KiB 的標頭最多管 130,304 個節點 = 2 GiB 的樹）。同一層的節點（包括索引節點）都有前後的連結，fsck 一層一層檢查。
+- **分隔鍵**：子節點的分隔鍵是它被分出時的第一個鍵；新根的最左邊子節點用空鍵；刪掉索引節點的第 0 筆時，新的第 0 筆沿用舊的鍵——所以每個索引節點的第一個鍵永遠是它整棵子樹的下界。不合併節點，空了才釋放；根只剩一個子節點就降一層。
+- **樹的成長**：樹的檔案用完時加倍，新的區塊接在 superblock 的 fork 描述後面（最多 8 段）。
+- **catalog**：鍵 = 父 CNID（大端序 8 位元組）＋ 名稱的比較形式。thread 的鍵只有 CNID 的 8 位元組，所以排在那個資料夾的子項目之前。記錄裡存原本的名稱（UTF-8）。根資料夾（CNID 2）的父親是 1，名稱是卷宗名稱。superblock 的資料夾數不算根資料夾。
+- **日誌**：一次只有一個交易：描述區塊（要改的區塊號碼，最多 256 個）、新內容、提交區塊（CRC32C 涵蓋描述與內容）。提交後馬上寫回原位，再更新日誌的標頭。mount 時若有完整、比標頭新的交易就重做；唯讀 mount 不寫，交易的區塊只在記憶體裡讀取。
+- **fsck**：superblock 與副本、特殊檔案、每棵樹的結構（排序、範圍、鏈結、計數、節點 bitmap）、catalog（記錄與 thread 互相對應、鍵與名稱一致、子項目數、檔案與資料夾數、CNID 範圍與 E5）、bitmap 與所有擁有者（逐一 bitmap 區塊比對，記憶體固定，大卷宗較慢）。
+
+### 11.3 測試（`make test` 的 host 測試）
+
+- `test_ehfs`：CRC-32C 的標準值、名稱（大小寫、NFC、韓文、希臘文、ß 不折成 ss、不合法的 UTF-8）、mkfs／mount／唯讀、配置與釋放、在提交過程中的每一個寫入點斷電（重新 mount 後要嘛全有、要嘛全無；唯讀 mount 也看得到已提交的交易）、損壞的 superblock、不認得的 incompat 旗標、bitmap 與標頭節點被改壞時 fsck 抓得到。
+- `test_ehfs_btree`：4000 個鍵的 12,000 次隨機插入、刪除、替換（值從幾個位元組到 3 KiB），每 1500 次用 fsck 與參考模型比對；樹的檔案成長；全部刪光；遞增與遞減的順序；左邊界；太大的記錄。
+- `test_ehfs_catalog`：根資料夾、巢狀的資料夾與檔案、不分大小寫與 NFC 的查詢、用 CNID 找、列出的順序、改名、搬移（不能搬進自己）、刪除（不能刪有東西的資料夾）、2000 個檔案、建立的交易在每一個寫入點斷電。
