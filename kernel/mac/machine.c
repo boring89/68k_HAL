@@ -6,6 +6,7 @@
 #include "machine.h"
 
 #include "adbkeys.h"
+#include "fs_hal.h"
 #include "pram.h"
 #include "sysvm.h"
 #include "emu/mac/mac.h"
@@ -1027,6 +1028,10 @@ int mac_machine_run(uint32_t frames)
             kernel_printf("%s\n", "mac: could not check the System file for virtual memory");
     }
 
+    /* The HAL's files as a read-only volume on the Mac's desktop (mounted once the Finder runs; docs/fsm.md). */
+    if (k_strcmp(config_get_or("mac_hal_volume", "on"), "off") != 0)
+        mac_fsm_attach(mac, mac_fs_hal());
+
     /* The parameter RAM of the last run (control panel settings), from the Boot partition. */
     bool keep_pram = pram_wanted();
 
@@ -1058,6 +1063,7 @@ int mac_machine_run(uint32_t frames)
     uint64_t paced_start = hal_timer_ns();
     uint32_t power_key_frames = 0;
     uint32_t pram_wait = 0;
+    bool hal_reported = false;
     bool finder_seen = false;
 
     for (uint32_t frame = 1; frames == 0 || frame <= frames; frame++)
@@ -1099,6 +1105,17 @@ int mac_machine_run(uint32_t frames)
             finder_seen = true;
             kernel_printf("mac: the Finder runs after %u frames, %u ms\n", frame,
                           (unsigned int)((hal_timer_ns() - paced_start) / 1000000u));
+        }
+
+        if (!hal_reported && mac->fsm.mounted)
+        {
+            hal_reported = true;
+            kernel_printf("mac: the HAL volume is mounted (drive %d)\n", mac->fsm.drive);
+        }
+        else if (!hal_reported && mac->fsm.install_error != 0)
+        {
+            hal_reported = true;
+            kernel_printf("mac: the HAL volume could not be mounted (%d)\n", mac->fsm.install_error);
         }
 
         /* The parameter RAM changed: write it once the Mac OS is done with it. */

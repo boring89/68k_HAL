@@ -2,8 +2,9 @@
 # Copyright (C) 2026 YuanChi Hsieh
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Assemble the 68k code of the Mac model and write the C headers:
-emu/mac/stub.s -> emu/mac/stub_code.h (mac_stub_code) and
-emu/mac/nubus_driver.s -> emu/mac/nubus_driver_code.h (mac_nubus_driver_code).
+emu/mac/stub.s -> emu/mac/stub_code.h (mac_stub_code),
+emu/mac/nubus_driver.s -> emu/mac/nubus_driver_code.h (mac_nubus_driver_code) and
+emu/mac/fsm.s -> emu/mac/fsm_code.h (mac_fsm_code).
 
 Usage: python3 -I tools/gen_mac_stub.py [--check]
 
@@ -22,6 +23,7 @@ TARGETS = [
     ("stub.s", "stub_code.h", "mac_stub_code", "EMU_MAC_STUB_CODE_H"),
     ("nubus_driver.s", "nubus_driver_code.h", "mac_nubus_driver_code",
      "EMU_MAC_NUBUS_DRIVER_CODE_H"),
+    ("fsm.s", "fsm_code.h", "mac_fsm_code", "EMU_MAC_FSM_CODE_H"),
 ]
 
 

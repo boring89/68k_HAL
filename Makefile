@@ -55,7 +55,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: mac-hidpi-measure mac-esp mac-disk test-macdisk test-mac-disk test-mac-update test-update-script test-mac-remember test-mac-hotkeys test-vbe mac-uefi-shot test-mac-perf test-pci-roots test-power usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: test-mac-fsm mac-hidpi-measure mac-esp mac-disk test-macdisk test-mac-disk test-mac-update test-update-script test-mac-remember test-mac-hotkeys test-vbe mac-uefi-shot test-mac-perf test-pci-roots test-power usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -357,7 +357,7 @@ $(BUILD)/host/mac_run: tools/mac_run.c $(HOST_LIB_OBJECTS) $(BUILD)/host/obj/$(M
 
 # The same runner without the sanitizers and with optimization, about 10x
 # faster; for long runs of the real ROM.
-MAC_FAST_SOURCES := tools/mac_run.c tools/mac_measure.c $(wildcard emu/mac/*.c) emu/m68k/vm.c \
+MAC_FAST_SOURCES := tools/mac_run.c tools/mac_measure.c $(wildcard emu/mac/*.c) emu/m68k/vm.c kernel/lib/k_string.c \
 	emu/m68k/trap.c kernel/lib/k_memory.c
 $(BUILD)/host/mac_run_fast: $(MAC_FAST_SOURCES) tools/mac_measure.h tools/mac_traps.h $(wildcard emu/mac/*.h) $(wildcard emu/m68k/*.h) $(MUSASHI_GEN)/m68kops.c \
 		$(MUSASHI)/m68kcpu.c $(MUSASHI)/m68kdasm.c $(MUSASHI)/softfloat/softfloat.c
@@ -408,8 +408,11 @@ test-rom: $(BUILD)/host/mac_run_fast
 	fi
 
 # The same Mac in the kernel (kernel/mac), booted by QEMU with the ROM and the
-# disk image as boot modules (kernel/mac/machine.h), twice: with the NuBus card
-# (MAC_TEST_RES, MAC_TEST_DEPTH) and with the built-in video. The kernel runs
+# disk image as boot modules (kernel/mac/machine.h), three times: with the NuBus card
+# (MAC_TEST_RES, MAC_TEST_DEPTH), with the built-in video, and with the card for
+# MAC_TEST_HAL_FRAMES frames. The kernel shows its files as the HAL volume once
+# the Finder runs (docs/fsm.md); the host shows an empty folder (-A) in its place,
+# which looks the same on the desktop. The kernel runs
 # MAC_TEST_FRAMES frames without a screen and prints the CRC-32 of the final
 # picture, which must equal what the host runner computes for the same number
 # of frames. KVM is used when available. Local only: needs MAC_ROM and
@@ -417,6 +420,7 @@ test-rom: $(BUILD)/host/mac_run_fast
 MAC_TEST_FRAMES ?= 600
 MAC_TEST_RES ?= 640x480
 MAC_TEST_DEPTH ?= 1
+MAC_TEST_HAL_FRAMES ?= 1800
 test-rom-qemu: $(BUILD)/host/mac_run_fast
 	@if [ ! -f "$(MAC_ROM)" ] || [ ! -f "$(MAC_DISK)" ]; then \
 		echo "test-rom-qemu: SKIP (no ROM or disk; set MAC_ROM and MAC_DISK)"; exit 0; fi; \
@@ -424,18 +428,25 @@ test-rom-qemu: $(BUILD)/host/mac_run_fast
 	cp "$(MAC_ROM)" $(BUILD)/mac/rom.bin; \
 	cp "$(MAC_DISK)" $(BUILD)/mac/disk.img; \
 	w=$(word 1,$(subst x, ,$(MAC_TEST_RES))); h=$(word 2,$(subst x, ,$(MAC_TEST_RES))); \
-	for config in card builtin; do \
+	mkdir -p $(BUILD)/mac/hal_folder; \
+	for config in card builtin hal; do \
+		frames=$(MAC_TEST_FRAMES); \
 		if [ $$config = card ]; then \
+			flags="-DKERNEL_MAC_TEST_WIDTH=$$w -DKERNEL_MAC_TEST_HEIGHT=$$h -DKERNEL_MAC_TEST_DEPTH=$(MAC_TEST_DEPTH)"; \
+			host="-C $(MAC_TEST_RES)x$(MAC_TEST_DEPTH)"; \
+		elif [ $$config = hal ]; then \
+			frames=$(MAC_TEST_HAL_FRAMES); \
 			flags="-DKERNEL_MAC_TEST_WIDTH=$$w -DKERNEL_MAC_TEST_HEIGHT=$$h -DKERNEL_MAC_TEST_DEPTH=$(MAC_TEST_DEPTH)"; \
 			host="-C $(MAC_TEST_RES)x$(MAC_TEST_DEPTH)"; \
 		else \
 			flags="-DKERNEL_MAC_TEST_BUILTIN"; host="-I"; \
 		fi; \
-		kbuild=$(BUILD)/mac/kernel-$(MAC_TEST_FRAMES)-$$config; \
+		host="$$host -A $(BUILD)/mac/hal_folder"; \
+		kbuild=$(BUILD)/mac/kernel-$$frames-$$config; \
 		$(MAKE) --no-print-directory BUILD=$$kbuild \
-			EXTRA_CFLAGS="-DKERNEL_MAC_TEST -DKERNEL_MAC_TEST_FRAMES=$(MAC_TEST_FRAMES) $$flags" \
+			EXTRA_CFLAGS="-DKERNEL_MAC_TEST -DKERNEL_MAC_TEST_FRAMES=$$frames $$flags" \
 			$$kbuild/kernel.elf > /dev/null || exit 1; \
-		want=$$($(BUILD)/host/mac_run_fast -F $(MAC_TEST_FRAMES) $$host -d "$(MAC_DISK)" "$(MAC_ROM)" | sed -n 's/^mac: screen crc \([0-9a-f]*\) .*/\1/p'); \
+		want=$$($(BUILD)/host/mac_run_fast -F $$frames $$host -d "$(MAC_DISK)" "$(MAC_ROM)" | sed -n 's/^mac: screen crc \([0-9a-f]*\) .*/\1/p'); \
 		accel=""; [ -w /dev/kvm ] && accel="-enable-kvm"; \
 		out=$(BUILD)/mac/qemu-$$config.out; \
 		$(QEMU) $$accel -m 256 -display none -serial stdio \
@@ -661,6 +672,12 @@ mac-disk: mac-esp tools/make_mac_disk.py
 	python3 -I tools/make_mac_disk.py --out $(MAC_DISK_IMAGE) --system "$(MAC_DISK)" --esp-dir $(MAC_ESP) $(MAC_DISK_SIZES)
 	@ls -ls $(MAC_DISK_IMAGE)
 
+# The external file system (docs/fsm.md; local only): a host folder as the Mac's read-only HAL volume in the
+# host runner; the Finder mounts and opens it, a file is copied onto the system disk, SimpleText opens one.
+test-mac-fsm: $(BUILD)/host/mac_run_fast
+	@if [ ! -f "$(MAC_ROM)" ] || [ ! -f "$(MAC_DISK)" ]; then echo "test-mac-fsm: SKIP (no MAC_ROM or MAC_DISK)"; exit 0; fi; \
+	python3 -I tools/mac_fsm_check.py $(BUILD)/host/mac_run_fast "$(MAC_ROM)" "$(MAC_DISK)" $(BUILD)/mac/fsm_test
+
 # HiDPI measurements (docs/hidpi.md; local only): the host runner plays a typical session
 # (tools/mac_hidpi_session.py) on a 640x480 Millions screen and reports which traps run, which video RAM
 # writes happen outside QuickDraw, which QuickDraw routines are entered without the trap dispatcher and
@@ -677,7 +694,8 @@ mac-hidpi-measure: $(BUILD)/host/mac_run_fast
 # runner; it would stop every start). First boot: the kernel turns virtual memory off and the parameter RAM
 # file is empty; straight into the Mac; a folder in Applications (A, Command-O, Command-N, Command-W) and one
 # on the desktop (Command-N), then the power button and Return (Shut Down: QEMU ends). Second boot of the
-# same image: the parameter RAM of the first boot is kept; both folders are there (the HAL's HFS reader,
+# same image: the parameter RAM of the first boot is kept; the HAL volume opens (H, A, L, Command-O;
+# test_disk_hal.ppm); both folders are there (the HAL's HFS reader,
 # after ` stops the Mac); macsys reset drops the one on the system disk and keeps the one in Applications.
 # A small image (the same layout, smaller partitions).
 MAC_TEST_DISK := $(BUILD)/mac/test_disk.img
@@ -692,9 +710,11 @@ test-mac-disk: mac-esp $(BUILD)/host/mac_run_fast
 		--run "wait:75" "key:a" "wait:2" "key:alt-o" "wait:6" "key:alt-n" "wait:6" "key:alt-w" "wait:4" \
 		"key:alt-n" "wait:6" "shot:$(BUILD)/mac/test_disk_1.ppm" "monitor:system_powerdown" "wait:5" "key:ret" "quit" \
 		"expect:autostart: mac" "expect:the Mac OS shut down" "expect:parameter RAM: empty" \
-		"expect:virtual memory was on in the System file" || exit 1; \
+		"expect:virtual memory was on in the System file" "expect:the HAL volume is mounted" || exit 1; \
 	python3 -I tools/mac_disk_check.py --uefi --no-reboot --disk $(MAC_TEST_DISK) --serial-out $(BUILD)/mac/test_disk_2.log \
-		--run "mark" "wait:75" "shot:$(BUILD)/mac/test_disk_2.ppm" "key:grave_accent" "wait:4" \
+		--run "mark" "wait:75" "shot:$(BUILD)/mac/test_disk_2.ppm" \
+		"key:h" "key:a" "key:l" "wait:1" "key:alt-o" "wait:8" "shot:$(BUILD)/mac/test_disk_hal.ppm" \
+		"key:grave_accent" "wait:4" \
 		"expect:parameter RAM: kept" "reject-new:virtual memory was on" \
 		"mark" "shell:mount system" "shell:ls Desktop Folder" "wait:2" "expect-new:untitled folder" \
 		"mark" "shell:mount apps" "shell:ls" "wait:2" "expect-new:untitled folder" \

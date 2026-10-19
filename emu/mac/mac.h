@@ -10,6 +10,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "fsm.h"
+
 /* CPU clock of the Mac IIci (25 MHz); the sound chip and the VIAs count from it. */
 #define MAC_CPU_HZ 25000000u
 
@@ -43,6 +45,7 @@
  */
 #define MAC_STUB_BASE 0x4F000000u
 #define MAC_STUB_SIZE 0x2000u
+#define MAC_FSM_STUB 0x800u             /* offset of emu/mac/fsm.s in the stub window */
 #define MAC_STUB_ADBOP 0x60u
 #define MAC_STUB_INJECT 0xA0u       /* offset of the input injection routine */
 #define MAC_STUB_PACKET 0x700u      /* the packet handed to the ROM's handler */        /* offset of the ADBOp replacement */
@@ -291,6 +294,8 @@ typedef struct
     mac_via_t via1;
     uint32_t via_rem;           /* CPU cycles not yet given to the VIAs (< 32) */
     uint32_t frame_cycles;      /* CPU cycles since the last 60 Hz tick */
+
+    mac_fsm_t fsm;              /* the external file system (emu/mac/fsm.c) */
 } mac_t;
 
 /*
@@ -311,7 +316,7 @@ int mac_rom_patch(uint8_t *rom, uint32_t size);
 /* Emulated opcodes ($71xx are illegal 68k instructions, so no real code
  * uses them; the patched ROM places them where native code must run). */
 #define MAC_EMUL_OP_BASE 0x7100
-#define MAC_EMUL_OP_LAST 0x7139
+#define MAC_EMUL_OP_LAST 0x713E
 #define MAC_EMUL_OP_RESET 0x7103
 #define MAC_EMUL_OP_CLKNOMEM 0x7104
 #define MAC_EMUL_OP_HWINFO 0x7105
@@ -330,6 +335,22 @@ int mac_rom_patch(uint8_t *rom, uint32_t size);
 #define MAC_EMUL_OP_CARD_STATUS 0x712C
 #define MAC_EMUL_OP_CARD_IRQ 0x712D
 #define MAC_EMUL_OP_CARD_CLOSE 0x712E
+#define MAC_EMUL_OP_FSM_INSTALL 0x713A
+#define MAC_EMUL_OP_FSM_HFS 0x713B
+#define MAC_EMUL_OP_FSM_COMM 0x713C
+#define MAC_EMUL_OP_FSM_STEP 0x713D
+#define MAC_EMUL_OP_FSM_RESULT 0x713E
+
+/*
+ * The external file system (emu/mac/fsm.c, docs/fsm.md). mac_fsm_attach before
+ * mac_reset: once the Finder runs, the volume of 'ops' is mounted (NULL: none).
+ * The rest is for mac.c.
+ */
+void mac_fsm_attach(mac_t *mac, const mac_fs_ops_t *ops);
+void mac_fsm_reset(mac_t *mac);
+void mac_fsm_op(mac_t *mac, uint16_t op);
+uint32_t mac_fsm_install_code(void);
+uint32_t mac_fsm_install_return(void);
 
 /* Native handlers of the .Disk driver (emu/mac/disk.c). They work on the
  * guest state of the emulated opcode that called them. */

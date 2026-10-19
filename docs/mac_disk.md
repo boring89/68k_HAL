@@ -96,6 +96,7 @@ kernel ── 設定（第 5 節）── macdisk：GPT → 分割區 → 疊加
 | `mac_cards` | 1、2 | 1 | NuBus 顯示卡數量 |
 | `mac_video` | `card`、`builtin` | `card` | `builtin` = IIci 內建顯示（640x480） |
 | `mac_ram` | MB，8–1024 | 128 | Mac 的記憶體（32 位元 kernel 最多 256） |
+| `mac_hal_volume` | `on`、`off` | `on` | 把 HAL 的檔案樹當成唯讀的「HAL」卷宗給 Mac（`docs/fsm.md`） |
 | `mac_pram` | `on`、`off` | `on` | 保存 Mac 的參數 RAM（第 6.1 節）；`off` = 每次都是新的（P11 以前的行為） |
 | `mac_disk` | `auto`、區塊裝置名稱 | `auto` | `auto` = 68k_HAL 磁碟的 System + Applications；裝置名稱（`disks` 列出）= 整顆當成唯一的磁碟 |
 | `disk_cache` | MB、`auto`、0 | `auto` | 磁碟快取的上限（第 11 節）；`auto` = 可用記憶體的 1/4，最多 8 GiB（32 位元 kernel 32 MB）；0 = 關閉 |

@@ -21,6 +21,8 @@
  *   -R   present the disk as write-protected
  *   -H   file: with -F, measure for a 2x HiDPI screen (traps, video RAM writes outside QuickDraw, direct
  *        calls into QuickDraw, fonts; tools/mac_measure.c, docs/hidpi.md) and write the report there
+ *   -A   folder: show this host folder to the Mac as a read-only volume "HAL" (the external file
+ *        system, emu/mac/fsm.c, as the kernel shows its own files; mounted once the Finder runs)
  *   -X   file: the parameter RAM (256 bytes): read from the file at the start if it exists, written at the end
  *        (like 68k_hal/pram on a 68k_HAL disk, kernel/mac/pram.h)
  *   -p   write the screen as a PPM image at the end
@@ -52,12 +54,17 @@
  * what to look at when the ROM gets stuck.
  */
 
+#include <dirent.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "emu/m68k/vm.h"
+#include "emu/mac/fs_paths.h"
 #include "emu/mac/mac.h"
 #include "mac_measure.h"
 #include "third_party/musashi/m68k.h"
@@ -252,6 +259,78 @@ static uint32_t g_tail = 32;
 static uint32_t log_lo, log_hi, log_pc;
 static bool want_log;
 static const char *measure_path;    /* -H */
+static const char *host_folder;     /* -A */
+static mac_fs_paths_t host_volume;
+
+/* -A: the host folder for emu/mac/fs_paths.c */
+static void host_path(char *out, size_t size, const char *path)
+{
+    snprintf(out, size, "%s%s%s", host_folder, path[0] != '\0' ? "/" : "", path);
+}
+
+static int host_entry(void *ctx, const char *path, uint32_t index, char *name, uint32_t size)
+{
+    char full[1024];
+    struct dirent *e;
+    uint32_t i = 0;
+    int result = -1;
+
+    (void)ctx;
+    host_path(full, sizeof full, path);
+
+    DIR *d = opendir(full);
+
+    if (d == NULL)
+        return -1;
+    while ((e = readdir(d)) != NULL)
+    {
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
+            continue;
+        if (i++ == index)
+        {
+            snprintf(name, size, "%s", e->d_name);
+            result = 0;
+            break;
+        }
+    }
+    closedir(d);
+    return result;
+}
+
+static int host_stat(void *ctx, const char *path, bool *is_dir, uint32_t *size, uint32_t *mtime)
+{
+    char full[1024];
+    struct stat st;
+
+    (void)ctx;
+    host_path(full, sizeof full, path);
+    if (stat(full, &st) != 0)
+        return -1;
+    *is_dir = S_ISDIR(st.st_mode);
+    *size = st.st_size > 0xFFFFFFFF ? 0xFFFFFFFFu : (uint32_t)st.st_size;
+    *mtime = (uint32_t)st.st_mtime;
+    return 0;
+}
+
+static int32_t host_read(void *ctx, const char *path, uint32_t offset, void *buffer, uint32_t length)
+{
+    char full[1024];
+
+    (void)ctx;
+    host_path(full, sizeof full, path);
+
+    int fd = open(full, O_RDONLY);
+
+    if (fd < 0)
+        return -1;
+
+    ssize_t n = pread(fd, buffer, length, offset);
+
+    close(fd);
+    return n < 0 ? -1 : (int32_t)n;
+}
+
+static const mac_fs_host_t host_ops = {NULL, host_entry, host_stat, host_read};
 static bool show_gd;
 static int card_res;            /* -C: index in mac_card_resolutions (0 = 640x480) */
 static bool builtin_only;       /* -I */
@@ -628,6 +707,10 @@ int main(int argc, char **argv)
             measure_path = argv[++i];
             want_log = true;
         }
+        else if (argv[i][0] == '-' && argv[i][1] == 'A' && i + 1 < argc)
+        {
+            host_folder = argv[++i];
+        }
         else if (argv[i][0] == '-' && argv[i][1] == 'X' && i + 1 < argc)
         {
             xpram_path = argv[++i];
@@ -788,6 +871,11 @@ int main(int argc, char **argv)
     {
         measure_start(&mac);
     }
+    if (host_folder != NULL)
+    {
+        mac_fs_paths_init(&host_volume, &host_ops, "HAL");
+        mac_fsm_attach(&mac, &host_volume.ops);
+    }
     if (xpram_path != NULL)
     {
         FILE *xf = fopen(xpram_path, "rb");
@@ -871,6 +959,19 @@ int main(int argc, char **argv)
             {
                 printf("mac: %s at frame %u\n", mac.power_request == MAC_POWER_OFF ? "power off" : "restart", f);
                 break;
+            }
+        }
+        if (host_folder != NULL)
+        {
+            printf("mac: host volume: install result %d, %s, drive %d, %u requests\n", mac.fsm.install_error,
+                   mac.fsm.mounted ? "mounted" : "not mounted", mac.fsm.drive, mac.fsm.requests);
+            if (show_xpram)     /* -r: also the last requests */
+            {
+                uint32_t n = mac.fsm.requests < 64 ? mac.fsm.requests : 64;
+
+                for (uint32_t k = mac.fsm.requests - n; k < mac.fsm.requests; k++)
+                    printf("mac: fsm request %u: select %04X perm %u -> %d\n", k + 1, mac.fsm.log[k % 64].select,
+                           mac.fsm.log[k % 64].permission, mac.fsm.log[k % 64].result);
             }
         }
         if (measure_path != NULL)

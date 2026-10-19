@@ -700,6 +700,13 @@ static void emul_op(mac_t *mac, uint32_t pc, uint16_t op)
     case MAC_EMUL_OP_CARD_CLOSE:
         mac_card_close(mac);
         break;
+    case MAC_EMUL_OP_FSM_INSTALL:
+    case MAC_EMUL_OP_FSM_HFS:
+    case MAC_EMUL_OP_FSM_COMM:
+    case MAC_EMUL_OP_FSM_STEP:
+    case MAC_EMUL_OP_FSM_RESULT:
+        mac_fsm_op(mac, op);
+        break;
     default:
         log_unimpl(mac, pc, 2, false, op);
         break;
@@ -862,6 +869,7 @@ int mac_reset(mac_t *mac)
     mac->unimpl_used = 0;
     mac->input_count = 0;
     mac->injecting = false;
+    mac_fsm_reset(mac);
     m68k_vm_reset_cpu();
     mac->insn_count = 0;    /* the reset itself runs one instruction */
     return 0;
@@ -961,6 +969,8 @@ int mac_sysbeep(mac_t *mac)
  * handled, not inside the ROM).
  */
 #define LM_CURAPNAME 0x910      /* Str31: the running application */
+#define LM_FS_BUSY 0x360        /* word: the file system is busy (FSQHdr.qFlags) */
+#define LM_FS_QUEUE_HEAD 0x362  /* the File Manager's queue (FSQHdr.qHead) */
 
 static void poll_mount(mac_t *mac)
 {
@@ -980,7 +990,7 @@ static void poll_mount(mac_t *mac)
         0x4E, 0x71,                 /* nop: the call has returned */
     };
 
-    if (mac->mount_pending == 0 || mac->call_active || ++mac->mount_poll % 16 != 0)
+    if ((mac->mount_pending == 0 && !mac->fsm.install_pending) || mac->call_active || ++mac->mount_poll % 16 != 0)
     {
         return;
     }
@@ -988,10 +998,24 @@ static void poll_mount(mac_t *mac)
     uint32_t pc = m68k_vm_get_reg(M68K_VM_REG_PC);
     uint32_t sr = m68k_vm_get_reg(M68K_VM_REG_SR);
 
+    /*
+     * Also only while the File Manager is idle (FSQHdr: FSBusy and the queue's head, low memory $360
+     * and $362; Inside Macintosh: Files): the injected code makes synchronous File Manager calls,
+     * which would wait forever behind a request that the injection interrupted.
+     */
     if (mac_bus_read(mac, LM_CURAPNAME, 1) != 6 || mac_bus_read(mac, LM_CURAPNAME + 1, 4) != 0x46696E64 ||
         mac_bus_read(mac, LM_CURAPNAME + 5, 2) != 0x6572 ||
-        pc >= MAC_ROM_BASE || (sr & SR_INT_MASK) != 0 || !(sr & SR_SUPERVISOR))
+        pc >= MAC_ROM_BASE || (sr & SR_INT_MASK) != 0 || !(sr & SR_SUPERVISOR) ||
+        mac_bus_read(mac, LM_FS_BUSY, 2) != 0 || mac_bus_read(mac, LM_FS_QUEUE_HEAD, 4) != 0)
     {
+        return;
+    }
+
+    /* The drives first; then the external file system registers itself and mounts its volume. */
+    if (mac->mount_pending == 0)
+    {
+        mac->fsm.install_pending = false;
+        start_call(mac, mac_fsm_install_code(), mac_fsm_install_return());
         return;
     }
 
