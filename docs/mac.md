@@ -156,6 +156,8 @@ Mac 的 ROM 是一本很長的開機劇本，劇本裡不斷地「去敲某個�
 | `-d IMG` | 掛上磁碟映像（讀進記憶體，**不寫回檔案**）；`-R` 唯讀 |
 | `-p FILE` | 結束時把畫面寫成 PPM |
 | `-F N` | 跑 N 個整幀並印畫面的 CRC-32（和 kernel 的結果比較） |
+| `-X FILE` | 參數 RAM：開始時從檔案讀（有的話），結束時寫回（第 15 節） |
+| `-H FILE` | HiDPI 量測：trap 次數、QuickDraw 以外的 VRAM 寫入、繞過分派程式的呼叫、字型（`docs/hidpi.md`、`make mac-hidpi-measure`） |
 
 一般的卡關流程：`-t 40 -u` 看 PC 在哪個迴圈 → `-m` 看它讀哪個旗標 → 用 objdump 反組譯 ROM 或用 `-x` 存 RAM 看是誰該清這個旗標 → 補上硬體行為或修補。
 

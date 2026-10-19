@@ -19,6 +19,8 @@
  *   -M   dx,dy,button,frame: with -F, move the mouse by (dx,dy) at that frame (repeatable)
  *   -K   code,down,frame: with -F, a key (ADB code) goes down/up at that frame (repeatable)
  *   -R   present the disk as write-protected
+ *   -H   file: with -F, measure for a 2x HiDPI screen (traps, video RAM writes outside QuickDraw, direct
+ *        calls into QuickDraw, fonts; tools/mac_measure.c, docs/hidpi.md) and write the report there
  *   -X   file: the parameter RAM (256 bytes): read from the file at the start if it exists, written at the end
  *        (like 68k_hal/pram on a 68k_HAL disk, kernel/mac/pram.h)
  *   -p   write the screen as a PPM image at the end
@@ -57,6 +59,7 @@
 
 #include "emu/m68k/vm.h"
 #include "emu/mac/mac.h"
+#include "mac_measure.h"
 #include "third_party/musashi/m68k.h"
 
 #define RAM_SIZE (8u * 1024 * 1024)
@@ -248,6 +251,7 @@ static void write_ppm(const char *path, const uint32_t *pixels)
 static uint32_t g_tail = 32;
 static uint32_t log_lo, log_hi, log_pc;
 static bool want_log;
+static const char *measure_path;    /* -H */
 static bool show_gd;
 static int card_res;            /* -C: index in mac_card_resolutions (0 = 640x480) */
 static bool builtin_only;       /* -I */
@@ -264,6 +268,10 @@ static bool val_on;
 static void log_hook(void *ctx, uint32_t pc)
 {
     (void)ctx;
+    if (measure_path != NULL)
+    {
+        measure_insn(&mac, pc);
+    }
     if (val_on)
     {
         uint32_t v = mac_bus_read(&mac, val_addr, 4);
@@ -615,6 +623,11 @@ int main(int argc, char **argv)
         {
             wav_path = argv[++i];
         }
+        else if (argv[i][0] == '-' && argv[i][1] == 'H' && i + 1 < argc)
+        {
+            measure_path = argv[++i];
+            want_log = true;
+        }
         else if (argv[i][0] == '-' && argv[i][1] == 'X' && i + 1 < argc)
         {
             xpram_path = argv[++i];
@@ -771,6 +784,10 @@ int main(int argc, char **argv)
     {
         mac.pc_hook = log_hook;
     }
+    if (measure_path != NULL)
+    {
+        measure_start(&mac);
+    }
     if (xpram_path != NULL)
     {
         FILE *xf = fopen(xpram_path, "rb");
@@ -844,6 +861,7 @@ int main(int argc, char **argv)
                 mac_sysbeep(&mac);
             }
             mac_run(&mac, 416000);
+            measure_frame(&mac);
             if (mac.power_request == MAC_POWER_RESTART && keep_restarting)
             {
                 printf("mac: restart at frame %u (continuing)\n", f);
@@ -853,6 +871,17 @@ int main(int argc, char **argv)
             {
                 printf("mac: %s at frame %u\n", mac.power_request == MAC_POWER_OFF ? "power off" : "restart", f);
                 break;
+            }
+        }
+        if (measure_path != NULL)
+        {
+            FILE *mf = fopen(measure_path, "w");
+
+            if (mf != NULL)
+            {
+                measure_report(&mac, mf);
+                fclose(mf);
+                printf("mac: measurements written to %s\n", measure_path);
             }
         }
         if (xpram_path != NULL)

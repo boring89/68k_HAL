@@ -55,7 +55,7 @@ HOST_CC=gcc
 HOST_CFLAGS=-std=c11 -Wall -Wextra -Werror -g -I. -Ithird_party/musashi \
 	-DMUSASHI_CNF='"emu/m68k/m68kconf.h"' -fsanitize=address,undefined -MMD -MP
 
-.PHONY: mac-esp mac-disk test-macdisk test-mac-disk test-mac-update test-update-script test-mac-remember test-mac-hotkeys test-vbe mac-uefi-shot test-mac-perf test-pci-roots test-power usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
+.PHONY: mac-hidpi-measure mac-esp mac-disk test-macdisk test-mac-disk test-mac-update test-update-script test-mac-remember test-mac-hotkeys test-vbe mac-uefi-shot test-mac-perf test-pci-roots test-power usb-image test-usb-image test-e1000e test-usb test-noapic test-q35 test-uefi test-fb test-mac-keys test-virtio-net test-net test-video test-mac-sound test-mac-persist test-mac-clock sdk initrd test-shell all clean iso run test test-boundary test-host test-qemu test-sst test-rom test-rom-qemu mac-iso mac-screenshot mac-input-test test-mac-stub run-mac
 
 .DEFAULT_GOAL := all
 
@@ -357,9 +357,9 @@ $(BUILD)/host/mac_run: tools/mac_run.c $(HOST_LIB_OBJECTS) $(BUILD)/host/obj/$(M
 
 # The same runner without the sanitizers and with optimization, about 10x
 # faster; for long runs of the real ROM.
-MAC_FAST_SOURCES := tools/mac_run.c $(wildcard emu/mac/*.c) emu/m68k/vm.c \
+MAC_FAST_SOURCES := tools/mac_run.c tools/mac_measure.c $(wildcard emu/mac/*.c) emu/m68k/vm.c \
 	emu/m68k/trap.c kernel/lib/k_memory.c
-$(BUILD)/host/mac_run_fast: $(MAC_FAST_SOURCES) $(wildcard emu/mac/*.h) $(wildcard emu/m68k/*.h) $(MUSASHI_GEN)/m68kops.c \
+$(BUILD)/host/mac_run_fast: $(MAC_FAST_SOURCES) tools/mac_measure.h tools/mac_traps.h $(wildcard emu/mac/*.h) $(wildcard emu/m68k/*.h) $(MUSASHI_GEN)/m68kops.c \
 		$(MUSASHI)/m68kcpu.c $(MUSASHI)/m68kdasm.c $(MUSASHI)/softfloat/softfloat.c
 	mkdir -p $(dir $@)
 	$(HOST_CC) -std=gnu11 -O2 -w -I. -I$(MUSASHI) -I$(MUSASHI_GEN) \
@@ -660,6 +660,17 @@ mac-disk: mac-esp tools/make_mac_disk.py
 	@if [ ! -f "$(MAC_DISK)" ]; then echo "mac-disk: no Mac system image (set MAC_DISK)"; exit 1; fi
 	python3 -I tools/make_mac_disk.py --out $(MAC_DISK_IMAGE) --system "$(MAC_DISK)" --esp-dir $(MAC_ESP) $(MAC_DISK_SIZES)
 	@ls -ls $(MAC_DISK_IMAGE)
+
+# HiDPI measurements (docs/hidpi.md; local only): the host runner plays a typical session
+# (tools/mac_hidpi_session.py) on a 640x480 Millions screen and reports which traps run, which video RAM
+# writes happen outside QuickDraw, which QuickDraw routines are entered without the trap dispatcher and
+# which fonts are drawn: build/mac/hidpi_report.txt.
+mac-hidpi-measure: $(BUILD)/host/mac_run_fast
+	@if [ ! -f "$(MAC_ROM)" ] || [ ! -f "$(MAC_DISK)" ]; then echo "mac-hidpi-measure: SKIP (no MAC_ROM or MAC_DISK)"; exit 0; fi; \
+	mkdir -p $(BUILD)/mac; \
+	$(BUILD)/host/mac_run_fast -F $$(python3 -I tools/mac_hidpi_session.py --frames) -t 0 -C 640x480x32 \
+		$$(python3 -I tools/mac_hidpi_session.py) -H $(BUILD)/mac/hidpi_report.txt -p $(BUILD)/mac/hidpi_end.ppm \
+		-d "$(MAC_DISK)" "$(MAC_ROM)" | grep "^mac:"
 
 # The whole 68k_HAL disk under UEFI (local only: the user's ROM and System). The system is a copy of
 # MAC_DISK on which the Memory control panel turned virtual memory on (tools/mac_memory_vm.sh in the host

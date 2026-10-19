@@ -227,6 +227,9 @@ typedef struct
     bool break_hit;
     void (*pc_hook)(void *ctx, uint32_t pc); /* debugging: called before every instruction (tools/mac_run -L) */
     void *pc_hook_ctx;
+    /* measurements (tools/mac_run -H): called after a write of size bytes at offset of card's video RAM */
+    void (*vram_hook)(void *ctx, uint32_t card, uint32_t offset, uint32_t size);
+    void *vram_hook_ctx;
     uint32_t watch_lo, watch_hi;    /* debugging: stop after the instruction that writes RAM here (0 = off) */
     uint32_t insn_count;
     mac_trace_t trace[MAC_TRACE_SIZE];
@@ -435,6 +438,9 @@ void mac_screen_size(const mac_t *mac, uint32_t *width, uint32_t *height);
 /* Size and picture of card 'index' (0 = slot $C, 1 = $D), as mac_screen_size and mac_render_changes.
  * Return -1 if there is no such card. */
 int mac_card_screen_size(const mac_t *mac, uint32_t index, uint32_t *width, uint32_t *height);
+
+/* Bytes per row of card 'index''s picture and its bits per pixel (0 if there is no such card). */
+uint32_t mac_card_row_bytes(const mac_t *mac, uint32_t index, uint32_t *bits_per_pixel);
 int mac_card_render(mac_t *mac, uint32_t index, uint32_t *out, uint8_t *changed);
 
 /*

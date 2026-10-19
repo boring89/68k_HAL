@@ -176,6 +176,16 @@ static uint32_t row_bytes(uint32_t res, uint32_t depth)
 }
 
 
+uint32_t mac_card_row_bytes(const mac_t *mac, uint32_t index, uint32_t *bits_per_pixel)
+{
+    if (index >= MAC_CARDS || !mac->card[index].present)
+        return 0;
+    if (bits_per_pixel != NULL)
+        *bits_per_pixel = depth_bits[mac->card[index].depth];
+    return row_bytes(mac->card[index].res, mac->card[index].depth);
+}
+
+
 static void put16(uint8_t *p, uint32_t v)
 {
     p[0] = (uint8_t)(v >> 8);
@@ -526,6 +536,8 @@ bool mac_card_write(mac_t *mac, uint32_t addr, int size, uint32_t value)
 
     card->dirty[first >> 5] |= 1u << (first & 31);
     card->dirty[last >> 5] |= 1u << (last & 31);
+    if (mac->vram_hook != NULL)
+        mac->vram_hook(mac->vram_hook_ctx, (uint32_t)(card - mac->card), off, (uint32_t)size);
     return true;
 }
 
