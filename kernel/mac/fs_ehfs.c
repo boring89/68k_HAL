@@ -6,6 +6,7 @@
 #include "fs_ehfs.h"
 
 #include "emu/mac/fs_paths.h"
+#include "emu/mac/mac_roman.h"
 #include "kernel/fs/ehfs/catalog.h"
 #include "kernel/fs/ehfs/file.h"
 #include "kernel/lib/k_memory.h"
@@ -53,24 +54,29 @@ static int os_error(int r)
     }
 }
 
+/* The longest eHFS name of a Mac name: each Mac Roman byte is at most 3 bytes of UTF-8. */
+#define FROM_MAC_MAX (MAC_FS_NAME_MAX * 3)
+
 /*
- * The eHFS name of a name the Mac gives: ASCII as it is, '/' as ':' (the Mac's
- * names have '/' where the HAL's have ':'). Other bytes are refused until
- * Mac Roman is translated (docs/fsm.md 4.4). Returns its length, or 0.
+ * The eHFS name (UTF-8) of a name the Mac gives (Mac Roman), '/' as ':' (the
+ * Mac's names have '/' where the HAL's have ':'). Control characters and ':'
+ * are refused. Returns its length, or 0.
  */
-static uint32_t ehfs_name(const uint8_t *name, uint32_t length, uint8_t *out)
+static uint32_t ehfs_name(const uint8_t *name, uint32_t length, uint8_t out[FROM_MAC_MAX])
 {
+    uint32_t n = 0;
+
     if (length == 0 || length > MAC_FS_NAME_MAX)
         return 0;
     for (uint32_t i = 0; i < length; i++)
     {
         uint8_t c = name[i];
 
-        if (c < 0x20 || c >= 0x7F || c == ':')
+        if (c < 0x20 || c == 0x7F || c == ':')
             return 0;
-        out[i] = c == '/' ? ':' : c;
+        n += mac_roman_to_utf8(c == '/' ? ':' : c, out + n);
     }
-    return length;
+    return n;
 }
 
 /* The Mac's name of an entry (Pascal string). */
@@ -155,7 +161,7 @@ static bool same_name(const uint8_t *a, const uint8_t *b, uint32_t length)
 static int op_lookup(void *ctx, uint32_t parent, const uint8_t *name, uint32_t length, mac_fs_item_t *item)
 {
     mac_fs_ehfs_t *v = ctx;
-    uint8_t converted[MAC_FS_NAME_MAX];
+    uint8_t converted[FROM_MAC_MAX];
     uint32_t n = ehfs_name(name, length, converted);
 
     if (n != 0 && ehfs_cat_lookup(v->fs, parent, converted, n, &entry) == EHFS_OK)
@@ -237,7 +243,7 @@ static int op_create(void *ctx, uint32_t parent, const uint8_t *name, uint32_t l
                      mac_fs_item_t *item)
 {
     mac_fs_ehfs_t *v = ctx;
-    uint8_t converted[MAC_FS_NAME_MAX];
+    uint8_t converted[FROM_MAC_MAX];
     uint32_t n = ehfs_name(name, length, converted);
 
     if (n == 0)
@@ -267,7 +273,7 @@ static int op_remove(void *ctx, uint32_t id)
 static int op_move(void *ctx, uint32_t id, uint32_t new_parent, const uint8_t *name, uint32_t length)
 {
     mac_fs_ehfs_t *v = ctx;
-    uint8_t converted[MAC_FS_NAME_MAX];
+    uint8_t converted[FROM_MAC_MAX];
     const uint8_t *new_name;
     uint32_t n;
 
@@ -333,24 +339,16 @@ void mac_fs_ehfs_init(mac_fs_ehfs_t *volume, ehfs_t *fs, mac_fs_ehfs_clock_t clo
     volume->fs = fs;
     volume->clock = clock;
 
-    /* The volume's name: ASCII as it is (':' cannot be in it), other characters as '_'. */
-    const uint8_t *name = fs->sb + SB_NAME + 1;
-    uint32_t length = fs->sb[SB_NAME], n = 0;
+    /* The volume's name in Mac Roman: characters it does not have, control characters and ':' as '_'. */
+    const uint8_t *name = fs->sb + SB_NAME + 1, *end = name + fs->sb[SB_NAME];
+    uint32_t n = 0;
 
-    for (uint32_t i = 0; i < length && n < sizeof volume->name - 1; i++)
+    while (name < end && n < sizeof volume->name - 1)
     {
-        uint8_t c = name[i];
+        int c = mac_roman_from_unicode(mac_roman_utf8_next(&name, end));
 
-        if (c >= 0x80)
-        {
-            while (i + 1 < length && (name[i + 1] & 0xC0) == 0x80)
-                i++;
+        if (c < 0x20 || c == 0x7F || c == ':')
             c = '_';
-        }
-        else if (c < 0x20 || c == 0x7F || c == ':')
-        {
-            c = '_';
-        }
         volume->name[n++] = (char)c;
     }
     if (n == 0)

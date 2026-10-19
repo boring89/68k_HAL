@@ -123,7 +123,13 @@ static void test_mac_names(void)
     mac_fs_paths_mac_name("a:b", 20, out);
     TEST_ASSERT(pstr_is(out, "a/b"));                   /* ':' separates Mac path names */
     mac_fs_paths_mac_name("caf\xC3\xA9.txt", 21, out);
-    TEST_ASSERT(pstr_is(out, "caf_.txt#21"));           /* not ASCII: changed, so it gets its ID */
+    TEST_ASSERT(pstr_is(out, "caf\x8E.txt"));           /* U+00E9 is Mac Roman 0x8E: not changed */
+    mac_fs_paths_mac_name("\xE6\x97\xA5\xE8\xA8\x98.txt", 21, out);
+    TEST_ASSERT(pstr_is(out, "__.txt#21"));             /* not in Mac Roman: changed, so it gets its ID */
+    mac_fs_paths_mac_name("5\xE2\x82\xAC", 22, out);
+    TEST_ASSERT(pstr_is(out, "5_#22"));                 /* the euro sign: not in System 7.5's Mac Roman */
+    mac_fs_paths_mac_name("bad\xC3", 23, out);
+    TEST_ASSERT(pstr_is(out, "bad_#23"));               /* a broken UTF-8 sequence */
     mac_fs_paths_mac_name("a-very-long-file-name-that-does-not-fit.txt", 1234, out);
     TEST_ASSERT_EQ_INT(31, out[0]);                     /* shortened to 31 with the ID at the end */
     TEST_ASSERT(memcmp(out + 1 + 31 - 5, "#1234", 5) == 0);

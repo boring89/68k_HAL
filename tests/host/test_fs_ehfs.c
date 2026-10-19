@@ -93,6 +93,7 @@ static int create(uint32_t parent, const char *name, bool is_dir, mac_fs_item_t 
 static void test_items(void)
 {
     mac_fs_item_t root, it, f;
+    ehfs_entry_t e0;
     mac_fs_volume_t v;
 
     setup("My Data");
@@ -109,7 +110,14 @@ static void test_items(void)
     TEST_ASSERT_EQ_INT(0, create(it.id, "Note 1/2", false, &f));    /* '/' is ':' on the HAL's side */
     TEST_ASSERT_EQ_STR("Note 1/2", c_name(f.name));
     TEST_ASSERT_EQ_INT(MAC_FS_DUP_FN_ERR, create(it.id, "NOTE 1/2", false, &f));
-    TEST_ASSERT_EQ_INT(MAC_FS_BD_NAM_ERR, create(it.id, "caf\x8E", false, &f));   /* Mac Roman, not yet */
+    TEST_ASSERT_EQ_INT(0, create(it.id, "caf\x8E", false, &f));        /* Mac Roman 0x8E = U+00E9 */
+    TEST_ASSERT_EQ_STR("caf\x8E", c_name(f.name));
+    TEST_ASSERT_EQ_INT(EHFS_OK, ehfs_cat_lookup(&fs, it.id, (const uint8_t *)"caf\xC3\xA9", 5, &e0));
+    TEST_ASSERT_EQ_INT((int)e0.cnid, (int)f.id);                        /* stored as UTF-8 */
+    TEST_ASSERT_EQ_INT(0, lookup(it.id, "caf\x8E", &f));
+    TEST_ASSERT_EQ_INT((int)e0.cnid, (int)f.id);
+    TEST_ASSERT_EQ_INT(EHFS_OK, ehfs_remove(&fs, it.id, (const uint8_t *)"caf\xC3\xA9", 5, 0));  /* the counts below */
+    TEST_ASSERT_EQ_INT(MAC_FS_BD_NAM_ERR, create(it.id, "tab\x09", false, &f));  /* a control character */
     TEST_ASSERT_EQ_INT(MAC_FS_DIR_NF_ERR, create(4242, "x", false, &f));
 
     ehfs_entry_t e;
@@ -141,13 +149,19 @@ static void test_names(void)
     /* Made on the HAL's side: names the Mac sees changed. */
     TEST_ASSERT_EQ_INT(EHFS_OK, ehfs_create(&fs, EHFS_CNID_ROOT, (const uint8_t *)"caf\xC3\xA9.txt", 9, false, 0, &e));
     TEST_ASSERT_EQ_INT(0, ops->get(ops->ctx, (uint32_t)e.cnid, &it));
-    snprintf(want, sizeof want, "caf_.txt#%u", (unsigned)e.cnid);
+    TEST_ASSERT_EQ_STR("caf\x8E.txt", c_name(it.name));                /* in Mac Roman: not changed */
+    TEST_ASSERT_EQ_INT(0, lookup(MAC_FS_ROOT_ID, "caf\x8E.txt", &it));
+    TEST_ASSERT_EQ_INT((int)e.cnid, (int)it.id);
+
+    TEST_ASSERT_EQ_INT(EHFS_OK, ehfs_create(&fs, EHFS_CNID_ROOT, (const uint8_t *)"x\xE6\x97\xA5.txt", 8, false, 0, &e));
+    TEST_ASSERT_EQ_INT(0, ops->get(ops->ctx, (uint32_t)e.cnid, &it));
+    snprintf(want, sizeof want, "x_.txt#%u", (unsigned)e.cnid);    /* not in Mac Roman */
     TEST_ASSERT_EQ_STR(want, c_name(it.name));
     TEST_ASSERT_EQ_INT(0, lookup(MAC_FS_ROOT_ID, want, &it));
     TEST_ASSERT_EQ_INT((int)e.cnid, (int)it.id);
-    want[0] = 'C';                                                 /* case */
+    want[0] = 'X';                                                 /* case */
     TEST_ASSERT_EQ_INT(0, lookup(MAC_FS_ROOT_ID, want, &it));
-    TEST_ASSERT_EQ_INT(-1, lookup(MAC_FS_ROOT_ID, "caf_.txt#9999", &it));
+    TEST_ASSERT_EQ_INT(-1, lookup(MAC_FS_ROOT_ID, "x_.txt#9999", &it));
 
     const char *longname = "A very long file name from Linux that the Mac cannot show.txt";
 
@@ -165,9 +179,11 @@ static void test_names(void)
     TEST_ASSERT_EQ_INT(0, create(MAC_FS_ROOT_ID, "Sub", true, &dir));
     TEST_ASSERT_EQ_INT(-1, lookup(dir.id, want, &it));
 
-    /* A volume name that is not ASCII. */
+    /* Volume names that are not ASCII. */
     setup("Daten \xC3\xBC" "ber");
-    TEST_ASSERT_EQ_STR("Daten _ber", volume.name);
+    TEST_ASSERT_EQ_STR("Daten \x9F" "ber", volume.name);                 /* U+00FC is Mac Roman 0x9F */
+    setup("\xE8\xB3\x87\xE6\x96\x99 1");
+    TEST_ASSERT_EQ_STR("__ 1", volume.name);
     fsck();
 }
 

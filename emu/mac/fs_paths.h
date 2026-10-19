@@ -15,8 +15,8 @@
  * A host folder tree that is reached by paths (the HAL's VFS, a folder of the
  * host running tools/mac_run), turned into the ID-based items of
  * mac_fs_ops_t. Paths are relative to the tree's top: "" is the top, "a/b"
- * below it. The Mac sees each host name in Mac Roman: ASCII as it is with ':'
- * as '/', other characters as '_'; a changed or shortened name ends in
+ * below it. The Mac sees each host name (UTF-8) in Mac Roman: ':' as '/',
+ * characters Mac Roman does not have as '_'; a changed or shortened name ends in
  * "#<ID>" so that it stays unique. Names starting with '.' are hidden.
  * Read-only.
  */

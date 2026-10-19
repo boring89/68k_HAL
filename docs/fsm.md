@@ -108,7 +108,7 @@ C 的處理程式每次 step 都**從頭執行**：已經做過的呼叫直接�
 ### 4.4 名字、ID 與檔案類型（`fs_paths.c`）
 
 - 每個 Mac 看過的項目有固定的 ID（從 16 開始，`fsUsrCNID`），表格最多 2048 個；根目錄是 2。
-- 名字：ASCII 照用，`:` 換成 `/`，其他字元換成 `_`；換過字或超過 31 字元的名字以 `#<ID>` 結尾（保持唯一）。`.` 開頭的名字不顯示。完整的 UTF-8 ↔ Mac Roman 在 K4（eHFS）。
+- 名字：主機的 UTF-8 名稱轉成 Mac Roman（`emu/mac/mac_roman.c`；對照表由 `tools/gen_mac_roman.py` 從 Python 內建的 `mac_roman` 編碼器產生，不用 Apple 的 ROMAN.TXT；0xDB 是 System 7.5 的通用貨幣符號 ¤，不是 Mac OS 8.5 起的 €），`:` 換成 `/`，Mac Roman 沒有的字元、控制字元與壞掉的 UTF-8 換成 `_`；換過字或超過 31 字元的名字以 `#<ID>` 結尾（保持唯一）。`.` 開頭的名字不顯示。
 - 檔案類型依副檔名：`.txt`、`.c`、`.h`、`.md`、`.lua` 等是 `TEXT`／`ttxt`（SimpleText 文件），其他是 `????`。宿主的檔案沒有資源 fork（長度 0）。
 - kernel：HAL 的 VFS 整棵樹，頂層的 `dev` 與 `proc` 不給 Mac（Data 卷宗給了 Mac 時 `ehfs` 也不給：同一顆卷宗不出現兩次）；`68k_hal.cfg` 的 `mac_hal_volume = off` 關掉。host：`mac_run -A <資料夾>`。
 
@@ -126,7 +126,7 @@ C 的處理程式每次 step 都**從頭執行**：已經做過的呼叫直接�
 ### 4.7 限制
 
 - HAL 卷宗唯讀；宿主的檔案沒有資源 fork 與 Finder 資訊（圖示位置由 Finder 決定）。
-- 名字只有 ASCII（Mac Roman 的對照表待決定，`P11_PLAN.md`）。
+- 名字只有 Mac Roman 的字元（中文、日文等顯示成 `_` 加 `#<ID>`）；大小寫只對 ASCII 字母不分（`É` 與 `é` 視為不同）。
 - ID 表格最多 2048 個項目，超過的看不到。
 - 一個資料夾的項目每次都從宿主重新列出（大資料夾較慢）。
 
@@ -153,7 +153,7 @@ C 的處理程式每次 step 都**從頭執行**：已經做過的呼叫直接�
 ### 7.1 後端 `kernel/mac/fs_ehfs.c`
 
 - Mac 的 ID 就是 eHFS 的 CNID（根目錄都是 2；E5 讓 CNID 不超過 2^32）。
-- 名字：eHFS 的 UTF-8 名稱照 4.4 節的規則給 Mac（ASCII 照用、`:` 顯示成 `/`、其他換成 `_`、改過或超過 31 字元的加 `#<CNID>`）。查詢：先把 Mac 的名字換回 eHFS 的名字（`/` → `:`）查，再試結尾的 `#<CNID>`。Mac 建立或改名時給的名字**只接受 ASCII**（其他回 bdNamErr），等 Mac Roman 的對照表決定。
+- 名字：eHFS 的 UTF-8 名稱照 4.4 節的規則給 Mac（UTF-8 → Mac Roman、`:` 顯示成 `/`、Mac Roman 沒有的字元換成 `_`、改過或超過 31 字元的加 `#<CNID>`）。查詢：先把 Mac 的名字換回 eHFS 的名字（Mac Roman → UTF-8，`/` → `:`）查，再試結尾的 `#<CNID>`。Mac 建立或改名時給的名字轉成 UTF-8 存（每個字元都是組合好的單一字元，已經是 NFC）；控制字元與 `:` 回 bdNamErr。
 - Finder 資訊：eHFS catalog 記錄的 32 位元組（FInfo+FXInfo 或 DInfo+DXInfo）；日期：eHFS 的奈秒 ↔ Mac 的 1904 年起的秒（和 Mac 的時鐘一樣用 UTC）；鎖定：記錄的旗標 bit 0。
 - 卷宗的名稱取自 superblock（非 ASCII 換成 `_`，最多 27 字元）；大小與剩餘空間：System 7.5 最多認 2 GB，較大的卷宗顯示成 2 GB（配置區塊從 512 開始加倍，讓區塊數不超過 65535）。
 - 錯誤對照：沒空間 dskFulErr、已存在 dupFNErr、找不到資料夾 dirNFErr、資料夾不是空的 fBsyErr、名字不行 bdNamErr、搬進自己 badMovErr、鎖定 fLckdErr。
@@ -187,7 +187,7 @@ Mac 執行時，kernel 呼叫 `ehfsfs_set_mac_running(true)`：檔案樹的 `/eh
 
 ### 7.5 限制
 
-- Mac 給的名字只有 ASCII；卷宗最大顯示 2 GB；檔案最大 2 GB（Mac 的限制）。
+- 名字只有 Mac Roman 的字元；卷宗最大顯示 2 GB；檔案最大 2 GB（Mac 的限制）。
 - 卷宗的 Finder 資訊（桌面視窗的位置）不保存（SetVolInfo 不做事）；檔案 ID 參照（ResolveFileIDRef 等）與 CatSearch、ExchangeFiles 不支援（paramErr）。
 - 一個資料夾的項目每次依索引列出時都從頭走（大資料夾較慢）。
 

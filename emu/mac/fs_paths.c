@@ -4,6 +4,7 @@
  */
 
 #include "fs_paths.h"
+#include "mac_roman.h"
 
 #include "kernel/lib/k_memory.h"
 #include "kernel/lib/k_string.h"
@@ -58,17 +59,17 @@ void mac_fs_paths_mac_name(const char *host_name, uint32_t id, uint8_t out[MAC_F
     uint32_t n = 0;
     bool changed = false;
 
-    for (const uint8_t *s = (const uint8_t *)host_name; *s != '\0' && n < sizeof buf;)
-    {
-        uint8_t c = *s++;
+    const uint8_t *end = (const uint8_t *)host_name + k_strlen(host_name);
 
-        if (c >= 0x80)
+    for (const uint8_t *s = (const uint8_t *)host_name; s < end && n < sizeof buf;)
+    {
+        uint32_t u = mac_roman_utf8_next(&s, end);
+        int roman = mac_roman_from_unicode(u);
+        uint8_t c = roman < 0 ? '_' : (uint8_t)roman;
+
+        if (roman < 0)
         {
-            /* A UTF-8 sequence: one character the Mac cannot show here. */
-            while ((*s & 0xC0) == 0x80)
-                s++;
-            c = '_';
-            changed = true;
+            changed = true;     /* a character Mac Roman does not have */
         }
         else if (c == ':')
         {

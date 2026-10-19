@@ -112,7 +112,7 @@ fork 描述（144 位元組）
 - System 7.5 的 File System Manager（FSM）讓外部的檔案系統以 HFS 呼叫（`PBGetCatInfo`、`PBHOpen`……）的形式出現在 Finder 裡。
 - Mac 的 dirID／fileID 是 32 位元：外掛直接用 CNID 的低 32 位元；CNID 依序配置，40 億個以內不會衝突（超過時的處理見第 9 節）。
 - 卷宗的資料在 HAL 端讀寫（kernel 裡的 eHFS 程式碼），Mac 端的外掛只是轉接：一個模擬 opcode 把參數區塊交給 HAL（和 `.Disk` 驅動相同的手法，`docs/mac.md` 第 6 節）。
-- 實作（P11 K5）：`kernel/mac/fs_ehfs.c`，見 `docs/fsm.md` 第 7 節。第 6 節的名字轉換目前只有 ASCII（Mac Roman 的對照表待決定）：Mac 端看到的非 ASCII 字元是 `_`，`#` 後面是十進位的 CNID（和 HAL 卷宗相同），Mac 給的名字只能是 ASCII。
+- 實作（P11 K5）：`kernel/mac/fs_ehfs.c`，見 `docs/fsm.md` 第 7 節。第 6 節的名字轉換用 `emu/mac/mac_roman.c`（UTF-8 ↔ Mac Roman）：Mac Roman 沒有的字元是 `_`，`#` 後面是十進位的 CNID（和 HAL 卷宗相同），不是第 6 節寫的十六進位；也沒有「近似字」的替換。
 
 ## 8. 工具與程式碼的組織
 
