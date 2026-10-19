@@ -984,9 +984,9 @@ static void poll_mount(mac_t *mac)
         0x31, 0x7C, 0x00, 0x00, 0x00, 0x16, /* move.w #drive,22(a0): ioVRefNum */
         0xA0, 0x0F,                 /* _MountVol */
         0x4F, 0xEF, 0x00, 0x34,     /* lea 52(sp),sp */
-        0x30, 0x3C, 0x00, 0x07,     /* move.w #7,d0: diskEvt */
-        0x20, 0x7C, 0x00, 0x00, 0x00, 0x00, /* movea.l #drive,a0: the message */
-        0xA0, 0x2F,                 /* _PostEvent */
+        0x30, 0x7C, 0x00, 0x07,     /* movea.w #7,a0: the event code, diskEvt */
+        0x20, 0x3C, 0x00, 0x00, 0x00, 0x00, /* move.l #drive,d0: the message */
+        0xA0, 0x2F,                 /* _PostEvent (Inside Macintosh II: A0 = eventCode, D0 = eventMsg) */
         0x4E, 0x71,                 /* nop: the call has returned */
     };
 
